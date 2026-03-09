@@ -1,0 +1,45 @@
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# Variables de entorno y secretos
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Resultados y exports generados
+results_*.csv
+results_*.json
+seasons_*.csv
+seasons_*.json
+gaps_*.csv
+gaps_*.json
+seasons/
+
+# Archivos temporales de LibreOffice / Excel
+.~lock.*
+
+# Logs
+*.log
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Mypy
+.mypy_cache/
