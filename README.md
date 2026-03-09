@@ -1,4 +1,4 @@
-# Booking Scraper
+# smart-rental-scraper
 
 Rent-a-car price scraper for multiple providers. Extracts rates across a date range and rental durations using a smart scraping strategy that minimises the number of browser sessions required, then exports results to CSV and JSON.
 
