@@ -1,5 +1,7 @@
 # smart-rental-scraper
 
+> **Proof of concept** built for a client in the rent-a-car industry who needed to automate competitor price extraction. Manual monitoring of rival rates across seasons, durations, and vehicle categories is time-consuming and error-prone; this PoC validates that the process can be fully automated with minimal browser sessions.
+
 Rent-a-car price scraper for multiple providers. Extracts rates across a date range and rental durations using a smart scraping strategy that minimises the number of browser sessions required, then exports results to CSV and JSON.
 
 ## Providers
