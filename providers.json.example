@@ -1,0 +1,11 @@
+[
+  {
+    "name": "Provider Name",
+    "scraper": "drivalia",
+    "base_url": "https://...",
+    "location_id": "ALC",
+    "location_name": "Nombre de la oficina",
+    "rate_name": "Nombre de tarifa",
+    "enabled": true
+  }
+]

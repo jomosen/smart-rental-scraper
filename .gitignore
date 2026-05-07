@@ -7,6 +7,9 @@ env/
 .env
 .env.*
 
+# Fuentes de scraping (no publicar)
+providers.json
+
 # Editor
 .vscode/
 .idea/

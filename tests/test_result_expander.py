@@ -1,15 +1,14 @@
 """Unit tests for ResultExpander.expand()."""
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
-from src.application.services.result_expander import ResultExpander
-from src.domain.models.provider import BookingProvider
-from src.domain.models.result import BookingResult, Car, Rate
-from src.domain.models.search import BookingSearch, Location
-from src.domain.models.season import HomogeneousZone
+from src.scraper.application.services.result_expander import ResultExpander
+from src.shared.domain.models.result import BookingResult, Car, Rate
+from src.shared.domain.models.search import BookingSearch, Location
+from src.shared.domain.models.season import HomogeneousZone
 
-_PROVIDER = BookingProvider(name="Provider A", base_url="https://example.com")
 _LOC = Location(canonical_id="ALC", display_name="Alicante Airport")
 
 
@@ -17,7 +16,7 @@ def _search(pickup: date, days: int) -> BookingSearch:
     dt = datetime(pickup.year, pickup.month, pickup.day, 10, 0)
     dropoff = datetime(pickup.year, pickup.month, pickup.day + days, 10, 0)
     return BookingSearch(
-        provider=_PROVIDER,
+        provider_name="Provider A",
         pickup_location=_LOC,
         dropoff_location=_LOC,
         pickup_at=dt,
@@ -25,19 +24,19 @@ def _search(pickup: date, days: int) -> BookingSearch:
     )
 
 
-def _result(*groups: str, total: float = 100.0) -> BookingResult:
+def _result(*groups: str, total: Decimal = Decimal("100")) -> BookingResult:
     cars = [
         Car(model="Model", group=g, description="",
             rates=[Rate(name="Std", currency="EUR", total=total, daily_price=total / 7)])
         for g in groups
     ]
-    return BookingResult(provider=_PROVIDER, cars=cars)
+    return BookingResult(provider_name="Provider A", cars=cars)
 
 
 def _zone(start: date, end: date, rep: date, group: str = "A") -> HomogeneousZone:
     return HomogeneousZone(
         start_date=start, end_date=end,
-        reference_price=100.0, car_group=group,
+        reference_price=Decimal("100"), car_group=group,
         representative_date=rep,
     )
 
@@ -76,7 +75,7 @@ class TestGapFilling:
         period_end = date(2026, 3, 20)
 
         rep_search = _search(rep_date, 7)
-        rep_result = _result("A", total=100.0)
+        rep_result = _result("A", total=Decimal("100"))
         pairs = [(rep_search, rep_result)]
 
         zone = _zone(date(2026, 3, 1), date(2026, 3, 14), rep_date)
@@ -99,7 +98,7 @@ class TestGapFilling:
         period_end = date(2026, 3, 20)
 
         rep_search = _search(rep_date, 7)
-        rep_result = _result("A", "B", total=100.0)
+        rep_result = _result("A", "B", total=Decimal("100"))
         pairs = [(rep_search, rep_result)]
 
         zone_a = _zone(date(2026, 3, 1), date(2026, 3, 14), rep_date, group="A")

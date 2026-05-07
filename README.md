@@ -6,18 +6,39 @@ Rent-a-car price scraper for multiple providers. Extracts rates across a date ra
 
 ## Providers
 
-Provider identities are kept in `.env` (not committed). The code references them generically as Provider A and Provider B.
+Provider identities are kept in `providers.json` (not committed). The code references scrapers generically as Provider A, B, C… — no provider name appears in the committed codebase.
 
-| Key | Description |
+Copy `providers.json.example` to `providers.json` and fill in your values:
+
+```json
+[
+  {
+    "name": "Display name used in exports",
+    "scraper": "provider_a",
+    "base_url": "https://...",
+    "location_id": "ALC",
+    "location_name": "Pickup office display name",
+    "rate_name": "Rate name to filter on",
+    "enabled": true
+  }
+]
+```
+
+| Field | Description |
 |---|---|
-| `PROVIDER_A_NAME` / `PROVIDER_B_NAME` | Display name used in exports |
-| `PROVIDER_A_BASE_URL` / `PROVIDER_B_BASE_URL` | Entry-point URL for the booking form |
-| `PROVIDER_A_LOCATION_ID` / `PROVIDER_B_LOCATION_ID` | Internal location identifier |
-| `PROVIDER_A_LOCATION_NAME` / `PROVIDER_B_LOCATION_NAME` | Display name of the pickup location |
-| `PROVIDER_A_RATE_NAME` / `PROVIDER_B_RATE_NAME` | Rate name to filter on (e.g. "Premium") |
-| `SEASON_PRICE_THRESHOLD` | Minimum relative price change to detect a season boundary (default `0.05`) |
+| `name` | Display name used in exports |
+| `scraper` | Scraper key: `provider_a`, `provider_b`, `provider_c` |
+| `base_url` | Entry-point URL |
+| `location_id` | Internal location identifier expected by the provider |
+| `location_name` | Pickup office display name |
+| `rate_name` | Rate name to filter on (must match what the scraper returns) |
+| `enabled` | Set to `false` to skip this provider without removing it |
 
-Copy `.env.example` to `.env` and fill in your values.
+Global settings in `.env`:
+
+| Variable | Description |
+|---|---|
+| `SEASON_PRICE_THRESHOLD` | Minimum relative price change to detect a season boundary (default `0.05`) |
 
 ## How it works
 
@@ -60,36 +81,40 @@ After export, `SpotCheckService` re-scrapes a random sample to verify data integ
 
 ```
 src/
-├── domain/
-│   ├── models/             BookingSearch, BookingResult, Car, Rate,
-│   │                       Provider, HomogeneousZone, PricePoint, SeasonBoundary
-│   └── interfaces/
-│       ├── browser/        IPageNavigator, IPageInteractor, IPageReader
-│       ├── driver.py       IBrowserDriver (composes the three browser sub-interfaces)
-│       ├── scraper.py      IBookingScraper
-│       ├── scraper_factory.py  IScraperFactory
-│       └── smart_scraping.py  ISeasonProbe, ISeasonAnalyzer,
-│                              ISearchPlanBuilder, ISeasonBoundaryRepository
-├── application/
-│   ├── smart_scraping/     SeasonProbe, SeasonAnalyzer, SearchPlanBuilder,
-│   │                       SmartScraperOrchestrator, PricePointExtractor
-│   ├── services/           SpotCheckService, ResultExpander, session_runner
-│   ├── exporters/          ResultExporter, SeasonExporter, GapExporter
-│   ├── filters/            RateFilter
-│   ├── factories/          ScraperFactory
-│   └── models/             SearchRequest
-├── infrastructure/
-│   ├── playwright/         PlaywrightDriver (stealth, anti-bot)
-│   ├── scrapers/           BaseScraper (Template Method), ProviderAScraper, ProviderBScraper
-│   └── repositories/       JsonSeasonBoundaryRepository
-├── presentation/
-│   └── cli/
-│       ├── container.py    Composition root — wires all dependencies
-│       └── main.py         Entry point and runtime configuration
+├── shared/                 Shared domain models (imported by both scraper and future saas)
+│   └── domain/models/      BookingProvider, BookingSearch, BookingResult, Car, Rate,
+│                           HomogeneousZone, PricePoint, SeasonBoundary
+├── scraper/                Scraping engine (clean-architecture stack)
+│   ├── domain/
+│   │   └── interfaces/
+│   │       ├── browser/    IPageNavigator, IPageInteractor, IPageReader
+│   │       ├── driver.py   IBrowserDriver
+│   │       ├── scraper.py  IBookingScraper
+│   │       ├── scraper_factory.py  IScraperFactory
+│   │       └── smart_scraping.py  ISeasonProbe, ISeasonAnalyzer,
+│   │                              ISearchPlanBuilder, ISeasonBoundaryRepository
+│   ├── application/
+│   │   ├── smart_scraping/ SeasonProbe, SeasonAnalyzer, SearchPlanBuilder,
+│   │   │                   SmartScraperOrchestrator, PricePointExtractor
+│   │   ├── services/       SpotCheckService, ResultExpander, session_runner
+│   │   ├── exporters/      ResultExporter, SeasonExporter, GapExporter
+│   │   ├── filters/        RateFilter
+│   │   ├── factories/      ScraperFactory
+│   │   └── models/         SearchRequest
+│   ├── infrastructure/
+│   │   ├── playwright/     PlaywrightDriver (stealth, anti-bot)
+│   │   ├── scrapers/       BaseScraper (Template Method), ProviderAScraper, ProviderBScraper,
+│   │   │                   ProviderCScraper
+│   │   └── repositories/   JsonSeasonBoundaryRepository
+│   └── presentation/
+│       └── cli/
+│           ├── container.py  Composition root — wires all dependencies
+│           └── main.py       Entry point and runtime configuration
+└── saas/                   Future SaaS backend (placeholder)
 tests/
-│   ├── test_season_analyzer.py
-│   ├── test_price_point_extractor.py
-│   └── test_result_expander.py
+├── test_season_analyzer.py
+├── test_price_point_extractor.py
+└── test_result_expander.py
 ```
 
 ## Configuration
@@ -103,7 +128,9 @@ tests/
 | `PICKUP_HOUR` | `10` | Pickup time (hour) |
 | `SPOT_CHECK_COUNT` | `10` | Spot checks per provider (5 real + 5 synthetic) |
 
-To disable a provider, comment out its line in the `providers` list inside `container.py`.
+To disable a provider without removing it, set `"enabled": false` in `providers.json`.
+
+To add a new provider with an existing scraper, add an entry to `providers.json`. To add a completely new scraper, create a `provider_X_scraper.py` inheriting from `BaseScraper` in `src/scraper/infrastructure/scrapers/` and register it with a new key in `SCRAPER_REGISTRY` inside `src/scraper/presentation/cli/container.py`.
 
 ## Outputs
 
@@ -120,7 +147,7 @@ To disable a provider, comment out its line in the `providers` list inside `cont
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-python -m src.presentation.cli.main
+python -m src.scraper.presentation.cli.main
 ```
 
 Run tests (no browser required):
@@ -128,6 +155,49 @@ Run tests (no browser required):
 ```bash
 pytest tests/
 ```
+
+## Database setup (local development)
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) with Compose v2 (`docker compose` — note: no hyphen).
+
+### Steps
+
+```bash
+# 1. Create your local .env from the template (defaults work out of the box)
+cp .env.example .env
+
+# 2. Start Postgres
+docker compose up -d postgres
+
+# 3. Confirm the container is healthy
+docker compose ps
+# Expected: postgres   running (healthy)
+
+# 4. Install Python dependencies (includes SQLAlchemy, Alembic, psycopg)
+pip install -r requirements.txt
+
+# 5. Apply migrations (no-op for now — initial migration is empty)
+alembic upgrade head
+
+# 6. Verify the migration is recorded
+alembic current
+# Expected output: <revision-id> (head)
+
+# 7. Test the round-trip
+alembic downgrade base   # reverts to pre-migration state
+alembic upgrade head     # re-applies
+```
+
+### Teardown
+
+```bash
+docker compose down        # stops the container, data volume is preserved
+docker compose down -v     # stops the container AND deletes the data volume
+```
+
+---
 
 ## Rent-a-car pricing model
 
