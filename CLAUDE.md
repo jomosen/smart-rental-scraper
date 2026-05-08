@@ -144,6 +144,7 @@ Postgres and query those tables directly.
 
 ## When in doubt
 
+- **Alcance del producto** (¿está esto dentro de v0?, ¿qué se ha decidido fuera?, ¿cuándo se reabre algo?) → `docs/PRODUCT_SCOPE.md`.
 - **Database / data-model questions** (tables, indexes, what to store, relationships, tenant isolation, authentication shape) → `docs/DATA_MODEL.md`. This document is canonical; if a contradiction exists between it and the code, fix the code or update the document explicitly.
 - **Architecture / SaaS evolution decisions** (API surface, deployment, multi-tenancy at the application level, scraper/SaaS separation) → `docs/ROADMAP_ARCHITECTURE.md`. If it isn't there, ask before deciding.
 - **Scraping performance / scaling concerns** (adaptive probe, layered scrape frequency) → `docs/SCRAPING_OPTIMIZATIONS.md`. These optimizations are **deferred** — do not implement preemptively.

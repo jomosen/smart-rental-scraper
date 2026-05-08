@@ -4,6 +4,10 @@
 >
 > This document is the entry point if you're returning to the project after a break. Read it in order to reconstruct what's been built and why; for the **why behind specific design decisions**, follow the links into `DATA_MODEL.md` and `ROADMAP_ARCHITECTURE.md`.
 
+El **alcance funcional** del producto vive en `docs/PRODUCT_SCOPE.md`.
+Este documento (`MILESTONES.md`) registra **cómo y cuándo** se
+construye lo que está dentro del alcance, no **qué** está dentro.
+
 ---
 
 ## How this log works
