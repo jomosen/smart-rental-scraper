@@ -113,7 +113,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 ### 6. Synthetic data (`ResultExpander`)
 
-**Opción C: do not persist synthetic data.** Only real scraped observations are stored. Expansion happens at query time.
+**Option C: do not persist synthetic data.** Only real scraped observations are stored. Expansion happens at query time.
 
 - `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_group)` tuple and has a `representative_date` that is actually scraped.
 - `price_observations` — only contains real scrapes (representatives + probe points).
@@ -132,7 +132,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 ### 7. Currency
 
-**Level 1: one currency per tenant. Column present on the BD.**
+**Level 1: one currency per tenant. Column present on the DB.**
 
 - `tenants.currency CHAR(3) NOT NULL` — fixed at onboarding, not changeable.
 - `providers.default_currency CHAR(3) NOT NULL` — catalog metadata.
@@ -151,11 +151,11 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 **Shared database, `tenant_id` column on tenant-scoped tables.** Three defensive layers.
 
-**Layer 1 — Repository-enforced filtering (mandatory).** `tenant_id` is injected into repositories from request context. Callers cannot pass a different value. Queries always filter automatically.
+**Layer 1 — Repository-enforced filtering (mandatory).** `tenant_id` is injected into repositories from request context. Callers cannot pass a different value. Queries always filter automatically. Implemented in `src/saas/infrastructure/persistence/repositories/`.
 
-**Layer 2 — Postgres Row-Level Security (strongly recommended from day one).** Each tenant-scoped table has an RLS policy. Application sets `SET LOCAL app.tenant_id = '...'` per request. Even if a repository has a bug, the database enforces isolation.
+**Layer 2 — Postgres Row-Level Security (active in the current schema).** Each tenant-scoped table has an RLS policy. Application sets `app.tenant_id` via `set_config('app.tenant_id', ..., true)` in `tenant_context()` (`src/saas/infrastructure/persistence/session.py`) per request. Even if a repository has a bug, the database enforces isolation.
 
-**Layer 3 — Isolation tests (desirable when API exists).** Two-tenant test fixtures verifying every public endpoint returns only own data.
+**Layer 3 — Isolation tests (implemented for the data layer; required for any new feature touching tenant-scoped tables).** Verified by `test_app_user_sees_only_own_tenant` in `tests/saas/infrastructure/persistence/test_repositories.py`.
 
 **Catalog tables (no `tenant_id`, no RLS):**
 - `providers`, `provider_locations`, `provider_rates`, `provider_vehicle_groups`
@@ -167,6 +167,17 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 - `tenant_subscriptions`, `pricing_rules`, `pricing_outputs`
 
 **Primary keys: UUIDs** for tenant-scoped entities. Catalog tables can use integers if preferred (their stable external IDs are codes like `provider_a` anyway).
+
+**Postgres role structure.** Four roles, separating concerns:
+
+- `smart_rental` — initial superuser created by the Postgres container (`POSTGRES_USER`). Not used by application code; available for ad-hoc administrative tasks at the database level.
+- `smart_rental_admin` — owns all schema objects. Used by Alembic to run migrations. RLS applies to it (tables use `FORCE ROW LEVEL SECURITY`).
+- `smart_rental_app` — runtime application user. RLS applies. Has `SELECT/INSERT/UPDATE/DELETE` on catalog tables and on tenant-scoped tables. Operations through this role **must** set `app.tenant_id` via `tenant_context()` before touching tenant-scoped tables.
+- `smart_rental_super` — administrative role with `BYPASSRLS`. Inherits `smart_rental_admin`'s permissions. Used for cross-tenant operations (provisioning new tenants, system-wide reports). Exposed in code via `super_session()`.
+
+The four roles are created by `deploy/postgres/init/01_create_app_users.sql` on database initialization. Their corresponding connection URLs live in `.env` (`DATABASE_URL`, `ADMIN_DATABASE_URL`, `APP_DATABASE_URL`, `SUPER_DATABASE_URL`).
+
+**Why `FORCE RLS` even on the table owner:** without `FORCE`, the owner bypasses RLS, which would silently break tenant isolation if anyone ran admin queries thinking they were safe. With `FORCE`, the only way to bypass is the explicit `smart_rental_super` role.
 
 ---
 
@@ -376,6 +387,12 @@ price_observations
   observed_at TIMESTAMPTZ
   PRIMARY KEY (id, observed_at)
   PARTITION BY RANGE (observed_at)    -- monthly partitions
+  -- IMPLEMENTATION NOTE: only the partitions for the current and next
+  -- month are created by the initial migration. Automatic creation
+  -- of future partitions is NOT yet implemented and is on the
+  -- deferred list. Until it is, INSERTs targeting a date beyond the
+  -- existing partitions will fail with "no partition of relation
+  -- found for row".
   -- Main index: (provider_id, provider_location_id, provider_rate_id,
   --              provider_vehicle_group_id, pickup_date, duration_days,
   --              observed_at DESC)
@@ -499,7 +516,7 @@ Authentication is delegated to an external identity provider. The choice of prov
 **Trigger.** Before exposing the first endpoint that requires real user login.
 
 **What's already decided** (so no rework when the provider is chosen):
-- `users.external_auth_id` will hold the provider's identity reference.
+- `users.external_auth_id` will hold the provider's identity reference (the 'sub' claim of the JWT, or equivalent).
 - `users.role` exists from day one with `'owner'` as default. Granular roles wait until a real customer demands them.
 
 ### Machine-to-machine authentication (API keys)
@@ -565,6 +582,21 @@ Current model assumes one cadence for all tenants subscribed to the same tuple (
 **Trigger.** A premium tier offers higher-frequency monitoring as a paid feature.
 
 **Migration.** Either (a) introduce per-tenant scrape jobs for premium tiers (breaks the shared-observation optimization for those tuples), or (b) raise the global cadence and accept the cost. Decision is product-driven.
+
+### Automatic creation of future price_observations partitions
+
+Only the current and next month's partitions exist after the initial migration. New partitions are not auto-created.
+
+**Why deferred.** Adding it preemptively requires choosing a mechanism (cron job, `pg_partman` extension, application-level scheduler hook), and the choice depends on operational context not yet decided.
+
+**Trigger.** Any of:
+- The next-month partition no longer covers a date the scraper is about to insert (operational risk: INSERTs fail silently in logs until a write hits the missing range).
+- Volume pressure warrants TimescaleDB hypertables (which would obviate manual partitioning).
+
+**Migration options when triggered.**
+- Application-level: a startup hook or scheduled task that ensures the next N months' partitions exist before scrapes run.
+- `pg_partman` extension: declarative partition lifecycle.
+- TimescaleDB: full hypertable replacement; bigger surgery but handles partitioning, compression, and retention together.
 
 ### Tenant data residency / regional isolation
 

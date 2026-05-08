@@ -80,32 +80,38 @@ Reuse `_refine_form` for date-only changes within an existing session; `_submit_
 
 ## Smart-scraping pipeline (do not break the contract)
 
-Three phases run per provider:
+Three phases run per (provider, location, rate):
 
 1. **Probe** (`SeasonProbe`) — weekly 7-day searches across the period.
-2. **Analysis** (`SeasonAnalyzer`) — groups probe results into `HomogeneousZone`s using `SEASON_PRICE_THRESHOLD`. Zones are persisted to `seasons/{provider}.json`.
-3. **Extraction** — one search per (representative date × duration). Searches are deduplicated across car groups; a single search returns all groups.
+2. **Analysis** (`SeasonAnalyzer`) — groups probe results into `HomogeneousZone`s using `SEASON_PRICE_THRESHOLD`. Zones are persisted via `HomogeneousZoneRepository.replace_zones_for_tuple`: previous zones for the same (provider, location, rate, vehicle_group) tuple are marked `active=false`, the new set is inserted as `active=true`. See `docs/DATA_MODEL.md` §6.
+3. **Extraction** — one search per (representative date × duration). Searches are deduplicated across car groups; a single search returns all groups. Results are persisted via `PriceObservationRepository.insert_if_changed`, which only inserts a new `price_observations` row when the price differs from the last recorded observation by more than `PRICE_CHANGE_THRESHOLD`; otherwise it updates the `price_observation_heartbeats` row in place.
 
-After extraction, `ResultExpander` fills remaining days from each zone's representative date. **Expanded prices are synthetic.** When persisting or exporting, expanded points must remain distinguishable from real scraped points (`is_synthetic` flag in the SaaS model — see `docs/DATA_MODEL.md` §6).
+Each run creates a `scrape_runs` row on start (`ScrapeRunRepository.create`) and closes it with `mark_finished(status="success"|"failed")` on exit.
 
-Do not add scraping calls inside the expansion step. The whole point of the design is that expansion is free.
+**Synthetic data is not persisted.** If the SaaS needs the price for a day that was not scraped, it derives it at read time by crossing `homogeneous_zones` with `price_observations` (logic that will live in a future `PriceQueryService`). Do not add scraping calls inside that price-query layer when it exists — derivation must read from existing observations and zones, not trigger new scrapes.
 
 ---
 
 ## Testing
 
-- Tests live in `tests/`, run without a browser.
-- Existing coverage: `test_season_analyzer.py`, `test_price_point_extractor.py`, `test_result_expander.py`.
+- Tests live in `tests/`, run with `pytest tests/`.
+- Existing coverage:
+  - `tests/test_season_analyzer.py` — unit tests for `SeasonAnalyzer`
+  - `tests/test_price_point_extractor.py` — unit tests for `PricePointExtractor`
+  - `tests/saas/infrastructure/persistence/test_repositories.py` — integration tests for all repositories (Hito 3)
+  - `tests/saas/application/test_catalog_sync.py` — integration tests for `CatalogSyncService` (Hito 4)
+  - `tests/saas/application/test_orchestrator_persistence.py` — integration tests for `SmartScraperOrchestrator` DB persistence (Hito 4)
+- Tests under `tests/saas/` are integration tests against the local Postgres. They require the DB to be running and migrations to be applied. Run `docker compose up -d postgres && alembic upgrade head` before `pytest` if it's not already up.
 - When you add or modify logic in `scraper/application/smart_scraping/` or `scraper/application/services/`, add or update tests in the same PR. These are the modules with the most reasoning logic — they need coverage.
 - Do **not** add tests that require a real browser session or hit real provider URLs. Anything `infrastructure/playwright/` or `infrastructure/scrapers/` is integration-tested manually for now.
-- When the SaaS database layer lands, **tenant-isolation tests are part of "done"**, not optional. See `docs/DATA_MODEL.md` §8.
+- Tenant-isolation tests are already in place (`TestTenantIsolation` in `test_repositories.py`). Any new tenant-scoped feature must include equivalent isolation coverage.
 
 ---
 
 ## Configuration
 
 - **Per-provider config** → `providers.json` (gitignored). Template in `providers.json.example`.
-- **Global runtime tunables** → `.env` (e.g. `SEASON_PRICE_THRESHOLD`, `PRICE_CHANGE_THRESHOLD`).
+- **Global runtime tunables** → `.env`. This includes scraping thresholds (`SEASON_PRICE_THRESHOLD`, `PRICE_CHANGE_THRESHOLD`) and the database connection URLs (`ADMIN_DATABASE_URL`, `APP_DATABASE_URL`, `SUPER_DATABASE_URL`, plus `POSTGRES_*` for the docker-compose stack). See `.env.example` for the full list.
 - **Pipeline constants** (period length, pickup hour, spot-check count) → top of `src/scraper/presentation/cli/main.py`.
 
 When adding a new tunable, decide deliberately which of the three layers it belongs to and document it in the README config tables.
@@ -114,15 +120,10 @@ When adding a new tunable, decide deliberately which of the three layers it belo
 
 ## Outputs
 
-Files are written with a timestamp suffix (`_<ts>`). The set is:
-
-- `results_<ts>.csv/json` — raw scraped results (representative dates).
-- `results_expanded_<ts>.csv` — full daily coverage, expanded.
-- `seasons_<ts>.csv/json` — detected zones per car group.
-- `seasons_unified_<ts>.csv/json` — unique extraction dates across all groups.
-- `gaps_<ts>.csv/json` — searches that returned errors or no cars.
-
-If you change an exporter, keep the column set backward-compatible unless the user explicitly asks for a schema change. The client consumes these files downstream.
+Results are persisted to the database — no CSV or JSON files are written. The relevant
+tables are `price_observations`, `homogeneous_zones`, `scrape_runs`, and
+`price_observation_heartbeats`. To inspect data during development, connect to the local
+Postgres and query those tables directly.
 
 ---
 
@@ -135,6 +136,7 @@ If you change an exporter, keep the column set backward-compatible unless the us
 - **The scraper is a separate process from the SaaS.** In the SaaS architecture, the scraper runs as a worker that pulls jobs from the SaaS API. Do not introduce assumptions of always-on, low-latency, in-process connectivity between the scraping pipeline and the database/API. Scraper code talks to the SaaS only through HTTP, and the worker initiates every connection.
 - **FORCE RLS means even the table owner is blocked.** The `tenants` table uses `FORCE ROW LEVEL SECURITY`. Any operation that writes to tenant-scoped tables without `app.tenant_id` set (including creating a new tenant) must use the `smart_rental_super` role (`BYPASSRLS`). Use `super_session()` for provisioning; use `tenant_context()` for everything else. Never lower the RLS level to work around a missing session scope.
 - **Alembic must run as `smart_rental_admin`, not the superuser.** `migrations/env.py` reads `ADMIN_DATABASE_URL`. If you switch it back to `DATABASE_URL` (the superuser), ownership and GRANT logic in the migrations will silently become a no-op and the app role will lose table access.
+- **Synthetic data is no longer persisted.** `ResultExpander` has been removed. Synthetic prices are derived on read from `homogeneous_zones` via a future `PriceQueryService` (not yet implemented). Anything that tries to persist `is_synthetic=True` observations is a bug.
 - **`.env` vs `.env.example` drift.** When a hito modifies `.env.example` (adding new variables), the user's local `.env` is NOT updated automatically. Tests will skip or fail with confusing errors until the user manually syncs the missing variables from `.env.example` to `.env`. When adding new environment variables, explicitly remind the user to sync their `.env` file.
 - **Postgres init scripts only run on database creation.** Files in `deploy/postgres/init/` (mounted to `/docker-entrypoint-initdb.d/`) are executed only when Postgres initializes a new data directory. To apply changes to those scripts, the user must run `docker compose down -v` (note the `-v` flag, which deletes the volume) followed by `docker compose up -d postgres`. The `-v` flag is critical and easy to forget. Migrations have to be re-applied afterwards.
 

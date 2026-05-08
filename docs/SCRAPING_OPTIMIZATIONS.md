@@ -8,7 +8,7 @@
 
 ## Context
 
-The current pipeline (`SeasonProbe` → `SeasonAnalyzer` → extraction → `ResultExpander`) was designed for a 90-day period with 2 providers. It scales better than linearly when extending the period because the number of homogeneous zones grows much slower than the number of days.
+The current pipeline (`SeasonProbe` → `SeasonAnalyzer` → extraction → persistence) was designed for a 90-day period with 2 providers. Synthetic days within a zone are derived at read time, not produced by an explicit expansion step. It scales better than linearly when extending the period because the number of homogeneous zones grows much slower than the number of days.
 
 Concrete estimate for the current pipeline:
 

@@ -2,6 +2,7 @@ playwright>=1.44.0
 python-dotenv>=1.0.0
 beautifulsoup4>=4.12.0
 pytest>=8.0.0
+pytest-asyncio>=0.21
 sqlalchemy>=2.0
 alembic>=1.13
 psycopg[binary]>=3.1

@@ -173,7 +173,8 @@ class TestScrapeRunRepository:
         run = repo.create(p.id, loc.id, rate.id)
         assert run.id is not None
         assert run.status == "running"
-        repo.mark_finished(run, status="success", stats={"rows": 42})
+        repo.mark_finished(run.id, status="success", stats={"rows": 42})
+        super_db_session.refresh(run)
         assert run.status == "success"
         assert run.finished_at is not None
         assert run.stats_jsonb == {"rows": 42}

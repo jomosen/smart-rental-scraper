@@ -159,26 +159,28 @@ Cuidado con que un tenant problemático (proveedor lento, captchas) bloquee a lo
 
 ---
 
-## 5. Plan de ejecución (6-8 semanas)
+## 5. Fases del trabajo
 
-| Semanas | Hito |
-|---|---|
-| 1-2 | Diseño del modelo de datos canónico (ya hecho, ver `DATA_MODEL.md`). Migración del output del PoC a Postgres. Todavía mono-tenant, todavía CLI, pero ya escribiendo en la BD final con `tenant_id` hardcodeado a 1. Valida el modelo contra datos reales. |
-| 3-4 | API mínima (FastAPI), auth básica (proveedor externo), endpoints de lectura sobre lo ya scrapeado, multi-tenancy real. Onboarding de un segundo tenant ficticio para forzar el aislamiento. |
-| 4-5 | Scheduler + worker con comunicación pull. Mover el scraping de CLI a job en cola. Dashboard mínimo (server-side rendered con HTMX o Next.js básico — no SPA grande aún). |
-| 6-7 | Pricing engine v0 con reglas declarativas simples. Output en CSV descargable y endpoint de API. |
-| 8 | Observability, alertas de staleness, primer cliente real con onboarding manual. |
+El roadmap se aborda en cuatro fases conceptuales. El log de lo construido y cuándo vive en `docs/MILESTONES.md`.
 
-### Punto de revisión a los 3 meses
+**Fase 1 — Persistencia.** Modelo de datos canónico, migraciones, multi-tenancy físico (RLS, roles), capa de repositorios y conexión del scraper a la base de datos. Estado: completada.
 
-Cuando haya 3-5 clientes reales, volver a esta arquitectura. Habrá aprendizajes que ahora no se pueden anticipar:
+**Fase 2 — Exposición.** API HTTP de lectura, autenticación básica, primer dashboard mínimo. Permite al cliente consultar el sistema sin tocar la BD directamente. Estado: pendiente.
+
+**Fase 3 — Scheduling y workers.** Mover el scraping de CLI a jobs encolados; comunicación pull worker → SaaS; primer worker en infraestructura real. Estado: pendiente.
+
+**Fase 4 — Motor de pricing.** Reglas declarativas v0 (hardcoded primero, DSL solo cuando haya 2-3 clientes pidiéndolo). Estado: pendiente.
+
+### Punto de revisión
+
+Cuando haya 3-5 clientes reales en producción, revisar este roadmap. Habrá aprendizajes que ahora no se pueden anticipar:
 
 - ¿Las reglas declarativas son suficientes o necesitan ML?
 - ¿Los clientes quieren push automático a su sistema?
 - ¿La frecuencia de scrape diaria es suficiente o necesitan intra-day?
 - ¿La infraestructura de scraping (IPs, redundancia) está aguantando?
 
-Esa es la versión que decide la v2.
+Esa será la versión que decida la v2.
 
 ---
 

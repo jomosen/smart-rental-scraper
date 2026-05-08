@@ -202,7 +202,7 @@ class PriceObservation(Base):
     """
     __tablename__ = "price_observations"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     provider_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("providers.id", name="fk_price_observations_provider", ondelete="RESTRICT"), nullable=False
     )

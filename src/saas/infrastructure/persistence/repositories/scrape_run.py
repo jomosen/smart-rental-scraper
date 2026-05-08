@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import Optional
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from ..models.catalog import ScrapeRun
@@ -30,12 +31,19 @@ class ScrapeRunRepository:
 
     def mark_finished(
         self,
-        run: ScrapeRun,
+        run_id: int,
         status: str,
         stats: Optional[dict] = None,
         error: Optional[str] = None,
     ) -> None:
-        run.finished_at = datetime.datetime.now(tz=datetime.timezone.utc)
-        run.status = status
-        run.stats_jsonb = stats
-        run.error = error
+        """Update the run record by ID. Safe to call from a different session than create()."""
+        self._s.execute(
+            update(ScrapeRun)
+            .where(ScrapeRun.id == run_id)
+            .values(
+                finished_at=datetime.datetime.now(tz=datetime.timezone.utc),
+                status=status,
+                stats_jsonb=stats,
+                error=error,
+            )
+        )
