@@ -1,0 +1,71 @@
+# Tenant onboarding configuration template.
+#
+# Usage:
+#   python -m src.saas.application.onboarding --config path/to/this-file.yaml
+#
+# Adjust all values for your tenant before running. The script runs eight
+# steps in sequence and rolls back automatically if any step fails.
+#
+# Field reference:
+#   provider_code  — matches Provider.code, i.e. the "scraper" key in providers.json
+#   location_code  — matches ProviderLocation.location_code (= providers.json "location_id")
+#   rate_code      — matches ProviderRate.rate_code (slugified "rate_name" from providers.json)
+#                    e.g. "Standard Rate" → "standard_rate"
+#   client_group_code — must match a code defined in vehicle_groups above
+
+tenant:
+  name: Acme Rentals            # Display name — any non-empty string
+  currency: EUR                 # 3-letter ISO 4217 currency code (ASCII alphabetic)
+  owner_email: admin@acme.com   # Owner account email (auth not yet implemented in v0)
+
+# How the tenant groups vehicles for pricing. These are the client-facing categories.
+# display_order is required (integer >= 0).
+vehicle_groups:
+  - code: compact
+    name: Compact
+    description: Small-to-medium passenger cars   # optional
+    display_order: 1
+  - code: intermediate
+    name: Intermediate
+    display_order: 2
+  - code: suv
+    name: SUV
+    description: Sport utility vehicles and crossovers
+    display_order: 3
+
+# One entry per (provider, location, rate) tuple to monitor.
+# All three codes must already exist in the catalog (run the scraper first).
+# Multiple subscriptions to the same provider_code are allowed as long as
+# the (provider_code, location_code, rate_code) combination is unique.
+#
+# mappings: how this provider's vehicle codes map to the client_group_codes above.
+# The system uses the minimum price when a group maps to multiple external_codes
+# (N:M aggregation policy, v0 default).
+subscriptions:
+  - provider_code: provider_a
+    location_code: MAD1
+    rate_code: standard_rate
+    mappings:
+      - client_group_code: compact
+        external_codes:
+          - ECMR
+          - CCAR
+      - client_group_code: intermediate
+        external_codes:
+          - ICMR
+          - ICAR
+      - client_group_code: suv
+        external_codes:
+          - IFAR
+          - SFAR
+
+  - provider_code: provider_a   # same provider_code, different location
+    location_code: BCN1
+    rate_code: standard_rate
+    mappings:
+      - client_group_code: compact
+        external_codes:
+          - ECMR
+      - client_group_code: intermediate
+        external_codes:
+          - ICMR

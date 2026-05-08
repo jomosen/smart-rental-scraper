@@ -207,3 +207,37 @@ The order of the next milestones depends on a conversation with the customer (ho
 **Candidate 5B — Minimum viable pricing engine.** Hard-coded rules in Python (no DSL yet) producing `pricing_outputs` for a real or fictitious tenant. Validates the chain `observations → rules → outputs` before investing in abstraction. Worth doing only after at least one real customer has expressed concrete rules they'd want.
 
 Recommended order: **5D → 5A → 5C → 5B**. The reasoning is that a real tenant with mappings teaches more about the model's gaps than any amount of additional abstraction; then exposing a read API lets the customer see something; then the partition automation prevents the silent August failure; and only then does it make sense to build pricing logic on top of all of that.
+
+---
+
+## Milestone 5D-A — Tenant onboarding CLI
+
+**Goal.** Provide an operator-facing command that creates a fully configured tenant in the database: catalog validation, tenant creation, vehicle-group discovery, owner user, client vehicle groups, provider-to-client mappings, and subscription activation. Eight steps, automatic rollback on failure, readable error messages at every exit.
+
+**What was built.**
+- `src/saas/application/onboarding/config.py`: `OnboardingConfig` dataclasses and `load_config(path)`. Parses and validates a tenant YAML config file. **Option B schema**: mappings live inside `subscriptions` (not `vehicle_groups`), keyed by `client_group_code` referencing a `vehicle_groups` entry. Validation: non-empty required fields, 3-letter ASCII-alpha currency, email format, `display_order` required integer ≥ 0, unique `(provider_code, location_code, rate_code)` tuples (allows multiple subscriptions to the same provider), `client_group_code` must reference a declared vehicle group, `external_codes` must be non-empty.
+- `src/saas/application/onboarding/steps.py`: Seven step functions and `OnboardingError`. Key properties: `step_validate_catalog` returns `dict[tuple[str,str,str], tuple[int,int,int]]` keyed by `(provider_code, location_code, rate_code)`, enabling multiple subscriptions per provider. `step_create_tenant` fails loudly if a tenant with the same name already exists. `step_discovery` delegates all cross-boundary work to `discovery.py` and takes `scraper_factory` as a required parameter. `step_create_users_and_groups` warns on stderr that `external_auth_id=NULL`. `step_create_mappings` iterates over subscriptions (not vehicle groups) to resolve mappings by tuple. `step_create_subscriptions` returns `dict[tuple, uuid.UUID]`. `step_activate_subscriptions` validates mapping completeness — subscriptions with any unmapped active `provider_vehicle_group` stay in `pending_mapping` with a stderr warning.
+- `src/saas/application/onboarding/rollback.py`: `rollback_tenant(tenant_id, session)` — deletes all tenant rows in FK-safe order. Unchanged from first pass.
+- `src/saas/application/discovery.py` (new): dedicated cross-boundary module concentrating all `src/scraper/` imports in one place. Contains `build_scraper_factory(providers_json)` and `run_discovery_for_tuple(...)`. Acknowledged technical debt until Phase 3 (scheduling and workers) replaces inline scraping with a job-queue call.
+- `src/saas/application/onboarding/cli.py`: `main()` entry point. Steps 4–7 run inside a **single** `tenant_context` transaction (no partial state committed between steps). `IntegrityError` on step 2 produces a readable message. Step 8 reports active vs. pending_mapping counts. Rollback messages include `tenant_id` for manual cleanup if rollback itself fails.
+- `docs/onboarding-example.yaml`: annotated template updated to Option B schema.
+- `pyyaml>=6.0` added to `requirements.txt`.
+- 12 tests in `tests/saas/application/test_onboarding.py` (5 unit in `TestLoadConfig`, 7 integration as top-level functions).
+
+**Decisions taken.**
+- **Option B: mappings inside subscriptions.** The first pass put mappings inside `vehicle_groups`, which imposed a false constraint that each `vehicle_group` could map to only one `(provider, location, rate)` tuple. Option B scopes each mapping to its subscription tuple, correctly reflecting that the same client group can have different external codes across locations.
+- **Multiple subscriptions to the same provider allowed.** The uniqueness constraint is now on `(provider_code, location_code, rate_code)`, not just `provider_code`. `DATA_MODEL.md` was already correct; the first-pass config validation was wrong.
+- **Steps 4–7 share one transaction.** Four separate `tenant_context` opens in the first pass could silently commit partial state (e.g. users created but mappings failed). One transaction means the DB only ever sees the complete set or nothing.
+- **`step_activate_subscriptions` validates mapping completeness.** A subscription is only promoted to `active` if every active `provider_vehicle_group` for its tuple has a `VehicleGroupMapping` in the tenant. Incomplete subscriptions stay in `pending_mapping` with an operator warning rather than being silently skipped.
+- **`scraper_factory` is a required parameter in `step_discovery`.** Passing `None` was a footgun that silently worked in tests (because `_run_session` was mocked) but would crash in production. The factory is now built explicitly in the CLI via `discovery.build_scraper_factory()`.
+- **Cross-boundary imports isolated to `discovery.py`.** All `src/saas/` → `src/scraper/` imports are concentrated in one module with a prominent comment. This is the designated coupling point until Phase 3 physically separates the scraper process.
+- **`step_create_tenant` fails loud on duplicate name.** A name-existence check raises `OnboardingError` before the INSERT, giving the operator a clear message instead of a raw DB exception.
+- **`SEASON_PRICE_THRESHOLD` read from environment in `discovery.py`.** Pattern mirrors `container.py:77` — `float(os.environ.get("SEASON_PRICE_THRESHOLD", "0.05"))`.
+
+**Deferred.**
+- **`--dry-run` flag.** Would validate all steps without committing. Deferred until operators use the CLI regularly enough to need it.
+- **`--tenant-id` resume.** If rollback fails, the operator must clean up manually. A flag to resume from a known partial state is deferred until it becomes necessary.
+- **Authentication.** `users.external_auth_id` is left `NULL` and the operator is warned. Will be set when the identity provider is chosen.
+- **Automatic partition creation for `price_observations`.** Discovery can insert observations into future months; partitions must exist or inserts fail silently. Deferred to Milestone 5C.
+
+**Closure.** `pytest tests/saas/application/test_onboarding.py` passes (12/12, 5 unit + 7 integration). All pre-existing tests (32) continue to pass.
