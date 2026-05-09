@@ -240,4 +240,39 @@ Recommended order: **5D → 5A → 5C → 5B**. The reasoning is that a real ten
 - **Authentication.** `users.external_auth_id` is left `NULL` and the operator is warned. Will be set when the identity provider is chosen.
 - **Automatic partition creation for `price_observations`.** Discovery can insert observations into future months; partitions must exist or inserts fail silently. Deferred to Milestone 5C.
 
-**Closure.** `pytest tests/saas/application/test_onboarding.py` passes (12/12, 5 unit + 7 integration). All pre-existing tests (32) continue to pass.
+**Closure.** `pytest tests/saas/application/test_onboarding.py` passes (13/13 after polish, 5 unit + 8 integration). All pre-existing tests (32) continue to pass.
+
+---
+
+## Milestone 5D-B — PriceQueryService
+
+**Goal.** Implement the three market-price queries defined in `PRODUCT_SCOPE.md` v0 as a Python service. No HTTP, no CLI — pure application logic with DTOs and tests.
+
+**What was built.**
+- `src/saas/application/price_query/dtos.py`: `ZoneRange`, `FormatARow`, `FormatATable`. `FormatARow` holds `prices_by_duration: dict[int, Optional[Decimal]]` (None when no observation) and `coverage: Optional[int]` (None for per-provider tariff, int for aggregates). Decimal throughout — no float.
+- `src/saas/application/price_query/rejilla.py`: `compute_intersected_grid(zones_by_provider, date_range)` — pure function, no DB dependencies. Collects all zone-boundary cut points from all providers, clips them to `date_range`, and returns consecutive (start, end) inclusive tramos. Returns `[]` when no zones exist.
+- `src/saas/application/price_query/service.py`: `PriceQueryService` with three public methods. Session injected by caller; no internal session management. All tenant-scoped queries include an application-layer `tenant_id` filter in addition to RLS.
+  - `get_provider_tariff`: resolves `(provider_code, location_code, rate_code)` → IDs, checks active subscription, loads zones and observations, builds one `FormatARow` per (client_group × zone) clipped to `date_range`. N:M min policy per client group.
+  - `get_market_average_tariff`: loads all active subscriptions, builds intersected grid from all their zones, aggregates prices with arithmetic mean (quantized to 0.01).
+  - `get_market_minimum_tariff`: same grid, aggregates with `min`.
+  - Shared private `_get_market_tariff("average"|"minimum")` implements both aggregate methods.
+  - `_fetch_observations` uses `DISTINCT ON (pvg_id, pickup_date, duration_days) ... ORDER BY ... observed_at DESC` — the canonical index pattern from `DATA_MODEL.md` Part 3.
+  - `coverage` = count of subscriptions contributing at least one non-None price to the row (not structural zone coverage, not per-duration).
+- `src/saas/application/price_query/__init__.py`: re-exports `PriceQueryService`, `FormatARow`, `FormatATable`, `ZoneRange`.
+- 15 tests in `tests/saas/application/test_price_query_service.py` (5 unit in `TestComputeIntersectedGrid`, 10 integration as top-level functions).
+
+**Decisions taken.**
+- **Decimal, not float.** `price_per_day` is `NUMERIC(10,2)`. Averages quantized to `Decimal("0.01")`. Minimum is exact (no rounding needed).
+- **DISTINCT ON over MAX(observed_at) subquery.** Follows the canonical query in `DATA_MODEL.md` Part 3. The existing index `(provider_id, location_id, rate_id, pvg_id, pickup_date, duration_days, observed_at DESC)` makes this efficient.
+- **coverage defined as "subscriptions contributing at least one price".** A subscription counts toward coverage if it has a zone covering the tramo AND at least one price observation for any duration. A subscription with a zone but no observations contributes 0 to coverage.
+- **Intersected grid from zone ranges, not zone ORM objects.** `compute_intersected_grid` receives `dict[int, list[ZoneRange]]` where the int key is a per-call index. The function is pure and testable without DB.
+- **Single aggregate implementation.** `get_market_average_tariff` and `get_market_minimum_tariff` delegate to `_get_market_tariff` with `aggregate="average"|"minimum"`. Avoids code duplication at the cost of one internal branch.
+- **No session opened internally.** The service is a pure orchestrator over the injected session. Caller controls transaction scope — required for compatibility with both `super_session` (BYPASSRLS) and `tenant_context` (app role + RLS).
+
+**Deferred.**
+- **API HTTP** exposing the three methods (Milestone 5A).
+- **CLI demo** for interactive querying (Milestone 5D-C).
+- **Format B** (day × duration matrix) — derivable from Format A on demand; not implemented.
+- **Intermediate-duration interpolation** — durations outside `{1,2,3,4,5,6,7,14,21,28}` return None; provider pricing logic for intermediates is deferred per `DATA_MODEL.md` Part 4.
+
+**Closure.** `pytest tests/` passes (60/60, 45 pre-existing + 15 new). 5 unit tests on the pure `compute_intersected_grid` function, 10 integration tests covering all three service methods including N:M policy, partial coverage, inactive-subscription exclusion, and RLS isolation.
