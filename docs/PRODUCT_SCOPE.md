@@ -182,20 +182,134 @@ de más de un tenant.
 modelo. Requiere job programado, plantillas de email, estado mínimo
 de "qué se ha visto / qué no".
 
-### Tarifario propio del cliente
+### Tarifario propio del cliente como input
 
 **Por qué se difiere.** El alcance del producto v0 es consulta del
-mercado, no comparación. Subir el tarifario propio implica fricción
-de adopción que se justifica solo cuando habilita capacidades
-concretas (benchmark, motor de pricing).
+mercado, no comparación. El motor de pricing de Fase 4 produce
+tarifarios directamente a partir de reglas del cliente y datos de
+mercado, sin requerir que el cliente suba su tarifario actual.
 
-**Trigger.** Primera petición concreta de un cliente para "ver dónde
-estoy yo respecto al mercado", o inicio de Fase 4 (motor de pricing).
+**Trigger.** Petición concreta de un cliente que quiera ver su
+posición actual respecto al mercado **antes** de adoptar pricing
+automático (utilidad de benchmark independiente).
 
 **Implicación cuando llegue.** Tabla `tenant_own_prices` con
-versionado explícito al estilo de `pricing_rules`. Habilita dos
-capacidades juntas: (a) benchmark cliente-vs-mercado, (b) motor de
-pricing en Format B (tarifario completo diff-able contra el actual).
+versionado al estilo de `pricing_rules`. Habilita la utilidad de
+benchmark cliente-vs-mercado como capacidad separada del motor
+de pricing.
+
+### Pricing automático: dos casos de uso, dos rejillas
+
+**Por qué se difiere.** Pricing es Fase 4, fuera de v0.
+
+**Marco anticipado para evitar ambigüedad cuando llegue:**
+
+Hay dos casos de uso del cliente sobre los datos del sistema:
+
+1. **CONSULTA DE MERCADO (v0).** El cliente pregunta entre fechas
+   sobre un rango de su elección. El output usa la rejilla del
+   **mercado** (zonas detectadas, multi-proveedor agregado). El
+   cliente no declara nada.
+
+2. **TARIFARIO OPERACIONAL (Fase 4).** El cliente declara reglas
+   con rangos. El sistema produce un tarifario para 6-9 meses
+   organizado en la rejilla del **cliente** (los rangos de sus
+   reglas). La declaración de reglas es prerrequisito.
+
+**Terminología.** Se reserva "zona" para unidad observada del
+mercado (`homogeneous_zones`) y "temporada" para unidad declarada
+del cliente. Las dos son rangos de fechas estructuralmente
+similares, pero su procedencia es diferente y conviene mantenerlo
+en el lenguaje.
+
+**Estructura del cálculo en caso 2:**
+- El cálculo opera sobre la rejilla intersectada (rangos de las
+  reglas × tramos del mercado). Ahí la regla aplica con precios
+  reales y sin ambigüedad.
+- El output se ofrece en dos vistas:
+  - **Detallada** (rejilla intersectada): para auditoría y
+    diagnóstico.
+  - **Operacional** (rejilla del cliente, re-agregada): exportable
+    al sistema del cliente. Default de re-agregación: mínimo del
+    subtramo, coherente con la filosofía competitiva del producto.
+
+**Sobre temporadas como entidad de modelo:**
+- No hay tabla `tenant_seasons` separada en Fase 4. Los rangos de
+  las reglas SON las temporadas operacionales del cliente.
+- Si en el futuro varias reglas comparten rango y eso se repite,
+  se puede extraer la abstracción. Por ahora, embebido en la regla.
+
+**Sobre el rol del sistema:**
+- El sistema **propone** temporadas (a partir de las zonas del
+  mercado, vía utilidad de sugerencia en el dashboard de Fase 4).
+- El cliente **adopta** las propuestas, las edita, o declara las
+  suyas desde cero. Una vez adoptadas, son del cliente.
+- El sistema **no define** temporadas autónomamente. No las
+  modifica una vez adoptadas. Si el mercado cambia y las zonas
+  se redetectan, las temporadas adoptadas no se mueven; el sistema
+  avisa al cliente de que hay nueva información disponible y el
+  cliente decide si refrescarlas.
+
+**Trigger.** Inicio de Fase 4 (motor de pricing).
+
+### Periodo de scraping operacional largo
+
+**Por qué se difiere.** v0 usa periodos cortos (default 90 días)
+porque la utilidad es consulta puntual del mercado. Pricing
+automático requiere horizonte mayor para que el cliente pueda
+"fijar y olvidarse".
+
+**Marco anticipado:**
+- El periodo operacional para clientes con pricing automático
+  será 180-270 días (6-9 meses), no 365. La razón: la fiabilidad
+  del precio del mercado decae con la distancia (los proveedores
+  no setean precios serios para fechas a 11 meses). Un horizonte
+  de 6-9 meses captura la temporada operativa relevante y filtra
+  ruido lejano.
+- Ampliar a este rango con la pipeline actual costaría ~28 minutos
+  por proveedor en daily scrape (ver `SCRAPING_OPTIMIZATIONS.md`),
+  manejable para 1-2 clientes pero doloroso a partir de 10.
+- Por tanto, el primer cliente real con pricing automático
+  dispara la activación de las optimizaciones diferidas: adaptive
+  probe + frequency-decreasing layered strategy.
+
+**Trigger.** Primer cliente que onboardea con `period_days >= 180`
+y daily cadence sostenida.
+
+### Integración con sistema externo del cliente
+
+**Por qué se difiere.** v0 entrega consultas de mercado. La
+generación de tarifarios recomendados es Fase 4. La sincronización
+con sistemas externos del cliente es Fase 5+, después del motor
+de pricing.
+
+**Trigger.** Primer cliente operando con tarifario recomendado en
+producción que pide reducir el copy/paste manual al sistema.
+
+**Marco anticipado:**
+- El paquete exportable es la vista operacional del caso 2
+  (tarifario en la rejilla de las temporadas declaradas por el
+  cliente). Las temporadas y los precios viajan juntos como
+  unidad consumible.
+- Modos de integración considerados:
+  - **Pull** (cliente lee nuestra API): primera elección por
+    defecto.
+  - **Feed** (fichero CSV/JSON en S3 firmado): alternativa para
+    sistemas legacy con import por fichero pero sin REST moderno.
+  - **Push** (nosotros escribimos al sistema del cliente): solo
+    bajo demanda concreta, requiere superficie operacional mayor.
+- Implementación bespoke per-cliente inicialmente. Cuando los
+  patrones se repitan, extraer adaptadores configurables.
+- La integración es producto vendible, no feature: setup fee +
+  suscripción más alta. Justifica el coste de bespoke.
+- `pricing_outputs.inputs_snapshot_jsonb` (ya en el modelo) es
+  prerrequisito de auditoría: para cualquier precio empujado,
+  debe ser posible reconstruir las reglas, los datos de mercado
+  y los parámetros que lo generaron.
+
+**Implicación cuando llegue.** Ningún cambio al modelo de pricing.
+Trabajo nuevo en una capa de "delivery" en `src/saas/` con
+adaptadores per-cliente.
 
 ### Política N:M configurable por mapeo
 
