@@ -128,11 +128,18 @@ def main(argv=None) -> int:
         print(f"[error] {e}", file=sys.stderr)
         return 1
     except IntegrityError as e:
-        print(
-            f"[error] Database constraint violation creating tenant '{config.tenant.name}': {e.orig}. "
-            "Check for duplicate names or constraint conflicts.",
-            file=sys.stderr,
-        )
+        orig = str(e.orig).lower()
+        if "unique" in orig and "tenants" in orig:
+            print(
+                f"[error] A tenant named '{config.tenant.name}' already exists in the database. "
+                "Use a different name or clean up the previous run.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"[error] Database constraint violation creating tenant '{config.tenant.name}': {e.orig}",
+                file=sys.stderr,
+            )
         return 1
     except Exception as e:
         print(f"[error] Could not create tenant: {e}", file=sys.stderr)
@@ -165,10 +172,10 @@ def main(argv=None) -> int:
 
     # ── Steps 4-7 — owner, groups, mappings, subscriptions, activation ───
     # All four steps share one transaction so no partial state is ever committed.
-    print(f"[4/8] Creating owner user and {len(config.vehicle_groups)} vehicle group(s)...")
-    print("[5/8] Creating vehicle group mappings...")
-    print("[6/8] Creating subscriptions...")
-    print("[7/8] Activating subscriptions...")
+    print(
+        f"[4-7/8] Creating owner, {len(config.vehicle_groups)} vehicle group(s), "
+        "mappings, subscriptions, and activating..."
+    )
     try:
         with tenant_context(app_factory, tenant_id) as s:
             client_group_ids = step_create_users_and_groups(config, tenant_id, s)

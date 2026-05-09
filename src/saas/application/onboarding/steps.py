@@ -333,6 +333,11 @@ def step_activate_subscriptions(
     in 'pending_mapping' and a warning is printed to stderr.
 
     Returns {(provider_code, location_code, rate_code): 'active' | 'pending_mapping'}.
+
+    Note: validates that every active PVG has *some* mapping in this tenant, not
+    that every PVG is mapped to a *specific* client group — N:M mappings are
+    intentional and correct. A subscription becomes active only when the set of
+    active PVGs and the set of mapped PVGs are identical for that tuple.
     """
     # One query: all PVG IDs already mapped for this tenant
     mapped_pvg_ids: set[int] = set(
@@ -362,17 +367,22 @@ def step_activate_subscriptions(
 
         unmapped = active_pvg_ids - mapped_pvg_ids
         if unmapped:
+            unmapped_codes = session.scalars(
+                select(ProviderVehicleGroup.external_code).where(
+                    ProviderVehicleGroup.id.in_(unmapped)
+                )
+            ).all()
             print(
                 f"[warning] Subscription ({pcode}, {lcode}, {rcode}) has "
-                f"{len(unmapped)} unmapped active vehicle group(s) — "
+                f"{len(unmapped)} unmapped active vehicle group(s): "
+                f"{', '.join(sorted(unmapped_codes))} — "
                 "leaving in 'pending_mapping'. Add mappings and re-run activation.",
                 file=sys.stderr,
             )
             statuses[key] = "pending_mapping"
         else:
             ts = session.get(TenantSubscription, sub_id)
-            if ts is not None:
-                ts.status = "active"
+            ts.status = "active"
             statuses[key] = "active"
 
     return statuses

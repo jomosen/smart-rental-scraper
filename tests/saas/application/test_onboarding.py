@@ -287,6 +287,41 @@ def test_leaves_subscription_pending_when_provider_groups_unmapped(
         _cleanup(super_db_session, pid, tenant_id)
 
 
+def test_leaves_subscription_pending_when_some_provider_groups_unmapped(
+    super_db_session, tmp_path, capsys
+):
+    pid, lid, rid = _setup_catalog(super_db_session)
+    _setup_pvg(super_db_session, pid, lid, rid, "ECMR")
+    _setup_pvg(super_db_session, pid, lid, rid, "SUV1")
+    super_db_session.commit()
+    tenant_id = None
+    try:
+        config = _config_from_yaml(_VALID_YAML, tmp_path)  # maps only ECMR
+        catalog_ids = {("onb_test_sc", "ONB1", "test_rate"): (pid, lid, rid)}
+
+        with super_session(super_engine()) as s:
+            tenant_id = step_create_tenant(config, s)
+
+        with super_session(super_engine()) as s:
+            client_group_ids = step_create_users_and_groups(config, tenant_id, s)
+            mapping_count = step_create_mappings(config, catalog_ids, tenant_id, client_group_ids, s)
+            sub_ids = step_create_subscriptions(config, catalog_ids, tenant_id, s)
+            statuses = step_activate_subscriptions(sub_ids, catalog_ids, tenant_id, s)
+
+        key = ("onb_test_sc", "ONB1", "test_rate")
+        assert mapping_count == 1
+        assert statuses[key] == "pending_mapping"
+
+        with super_session(super_engine()) as s:
+            ts = s.get(TenantSubscription, sub_ids[key])
+            assert ts.status == "pending_mapping"
+
+        captured = capsys.readouterr()
+        assert "SUV1" in captured.err
+    finally:
+        _cleanup(super_db_session, pid, tenant_id)
+
+
 def test_rolls_back_tenant_when_discovery_fails(super_db_session, tmp_path):
     pid, lid, rid = _setup_catalog(super_db_session)
     super_db_session.commit()
