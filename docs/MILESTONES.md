@@ -285,3 +285,30 @@ Pulidos posteriores incluidos en este hito:
   de sesión != `tenant_id` pedido (`_assert_session_tenant_consistent`).
 - 2 tests nuevos: `test_coverage_differs_across_durations_within_same_row` y
   `test_raises_when_session_tenant_mismatches_requested_tenant`. Total: 62/62.
+
+---
+
+## Milestone 5D-C — Demo CLI
+
+**Goal.** Provide a command-line interface that executes one of the three `PriceQueryService` queries and renders the result as a human-readable Format A table in the terminal. Last piece of Milestone 5D.
+
+**What was built.**
+- `src/saas/application/demo/__init__.py` and `__main__.py`: package entry points; `python -m src.saas.application.demo` invokes `main()`.
+- `src/saas/application/demo/cli.py`: argparse-based CLI with full argument validation (UUID parsing, date-range ordering, provider-arg presence for `--query=provider`, warning when provider args are ignored for aggregate queries). Opens `tenant_context` session (app role, RLS enforced). Resolves tenant name, active subscription count, and client group display names from the same session before rendering.
+- `src/saas/application/demo/formatter.py`: pure function `format_table(table, query_type, tenant_name, extra_context) → str`. Uses `rich` for Unicode box drawing: `Panel` for the header box, `Table(box=SQUARE)` for each client group. Coverage column present only in average/minimum mode. Em dash `—` for None prices. Soft-wrapping for warning messages to avoid mid-sentence line breaks.
+- `tests/saas/application/test_demo.py`: 7 unit tests on `format_table` (no DB), 5 integration-style tests on `main()` with `PriceQueryService` mocked.
+- `requirements.txt`: added `rich>=13.0`.
+
+**Decisions taken.**
+- **`rich` for output rendering.** `Panel` gives the `╭─╮` header box from the spec with zero boilerplate. `Table(box=SQUARE)` gives `┌─┬─┐` data tables. Output captured via `Console(file=io.StringIO())`, making `format_table` a pure function testable without a terminal.
+- **Period in tramos uses DD/MM when the entire date_range is within one year.** Same-year detection is done once from `date_range` metadata and applied to all tramo cells. The header always shows full DD/MM/YYYY.
+- **Coverage compacted to "N/T" or "N1-N2/T".** When all duration cells in a row have the same coverage, a single value is shown. When they differ, the range is shown. T = `num_subscriptions` from `extra_context`, resolved by the CLI via a `SELECT count(*)` on `tenant_subscriptions`.
+- **`format_table` is a pure function.** No session, no DB, no tenant_id. All context (tenant name, group names, subscription count, provider names for provider mode) flows through `extra_context`. The CLI resolves these and passes them in.
+- **Validation fails fast with exit code 1 and a clear message to stderr.** No traceback is shown. Argparse-level failures (unknown args) are also caught. `_CliError` is the private exception type for validation failures.
+- **`tenant_context` (app role, RLS enforced).** The CLI represents a legitimate product consumer, not an administrative operation. `super_session` is never used here.
+
+**Deferred.**
+- **Output to CSV / Excel / JSON** exportable format — will be necessary in Phase 4 when delivering operational tariffs to client systems (see `PRODUCT_SCOPE.md` "Integración con sistema externo del cliente").
+- **Colored output by price thresholds** (highlight cheapest/most expensive cells). Useful visual feature but not v0.
+
+**Closure.** `pytest tests/` passes (74/74, 62 pre-existing + 12 new). 7 unit tests on the pure `format_table` function, 5 CLI tests with mocked service. Hito 5D cerrado.
