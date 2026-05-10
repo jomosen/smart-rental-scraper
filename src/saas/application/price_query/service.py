@@ -70,6 +70,7 @@ class PriceQueryService:
         the tenant has no active subscription to (provider_code, location_code,
         rate_code), or any catalog lookup fails.
         """
+        self._assert_session_tenant_consistent(tenant_id)
         d1, d2 = date_range
         metadata: dict = {
             "date_range": (d1.isoformat(), d2.isoformat()),
@@ -188,7 +189,7 @@ class PriceQueryService:
                     period_start=period_start,
                     period_end=period_end,
                     prices_by_duration=prices_by_duration,
-                    coverage=None,
+                    coverage_by_duration=None,
                 ))
 
         rows.sort(key=lambda r: (r.client_group_code, r.period_start))
@@ -245,6 +246,7 @@ class PriceQueryService:
         client_vehicle_group_codes: list[str],
         durations: list[int],
     ) -> FormatATable:
+        self._assert_session_tenant_consistent(tenant_id)
         d1, d2 = date_range
         metadata: dict = {
             "date_range": (d1.isoformat(), d2.isoformat()),
@@ -317,7 +319,7 @@ class PriceQueryService:
         for cvg_code, cvg_id in client_groups.items():
             for T1, T2 in grid:
                 sub_prices_by_dur: dict[int, list[Decimal]] = {d: [] for d in durations}
-                total_coverage = 0
+                coverage_per_duration: dict[int, int] = {d: 0 for d in durations}
 
                 for sd in sub_data:
                     pvg_ids = sd["client_to_pvgs"].get(cvg_id, [])
@@ -338,14 +340,10 @@ class PriceQueryService:
                             if price is not None:
                                 sub_dur_prices[dur].append(price)
 
-                    sub_has_any = False
                     for dur in durations:
                         if sub_dur_prices[dur]:
                             sub_prices_by_dur[dur].append(min(sub_dur_prices[dur]))
-                            sub_has_any = True
-
-                    if sub_has_any:
-                        total_coverage += 1
+                            coverage_per_duration[dur] += 1
 
                 # Aggregate across subscriptions
                 prices_by_duration: dict[int, Optional[Decimal]] = {}
@@ -364,13 +362,30 @@ class PriceQueryService:
                     period_start=T1,
                     period_end=T2,
                     prices_by_duration=prices_by_duration,
-                    coverage=total_coverage,
+                    coverage_by_duration=coverage_per_duration,
                 ))
 
         rows.sort(key=lambda r: (r.client_group_code, r.period_start))
         return FormatATable(rows=rows, metadata=metadata)
 
     # ── Private helpers ─────────────────────────────────────────────────────────
+
+    def _assert_session_tenant_consistent(self, tenant_id: uuid.UUID) -> None:
+        """Validate that the session's app.tenant_id matches the requested
+        tenant_id, OR that the session has no tenant context (BYPASSRLS).
+
+        Raises ValueError on mismatch — common cause is calling the service
+        with a session whose app.tenant_id was set to a different tenant.
+        """
+        result = self._s.execute(
+            text("SELECT current_setting('app.tenant_id', true)")
+        ).scalar()
+        if result and result.strip() and result != str(tenant_id):
+            raise ValueError(
+                f"Session app.tenant_id ({result!r}) does not match the "
+                f"requested tenant_id ({tenant_id}). Caller likely set the "
+                "session context to a different tenant."
+            )
 
     def _resolve_client_groups(
         self,
@@ -511,7 +526,17 @@ def _find_representative(
     T1: date,
     T2: date,
 ) -> Optional[date]:
-    """Return the representative_date of the zone fully covering [T1, T2], or None."""
+    """Return the representative_date of the zone covering [T1, T2].
+
+    PRECONDITION: [T1, T2] must be a tramo of the intersected grid
+    produced by compute_intersected_grid. By construction such a
+    tramo lies entirely within at most one zone per PVG.
+
+    Calling with arbitrary [T1, T2] that crosses zone boundaries
+    returns None silently — this helper is internal to the
+    market-aggregate methods and must not be reused outside that
+    context.
+    """
     for start, end, rep in zone_list:
         if start <= T1 and end >= T2:
             return rep

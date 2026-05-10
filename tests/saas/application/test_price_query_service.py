@@ -371,9 +371,9 @@ def test_get_provider_tariff_returns_one_row_per_zone_per_group(super_db_session
     row2 = next(r for r in result.rows if r.period_start == date(2026, 7, 15))
     assert row1.period_end == date(2026, 7, 14)
     assert row1.prices_by_duration[7] == Decimal("45.00")
-    assert row1.coverage is None
+    assert row1.coverage_by_duration is None
     assert row2.prices_by_duration[7] == Decimal("65.00")
-    assert row2.coverage is None
+    assert row2.coverage_by_duration is None
     assert result.metadata["currency"] == "EUR"
 
 
@@ -526,13 +526,13 @@ def test_get_market_average_uses_intersected_grid_across_providers(super_db_sess
     assert row1.period_end == date(2026, 7, 14)
     # A: 40, B: 50 → avg = 45
     assert row1.prices_by_duration[7] == Decimal("45.00")
-    assert row1.coverage == 2
+    assert row1.coverage_by_duration[7] == 2
 
     row2 = rows_by_start[date(2026, 7, 15)]
     assert row2.period_end == date(2026, 8, 31)
     # A: 40 (zone Jun 1 – Aug 31, rep Jun 15), B: 60 (zone Jul 15 – Aug 31, rep Jul 31)
     assert row2.prices_by_duration[7] == Decimal("50.00")
-    assert row2.coverage == 2
+    assert row2.coverage_by_duration[7] == 2
 
 
 def test_get_market_average_reports_coverage_per_cell(super_db_session):
@@ -579,8 +579,10 @@ def test_get_market_average_reports_coverage_per_cell(super_db_session):
 
     assert len(result.rows) == 1
     row = result.rows[0]
-    # Both providers contribute at least one price → coverage = 2
-    assert row.coverage == 2
+    # dur 7: both providers contribute → coverage_by_duration[7] = 2
+    assert row.coverage_by_duration[7] == 2
+    # dur 1: only Provider B contributes → coverage_by_duration[1] = 1
+    assert row.coverage_by_duration[1] == 1
     # dur 7: average(45, 55) = 50
     assert row.prices_by_duration[7] == Decimal("50.00")
     # dur 1: only Provider B contributes → 60 (no average, single value)
@@ -629,7 +631,7 @@ def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
 
     assert len(result.rows) == 1
     row = result.rows[0]
-    assert row.coverage == 1  # only Provider A counts
+    assert row.coverage_by_duration[7] == 1  # only Provider A counts
     assert row.prices_by_duration[7] == Decimal("40.00")  # only Provider A's price
 
 
@@ -673,7 +675,7 @@ def test_get_market_minimum_returns_min_across_providers(super_db_session):
 
     assert len(result.rows) == 1
     row = result.rows[0]
-    assert row.coverage == 2
+    assert row.coverage_by_duration[7] == 2
     assert row.prices_by_duration[7] == Decimal("45.00")  # min(45, 55)
 
 
@@ -728,12 +730,12 @@ def test_get_market_minimum_handles_partial_coverage(super_db_session):
 
     # Tramo 1: both providers → coverage=2, min(40, 50)=40
     row1 = rows_by_start[date(2026, 6, 1)]
-    assert row1.coverage == 2
+    assert row1.coverage_by_duration[7] == 2
     assert row1.prices_by_duration[7] == Decimal("40.00")
 
     # Tramo 2: only Provider B → coverage=1, price=55
     row2 = rows_by_start[date(2026, 7, 15)]
-    assert row2.coverage == 1
+    assert row2.coverage_by_duration[7] == 1
     assert row2.prices_by_duration[7] == Decimal("55.00")
 
 
@@ -802,7 +804,7 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
         # T1 should see only Provider A's data
         assert len(result.rows) == 1
         row = result.rows[0]
-        assert row.coverage == 1  # only one subscription visible
+        assert row.coverage_by_duration[7] == 1  # only one subscription visible
         assert row.prices_by_duration[7] == Decimal("45.00")  # Provider A's price
         # Provider B's price (99.00) must not appear anywhere
         for r in result.rows:
@@ -812,5 +814,96 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
         _cleanup(
             super_db_session,
             provider_ids=[pid for pid in (p_a_id, p_b_id) if pid is not None],
+            tenant_ids=[tid for tid in (t1_id, t2_id) if tid is not None],
+        )
+
+
+def test_coverage_differs_across_durations_within_same_row(super_db_session):
+    """coverage_by_duration tracks per-cell coverage, not per-row."""
+    rep = date(2026, 6, 15)
+
+    # Provider A: observations for dur 7 AND 14
+    p_a = _seed_provider(super_db_session, "pq_t15a")
+    loc_a = _seed_location(super_db_session, p_a.id)
+    rate_a = _seed_rate(super_db_session, p_a.id)
+    pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR")
+    run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
+    _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
+               date(2026, 6, 1), date(2026, 8, 31), rep)
+    _seed_observation(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id, run_a.id,
+                      rep, 7, Decimal("40.00"))
+    _seed_observation(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id, run_a.id,
+                      rep, 14, Decimal("35.00"))
+
+    # Provider B: observation for dur 7 ONLY (no 14)
+    p_b = _seed_provider(super_db_session, "pq_t15b")
+    loc_b = _seed_location(super_db_session, p_b.id)
+    rate_b = _seed_rate(super_db_session, p_b.id)
+    pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR")
+    run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
+    _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
+               date(2026, 6, 1), date(2026, 8, 31), rep)
+    _seed_observation(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id, run_b.id,
+                      rep, 7, Decimal("50.00"))
+    # No dur 14 observation for Provider B
+
+    t = _seed_tenant(super_db_session, "PQ T15")
+    cvg = _seed_client_group(super_db_session, t.id)
+    _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
+    _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, pvg_a.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, pvg_b.id)
+
+    service = PriceQueryService(super_db_session)
+    result = service.get_market_average_tariff(
+        t.id,
+        (date(2026, 6, 1), date(2026, 8, 31)),
+        ["compact"],
+        [7, 14],
+    )
+
+    assert len(result.rows) == 1
+    row = result.rows[0]
+    # dur 7: both providers have data → coverage = 2
+    assert row.coverage_by_duration[7] == 2
+    # dur 14: only Provider A has data → coverage = 1
+    assert row.coverage_by_duration[14] == 1
+
+
+def test_raises_when_session_tenant_mismatches_requested_tenant(super_db_session, db_session):
+    """_assert_session_tenant_consistent raises ValueError on mismatch."""
+    t1_id: uuid.UUID | None = None
+    t2_id: uuid.UUID | None = None
+    p_id: int | None = None
+    try:
+        p = _seed_provider(super_db_session, "pq_t16")
+        loc = _seed_location(super_db_session, p.id)
+        rate = _seed_rate(super_db_session, p.id)
+        p_id = p.id
+
+        t1 = _seed_tenant(super_db_session, "PQ T16 Tenant1")
+        t2 = _seed_tenant(super_db_session, "PQ T16 Tenant2")
+        t1_id = t1.id
+        t2_id = t2.id
+        super_db_session.commit()
+
+        # Set session to T1's context, then request T2's data
+        db_session.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(t1_id)},
+        )
+        service = PriceQueryService(db_session)
+
+        with pytest.raises(ValueError, match="does not match"):
+            service.get_market_average_tariff(
+                t2_id,
+                (date(2026, 6, 1), date(2026, 8, 31)),
+                ["compact"],
+                [7],
+            )
+    finally:
+        _cleanup(
+            super_db_session,
+            provider_ids=[pid for pid in (p_id,) if pid is not None],
             tenant_ids=[tid for tid in (t1_id, t2_id) if tid is not None],
         )

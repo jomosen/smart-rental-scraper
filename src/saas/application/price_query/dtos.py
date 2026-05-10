@@ -1,7 +1,7 @@
 """Data transfer objects for PriceQueryService outputs."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -21,7 +21,10 @@ class FormatARow:
     period_start: date
     period_end: date                              # inclusive
     prices_by_duration: dict[int, Optional[Decimal]]  # None when no observation
-    coverage: Optional[int] = None               # None in per-provider tariff; int in aggregates
+    coverage_by_duration: Optional[dict[int, int]] = None
+    # None for single-provider queries (coverage does not apply).
+    # dict[duration → count of subscriptions contributing data] for
+    # market_average and market_minimum.
 
 
 @dataclass

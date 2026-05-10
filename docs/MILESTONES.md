@@ -276,3 +276,12 @@ Recommended order: **5D → 5A → 5C → 5B**. The reasoning is that a real ten
 - **Intermediate-duration interpolation** — durations outside `{1,2,3,4,5,6,7,14,21,28}` return None; provider pricing logic for intermediates is deferred per `DATA_MODEL.md` Part 4.
 
 **Closure.** `pytest tests/` passes (60/60, 45 pre-existing + 15 new). 5 unit tests on the pure `compute_intersected_grid` function, 10 integration tests covering all three service methods including N:M policy, partial coverage, inactive-subscription exclusion, and RLS isolation.
+
+Pulidos posteriores incluidos en este hito:
+- `coverage` es ahora un dict por duración (`coverage_by_duration: Optional[dict[int, int]]`),
+  fiel al contrato escrito en `PRODUCT_SCOPE.md` ("cada celda lleva un campo coverage").
+- `_find_representative` documenta su precondición de forma fuerte (marcador PRECONDITION).
+- Validación temprana de coherencia de contexto de sesión: `ValueError` si `app.tenant_id`
+  de sesión != `tenant_id` pedido (`_assert_session_tenant_consistent`).
+- 2 tests nuevos: `test_coverage_differs_across_durations_within_same_row` y
+  `test_raises_when_session_tenant_mismatches_requested_tenant`. Total: 62/62.
