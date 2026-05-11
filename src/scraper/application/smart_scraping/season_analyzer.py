@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List
+from typing import Dict, List
 
 from ...domain.interfaces.smart_scraping import ISeasonAnalyzer
 from ...domain.models.season_internals import PricePoint, SeasonBoundary
@@ -54,6 +54,51 @@ class SeasonAnalyzer(ISeasonAnalyzer):
         boundaries = self._detect_boundaries(relevant)
         boundaries.sort(key=lambda b: b.left_date)
         return self._build_zones(boundaries, period_start, period_end, relevant, car_group)
+
+    def detect_zones_provider_level(
+        self,
+        price_points: List[PricePoint],
+        period_start: date,
+        period_end: date,
+    ) -> List[HomogeneousZone]:
+        """Detect zones aggregating ALL price points, ignoring car_group.
+
+        Use this when zones reflect the provider's calendar (the typical
+        rent-a-car case) rather than per-group seasonality. Resulting
+        zones carry car_group="" — the caller is responsible for
+        replicating them to each provider_vehicle_group when persisting.
+        """
+        if not price_points:
+            return [self._single_zone(period_start, period_end, Decimal(0), "")]
+
+        aggregated = self._aggregate_by_date(price_points)
+        boundaries = self._detect_boundaries(aggregated)
+        boundaries.sort(key=lambda b: b.left_date)
+        return self._build_zones(boundaries, period_start, period_end, aggregated, "")
+
+    def _aggregate_by_date(self, price_points: List[PricePoint]) -> List[PricePoint]:
+        """Return one synthetic PricePoint per unique pickup_date with mean daily price.
+
+        Groups multiple car_group entries on the same date into a single
+        representative point so boundary detection operates on the temporal
+        signal, not across-group price differences.
+        """
+        by_date: Dict[date, List[Decimal]] = {}
+        for p in price_points:
+            daily = p.total_price / max(p.duration_days, 1)
+            by_date.setdefault(p.pickup_date, []).append(daily)
+
+        result: List[PricePoint] = []
+        for d in sorted(by_date):
+            prices = by_date[d]
+            avg = sum(prices) / len(prices)
+            result.append(PricePoint(
+                pickup_date=d,
+                duration_days=1,
+                total_price=avg,
+                car_group="",
+            ))
+        return result
 
     def _detect_boundaries(self, points: List[PricePoint]) -> List[SeasonBoundary]:
         """Detects boundaries by comparing daily price between consecutive points."""

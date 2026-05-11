@@ -26,6 +26,7 @@ from src.saas.infrastructure.persistence.models.catalog import (
     ProviderVehicleGroup,
     ScrapeRun,
 )
+from src.saas.infrastructure.persistence.repositories import ProviderVehicleGroupRepository
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.application.smart_scraping.price_point_extractor import PricePointExtractor
 from src.scraper.application.smart_scraping.search_plan_builder import SearchPlanBuilder
@@ -102,6 +103,19 @@ def _empty_results(requests):
     return [BookingResult(provider_name="Orch Test Provider", cars=[]) for _ in requests]
 
 
+def _results_with_groups(requests, groups: list[str], rate_name: str = "Test Rate"):
+    """Return one BookingResult per request, each containing one Car per group."""
+    cars = [
+        Car(
+            model=f"Car {g}", group=g, description="",
+            rates=[Rate(name=rate_name, currency="EUR",
+                       total=Decimal("70.00"), daily_price=Decimal("10.00"))],
+        )
+        for g in groups
+    ]
+    return [BookingResult(provider_name="Orch Test Provider", cars=cars) for _ in requests]
+
+
 class TestOrchestratorCreatesScrapeRun:
     async def test_creates_scrape_run_per_provider(self, super_db_session):
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
@@ -158,6 +172,9 @@ class TestOrchestratorFailure:
 class TestOrchestratorZonePersistence:
     async def test_persists_zones_via_replace(self, super_db_session):
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        # Pre-seed one PVG so the empty-probe run has a group to replicate zones to
+        vg_repo = ProviderVehicleGroupRepository(super_db_session)
+        vg_repo.upsert_seen(provider_id, location_id, rate_id, "ECMR", "Economy")
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -169,12 +186,108 @@ class TestOrchestratorZonePersistence:
                               new=AsyncMock(side_effect=_empty_results)):
                 result = await orch.run(provider, location, location, _PERIOD_START, _PERIOD_END)
 
+            # zones_detected = total rows = provider_zones × active_groups
             assert result.zones_detected > 0
             zones = super_db_session.scalars(
                 select(HzOrm)
                 .where(HzOrm.provider_id == provider_id, HzOrm.active.is_(True))
             ).all()
             assert len(zones) > 0
+        finally:
+            _cleanup_provider(super_db_session, provider_id)
+
+
+class TestOrchestratorZoneReplication:
+    async def test_zones_replicated_to_all_active_provider_vehicle_groups(
+        self, super_db_session
+    ):
+        """Zone rows equal provider_zones × active_groups after a run."""
+        provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        vg_repo = ProviderVehicleGroupRepository(super_db_session)
+        for code in ("ECMR", "CCAR", "FCAR"):
+            vg_repo.upsert_seen(provider_id, location_id, rate_id, code, code)
+        super_db_session.commit()
+        session_factory = partial(super_session, super_engine())
+        try:
+            orch = _make_orchestrator(provider_id, location_id, rate_id, session_factory)
+            provider = BookingProvider(name="Orch Test Provider", base_url="https://x.com")
+            location = Location(canonical_id="ORC", display_name="Orch Test Location")
+
+            # Probe empty → 1 provider-level zone; 3 pre-existing PVGs → 3 zone rows
+            with patch.object(SmartScraperOrchestrator, "_run_session",
+                              new=AsyncMock(side_effect=_empty_results)):
+                result = await orch.run(provider, location, location, _PERIOD_START, _PERIOD_END)
+
+            zones = super_db_session.scalars(
+                select(HzOrm)
+                .where(HzOrm.provider_id == provider_id, HzOrm.active.is_(True))
+            ).all()
+            # 1 provider-level zone replicated to each of the 3 active PVGs
+            assert len(zones) == 3
+            assert result.zones_detected == 3
+        finally:
+            _cleanup_provider(super_db_session, provider_id)
+
+    async def test_zones_replicated_to_groups_discovered_in_probe(
+        self, super_db_session
+    ):
+        """Groups seen in probe are upserted and get zones even if catalog was empty."""
+        provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        super_db_session.commit()
+        session_factory = partial(super_session, super_engine())
+        try:
+            orch = _make_orchestrator(provider_id, location_id, rate_id, session_factory)
+            provider = BookingProvider(name="Orch Test Provider", base_url="https://x.com")
+            location = Location(canonical_id="ORC", display_name="Orch Test Location")
+
+            call_count = 0
+
+            async def side_effect(requests):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:  # probe — 2 groups at stable price → 1 zone
+                    return _results_with_groups(requests, ["GrpA", "GrpB"])
+                return _empty_results(requests)  # extraction
+
+            with patch.object(SmartScraperOrchestrator, "_run_session",
+                              new=AsyncMock(side_effect=side_effect)):
+                result = await orch.run(provider, location, location, _PERIOD_START, _PERIOD_END)
+
+            zones = super_db_session.scalars(
+                select(HzOrm)
+                .where(HzOrm.provider_id == provider_id, HzOrm.active.is_(True))
+            ).all()
+            # 1 provider-level zone replicated to GrpA and GrpB = 2 zone rows
+            assert len(zones) == 2
+            pvg_ids = {z.provider_vehicle_group_id for z in zones}
+            assert len(pvg_ids) == 2  # two distinct PVGs received zones
+        finally:
+            _cleanup_provider(super_db_session, provider_id)
+
+    async def test_no_zones_persisted_when_no_groups_available(
+        self, super_db_session
+    ):
+        """No PVGs, empty probe → warning logged, no zone rows, run succeeds."""
+        provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        super_db_session.commit()
+        session_factory = partial(super_session, super_engine())
+        try:
+            orch = _make_orchestrator(provider_id, location_id, rate_id, session_factory)
+            provider = BookingProvider(name="Orch Test Provider", base_url="https://x.com")
+            location = Location(canonical_id="ORC", display_name="Orch Test Location")
+
+            with patch.object(SmartScraperOrchestrator, "_run_session",
+                              new=AsyncMock(side_effect=_empty_results)):
+                result = await orch.run(provider, location, location, _PERIOD_START, _PERIOD_END)
+
+            zones = super_db_session.scalars(
+                select(HzOrm).where(HzOrm.provider_id == provider_id)
+            ).all()
+            assert len(zones) == 0
+            assert result.zones_detected == 0
+
+            run = super_db_session.get(ScrapeRun, result.run_id)
+            assert run.status == "success"
         finally:
             _cleanup_provider(super_db_session, provider_id)
 

@@ -34,7 +34,7 @@ from ....saas.infrastructure.persistence.repositories import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 14, 21, 28]
+_DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
 
 
 @dataclass
@@ -135,23 +135,24 @@ class SmartScraperOrchestrator:
             # ── PHASE 2: Analysis ─────────────────────────────────────────
             logger.info("[%s] Phase 2 — Zone analysis", self._provider_code)
             price_points = self._extractor.extract(probe_searches, probe_results)
-            car_groups = list({p.car_group for p in price_points}) or ["unknown"]
-
-            all_zones: List[HomogeneousZone] = []
-            for group in car_groups:
-                zones = self._analyzer.detect_zones(price_points, start, end, group)
-                all_zones.extend(zones)
-                logger.info(
-                    "[%s] Group '%s': %d zone(s)",
-                    self._provider_code, group, len(zones),
-                )
-
-            zones_count = self._persist_zones(all_zones)
+            provider_zones = self._analyzer.detect_zones_provider_level(
+                price_points, start, end,
+            )
+            logger.info(
+                "[%s] Detected %d provider-level zone(s)",
+                self._provider_code, len(provider_zones),
+            )
+            probe_groups = list({
+                car.group
+                for result in probe_results if result and result.cars
+                for car in result.cars
+            })
+            zones_count = self._persist_zones(provider_zones, probe_groups)
 
             # ── PHASE 3: Selective extraction ─────────────────────────────
             logger.info("[%s] Phase 3 — Extraction", self._provider_code)
             short_searches = self._plan_builder.build_short_searches(
-                all_zones, provider, pickup_location, dropoff_location,
+                provider_zones, provider, pickup_location, dropoff_location,
                 self._extraction_durations, end, self._pickup_hour,
             )
             short_requests = [SearchRequest(search=s, rate_filter=self._rate_filter)
@@ -206,24 +207,52 @@ class SmartScraperOrchestrator:
             run_id = run.id
         return run_id
 
-    def _persist_zones(self, zones: List[HomogeneousZone]) -> int:
-        """Persist zones grouped by car_group, replacing any previously active zones."""
-        groups_to_zones: dict[str, List[HomogeneousZone]] = {}
-        for zone in zones:
-            groups_to_zones.setdefault(zone.car_group, []).append(zone)
+    def _persist_zones(
+        self,
+        provider_zones: List[HomogeneousZone],
+        probe_groups: List[str],
+    ) -> int:
+        """Persist provider-level zones, replicated to every active
+        provider_vehicle_group of the tuple.
 
+        Returns the total count of zone rows written (provider_zones × groups).
+
+        Limitation: only replicates zones to groups visible in this probe
+        OR already in catalog from previous runs. Groups that exist for
+        the provider but appear only in phase-3 extraction (rare) won't
+        get zones until the next run. Acceptable: subsequent runs close
+        the gap.
+        """
         with self._session_factory() as s:
             vg_repo = ProviderVehicleGroupRepository(s)
             zone_repo = HomogeneousZoneRepository(s)
 
-            for group_name, group_zones in groups_to_zones.items():
-                vg = vg_repo.upsert_seen(
+            # Ensure all groups seen in probe are in the catalog
+            for group_name in probe_groups:
+                vg_repo.upsert_seen(
                     self._provider_id,
                     self._provider_location_id,
                     self._provider_rate_id,
                     group_name,
                     group_name,
                 )
+
+            active_groups = vg_repo.list_active_for_tuple(
+                self._provider_id,
+                self._provider_location_id,
+                self._provider_rate_id,
+            )
+
+            if not active_groups:
+                logger.warning(
+                    "[%s] No active provider_vehicle_groups for tuple — "
+                    "zones not persisted",
+                    self._provider_code,
+                )
+                return 0
+
+            total_rows = 0
+            for vg in active_groups:
                 orm_zones = [
                     HzOrm(
                         provider_id=self._provider_id,
@@ -235,7 +264,7 @@ class SmartScraperOrchestrator:
                         representative_date=z.representative_date,
                         active=True,
                     )
-                    for z in group_zones
+                    for z in provider_zones
                 ]
                 zone_repo.replace_zones_for_tuple(
                     self._provider_id,
@@ -244,8 +273,13 @@ class SmartScraperOrchestrator:
                     vg.id,
                     orm_zones,
                 )
+                total_rows += len(orm_zones)
 
-        return len(zones)
+            logger.info(
+                "[%s] Persisted %d zone(s) × %d group(s) = %d rows",
+                self._provider_code, len(provider_zones), len(active_groups), total_rows,
+            )
+            return total_rows
 
     def _persist_observations(
         self,

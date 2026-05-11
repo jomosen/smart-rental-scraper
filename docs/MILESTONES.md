@@ -312,3 +312,27 @@ Pulidos posteriores incluidos en este hito:
 - **Colored output by price thresholds** (highlight cheapest/most expensive cells). Useful visual feature but not v0.
 
 **Closure.** `pytest tests/` passes (74/74, 62 pre-existing + 12 new). 7 unit tests on the pure `format_table` function, 5 CLI tests with mocked service. Hito 5D cerrado.
+
+---
+
+## Known Issues — RESOLVED
+
+### KI-1 — Zone replication to all provider_vehicle_groups
+
+**Problem.** `SmartScraperOrchestrator._persist_zones` was only writing zone rows for the single car group chosen by `PricePointExtractor` (the first car in the probe result). For a provider with 14 vehicle groups, 13 groups had no zones and thus no price observations were ever written for them.
+
+**Root cause.** Phase 2 originally called `analyzer.detect_zones(price_points, ..., car_group)` once per group that appeared in `price_points`. Since `PricePointExtractor.extract` returns only the first car per search result, only one group was represented in `price_points`. The old `_persist_zones` wrote zones only for that group.
+
+**Fix (committed with this milestone).**
+1. Added `detect_zones_provider_level` to `SeasonAnalyzer`: aggregates all price points by pickup date (mean daily price across all groups per date) and detects boundaries on the aggregated temporal signal, avoiding spurious boundaries from cross-group price differences. Resulting zones carry `car_group=""`.
+2. Added `list_active_for_tuple` to `ProviderVehicleGroupRepository`: returns all active PVGs for a (provider, location, rate) tuple.
+3. Rewrote Phase 2 and `_persist_zones` in `SmartScraperOrchestrator`: now detects one set of provider-level zones, then replicates them to ALL active `provider_vehicle_groups`. Groups seen in probe results are upserted first (via `upsert_seen`) so newly-discovered groups receive zones immediately.
+4. `probe_groups` is now extracted from `probe_results` (all car groups across all results), not from `price_points` (which only contains the first car per search).
+5. Fixed missing `7` in `_DEFAULT_EXTRACTION_DURATIONS` (was `[1,2,3,4,5,6,14,21,28]`, corrected to `[1,2,3,4,5,6,7,14,21,28]`).
+6. Fixed `NameError` in Phase 3 where `all_zones` was referenced after renaming to `provider_zones`.
+
+**Tests added.**
+- `TestDetectZonesProviderLevel` (3 tests) in `tests/test_season_analyzer.py`.
+- `TestOrchestratorZoneReplication` (3 tests) in `tests/saas/application/test_orchestrator_persistence.py`.
+
+**Closure.** `pytest tests/` passes (80/80, 74 pre-existing + 6 new).

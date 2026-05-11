@@ -105,3 +105,34 @@ class TestGroupIsolation:
         zones = analyzer.detect_zones(points, START, END, "A")
         expected_days = (END - START).days + 1
         assert zones[0].days == expected_days
+
+
+class TestDetectZonesProviderLevel:
+    def test_detect_zones_provider_level_aggregates_all_groups(self):
+        # Group A jumps from 70 to 140 at Mar 8 (+100%), group B stays stable at 50.
+        # Averaged daily prices: Mar1=(10+7.14)/2≈8.57, Mar8=(20+7.14)/2≈13.57 → +58% > 5%
+        analyzer = SeasonAnalyzer(price_change_threshold=0.05)
+        points = [
+            _point(date(2026, 3, 1), Decimal("70.0"), group="A"),
+            _point(date(2026, 3, 1), Decimal("50.0"), group="B"),
+            _point(date(2026, 3, 8), Decimal("140.0"), group="A"),
+            _point(date(2026, 3, 8), Decimal("50.0"), group="B"),
+        ]
+        zones = analyzer.detect_zones_provider_level(points, START, END)
+        assert len(zones) == 2  # boundary detected between Mar 1 and Mar 8
+
+    def test_detect_zones_provider_level_returns_single_zone_when_empty(self):
+        analyzer = SeasonAnalyzer()
+        zones = analyzer.detect_zones_provider_level([], START, END)
+        assert len(zones) == 1
+        assert zones[0].start_date == START
+        assert zones[0].end_date == END
+
+    def test_detect_zones_provider_level_assigns_empty_car_group(self):
+        analyzer = SeasonAnalyzer(price_change_threshold=0.05)
+        points = [
+            _point(date(2026, 3, 1), Decimal("70.0"), group="Economy"),
+            _point(date(2026, 3, 8), Decimal("70.0"), group="Economy"),
+        ]
+        zones = analyzer.detect_zones_provider_level(points, START, END)
+        assert all(z.car_group == "" for z in zones)

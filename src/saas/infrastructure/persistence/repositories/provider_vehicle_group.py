@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +28,22 @@ class ProviderVehicleGroupRepository:
                 ProviderVehicleGroup.external_code == external_code,
             )
         )
+
+    def list_active_for_tuple(
+        self,
+        provider_id: int,
+        provider_location_id: int,
+        provider_rate_id: int,
+    ) -> List[ProviderVehicleGroup]:
+        """Return all active provider_vehicle_groups for this tuple."""
+        return list(self._s.scalars(
+            select(ProviderVehicleGroup).where(
+                ProviderVehicleGroup.provider_id == provider_id,
+                ProviderVehicleGroup.provider_location_id == provider_location_id,
+                ProviderVehicleGroup.provider_rate_id == provider_rate_id,
+                ProviderVehicleGroup.active == True,
+            )
+        ).all())
 
     def upsert_seen(
         self,
