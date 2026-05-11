@@ -1,0 +1,17 @@
+tenant:
+  name: "Mardrive Demo"
+  currency: "EUR"
+  owner_email: "owner@demo.local"
+
+vehicle_groups:
+  - code: GROUP_M
+    name: "Group M"
+    display_order: 1
+
+subscriptions:
+  - provider_code: provider_c
+    location_code: "1"
+    rate_code: "standard"
+    mappings:
+      - client_group_code: GROUP_M
+        external_codes: ["Grupo D"]

@@ -131,6 +131,7 @@ class ProviderAScraper(BaseScraper):
                 model=model,
                 group=group,
                 description=", ".join(descriptions),
+                example_models="",
                 rates=list(dict.fromkeys(rates)),
             ))
 

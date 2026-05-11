@@ -106,6 +106,7 @@ def _setup_pvg(session, pid: int, lid: int, rid: int, ext_code: str = "ECMR") ->
         provider_rate_id=rid,
         external_code=ext_code,
         external_name=ext_code,
+        example_models="",
     )
     session.add(pvg)
     session.flush()

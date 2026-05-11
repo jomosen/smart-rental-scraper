@@ -30,7 +30,7 @@ Deliberately deferred items appear at the end with their re-evaluation triggers.
 Three entities, N:M relation, manual mapping per tenant.
 
 - `client_vehicle_groups` — taxonomy defined by the tenant for their own business.
-- `provider_vehicle_groups` — groups discovered by scraping each `(provider, location, rate)` tuple. Catalog-side. The same provider monitored by two tenants in the same configuration shares the same provider group rows.
+- `provider_vehicle_groups` — groups discovered by scraping each `(provider, location, rate)` tuple. Catalog-side. The same provider monitored by two tenants in the same configuration shares the same provider group rows. Each row also carries display attributes populated by the scraper: `example_models` (required, e.g. `"Fiat Panda, Kia Picanto"`), `seats` (nullable int), `luggage` (nullable int), `transmission` (nullable varchar, `'manual'` or `'automatic'`). These attributes are written by `upsert_seen` on every probe and extraction pass; they are updated in-place when the provider changes them. `example_models` is NOT NULL — a provider that does not display example models is not worth scraping and should not be onboarded.
 - `vehicle_group_mappings` — N:M relation between the two, scoped to the tenant.
 
 **Why N:M, not N:1.** Two provider groups ("Compact" and "Compact Auto") may map to the same client group. Forcing uniqueness on either side breaks valid scenarios.
@@ -352,6 +352,10 @@ provider_vehicle_groups
   provider_rate_id FK
   external_code
   external_name
+  example_models TEXT NOT NULL    -- e.g. "Fiat Panda, Kia Picanto" (required; '' until first scrape)
+  seats          INT NULL
+  luggage        INT NULL
+  transmission   VARCHAR(16) NULL -- 'manual' | 'automatic' | NULL
   first_seen_at
   last_seen_at
   active

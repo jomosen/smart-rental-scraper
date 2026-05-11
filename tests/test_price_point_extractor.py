@@ -27,7 +27,7 @@ def _result(*cars: Car) -> BookingResult:
 
 
 def _car(group: str, rate_name: str, total: Decimal) -> Car:
-    return Car(model="ModelX", group=group, description="",
+    return Car(model="ModelX", group=group, description="", example_models="",
                rates=[Rate(name=rate_name, currency="EUR", total=total, daily_price=total / 7)])
 
 
@@ -61,7 +61,7 @@ class TestRateFilter:
         extractor = PricePointExtractor(rate_name="Premium")
         search = _search(date(2026, 3, 1))
         car = Car(
-            model="ModelX", group="B", description="",
+            model="ModelX", group="B", description="", example_models="",
             rates=[
                 Rate(name="Standard", currency="EUR", total=Decimal("50.0"), daily_price=Decimal("7.14")),
                 Rate(name="Premium", currency="EUR", total=Decimal("90.0"), daily_price=Decimal("12.86")),

@@ -44,7 +44,7 @@ from .steps import (
     step_validate_catalog,
 )
 
-_PROVIDERS_JSON_DEFAULT = Path(__file__).parents[5] / "providers.json"
+_PROVIDERS_JSON_DEFAULT = Path(__file__).parents[4] / "providers.json"
 
 _DISCOVERY_PERIOD_DAYS = 90
 _PICKUP_HOUR = 10

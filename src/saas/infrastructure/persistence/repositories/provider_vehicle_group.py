@@ -52,6 +52,10 @@ class ProviderVehicleGroupRepository:
         provider_rate_id: int,
         external_code: str,
         external_name: str,
+        example_models: str,
+        seats: Optional[int] = None,
+        luggage: Optional[int] = None,
+        transmission: Optional[str] = None,
     ) -> ProviderVehicleGroup:
         """Return the existing row if found, updating last_seen_at; insert otherwise."""
         now = datetime.datetime.now(tz=datetime.timezone.utc)
@@ -65,6 +69,10 @@ class ProviderVehicleGroupRepository:
                 provider_rate_id=provider_rate_id,
                 external_code=external_code,
                 external_name=external_name,
+                example_models=example_models,
+                seats=seats,
+                luggage=luggage,
+                transmission=transmission,
                 first_seen_at=now,
                 last_seen_at=now,
             )
@@ -74,4 +82,12 @@ class ProviderVehicleGroupRepository:
             row.last_seen_at = now
             if row.external_name != external_name:
                 row.external_name = external_name
+            if row.example_models != example_models:
+                row.example_models = example_models
+            if row.seats != seats:
+                row.seats = seats
+            if row.luggage != luggage:
+                row.luggage = luggage
+            if row.transmission != transmission:
+                row.transmission = transmission
         return row

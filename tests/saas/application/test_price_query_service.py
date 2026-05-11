@@ -87,6 +87,7 @@ def _seed_pvg(
         provider_rate_id=rid,
         external_code=code,
         external_name=code,
+        example_models="",
         active=True,
     )
     session.add(pvg)

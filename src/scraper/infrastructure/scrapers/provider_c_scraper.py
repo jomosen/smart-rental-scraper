@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from typing import Optional
 from urllib.parse import quote
@@ -19,6 +20,26 @@ def _parse_price(text: str) -> Decimal:
         return Decimal(clean)
     except Exception:
         return Decimal(0)
+
+
+def _parse_seats(text: str) -> Optional[int]:
+    """Parses '5' → 5, '5+2' → 7 (foldable seats summed), or None on failure."""
+    text = text.strip()
+    if not text:
+        return None
+    parts = text.split("+")
+    try:
+        return sum(int(p.strip()) for p in parts if p.strip())
+    except ValueError:
+        return None
+
+
+def _parse_luggage(text: str) -> Optional[int]:
+    """Parses '2', '4' → int; returns None for volumes ('6m³') or empty."""
+    text = text.strip()
+    if re.fullmatch(r"\d+", text):
+        return int(text)
+    return None
 
 
 class ProviderCScraper(BaseScraper):
@@ -57,16 +78,29 @@ class ProviderCScraper(BaseScraper):
             group_el = item.select_one(".brxe-xvavgc")
             daily_el = item.select_one(".brxe-mxprcd")
             total_el = item.select_one(".brxe-frerph")
+            seats_el = item.select_one('[title="Número de plazas"]')
+            luggage_el = item.select_one('[title="Capacidad maletero"]')
+            trans_el = item.select_one('[title*="Cambio"]')
 
-            model = model_el.get_text(strip=True) if model_el else "Desconocido"
+            example_models = model_el.get_text(strip=True) if model_el else ""
             group = group_el.get_text(strip=True).strip("()") if group_el else ""
             daily_price = _parse_price(daily_el.get_text()) if daily_el else Decimal(0)
             total = _parse_price(total_el.get_text()) if total_el else Decimal(0)
+            seats = _parse_seats(seats_el.get_text(strip=True)) if seats_el else None
+            luggage = _parse_luggage(luggage_el.get_text(strip=True)) if luggage_el else None
+            transmission = None
+            if trans_el:
+                title = trans_el.get("title", "")
+                transmission = "automatic" if "automático" in title else "manual"
 
             cars.append(Car(
-                model=model,
+                model=example_models,
                 group=group,
                 description="",
+                example_models=example_models,
+                seats=seats,
+                luggage=luggage,
+                transmission=transmission,
                 rates=[Rate(
                     name="Standard",
                     currency="EUR",

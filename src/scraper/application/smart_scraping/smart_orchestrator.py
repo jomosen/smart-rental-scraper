@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ...domain.interfaces.scraper_factory import IScraperFactory
 from ...domain.interfaces.smart_scraping import (
@@ -13,7 +13,7 @@ from ...domain.interfaces.smart_scraping import (
     ISeasonProbe,
 )
 from ...domain.models.booking_provider import BookingProvider
-from ....shared.domain.models.result import BookingResult
+from ....shared.domain.models.result import BookingResult, Car
 from ....shared.domain.models.search import BookingSearch, Location
 from ....shared.domain.models.season import HomogeneousZone
 from ..filters.rate_filter import RateFilter
@@ -142,12 +142,13 @@ class SmartScraperOrchestrator:
                 "[%s] Detected %d provider-level zone(s)",
                 self._provider_code, len(provider_zones),
             )
-            probe_groups = list({
-                car.group
-                for result in probe_results if result and result.cars
-                for car in result.cars
-            })
-            zones_count = self._persist_zones(provider_zones, probe_groups)
+            probe_cars: Dict[str, Car] = {}
+            for result in probe_results:
+                if result and result.cars:
+                    for car in result.cars:
+                        if car.group not in probe_cars:
+                            probe_cars[car.group] = car
+            zones_count = self._persist_zones(provider_zones, probe_cars)
 
             # ── PHASE 3: Selective extraction ─────────────────────────────
             logger.info("[%s] Phase 3 — Extraction", self._provider_code)
@@ -210,7 +211,7 @@ class SmartScraperOrchestrator:
     def _persist_zones(
         self,
         provider_zones: List[HomogeneousZone],
-        probe_groups: List[str],
+        probe_cars: Dict[str, Car],
     ) -> int:
         """Persist provider-level zones, replicated to every active
         provider_vehicle_group of the tuple.
@@ -228,13 +229,17 @@ class SmartScraperOrchestrator:
             zone_repo = HomogeneousZoneRepository(s)
 
             # Ensure all groups seen in probe are in the catalog
-            for group_name in probe_groups:
+            for group_name, car in probe_cars.items():
                 vg_repo.upsert_seen(
                     self._provider_id,
                     self._provider_location_id,
                     self._provider_rate_id,
                     group_name,
                     group_name,
+                    example_models=car.example_models,
+                    seats=car.seats,
+                    luggage=car.luggage,
+                    transmission=car.transmission,
                 )
 
             active_groups = vg_repo.list_active_for_tuple(
@@ -310,6 +315,10 @@ class SmartScraperOrchestrator:
                             self._provider_rate_id,
                             car.group,
                             car.group,
+                            example_models=car.example_models,
+                            seats=car.seats,
+                            luggage=car.luggage,
+                            transmission=car.transmission,
                         )
                         did_insert = obs_repo.insert_if_changed(
                             provider_id=self._provider_id,

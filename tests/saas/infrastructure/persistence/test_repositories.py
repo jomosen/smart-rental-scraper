@@ -93,6 +93,7 @@ def _vehicle_group(
         provider_rate_id=provider_rate_id,
         external_code=external_code,
         external_name="Economy",
+        example_models="Fiat Panda, Kia Picanto",
         active=True,
     )
     session.add(vg)
@@ -146,7 +147,7 @@ class TestProviderVehicleGroupRepository:
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
         repo = ProviderVehicleGroupRepository(super_db_session)
-        vg = repo.upsert_seen(p.id, loc.id, rate.id, "COMPACT", "Compact Car")
+        vg = repo.upsert_seen(p.id, loc.id, rate.id, "COMPACT", "Compact Car", example_models="Fiat 500, VW Polo")
         assert vg.id is not None
         assert vg.external_code == "COMPACT"
         assert vg.external_name == "Compact Car"
@@ -156,12 +157,67 @@ class TestProviderVehicleGroupRepository:
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
         repo = ProviderVehicleGroupRepository(super_db_session)
-        vg1 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV Old Name")
+        vg1 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV Old Name", example_models="Toyota RAV4")
         first_seen = vg1.first_seen_at
-        vg2 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV New Name")
+        vg2 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV New Name", example_models="Toyota RAV4")
         assert vg2.id == vg1.id
         assert vg2.external_name == "SUV New Name"
         assert vg2.first_seen_at == first_seen
+
+    def test_upsert_seen_persists_group_attributes(self, super_db_session):
+        p = _provider(super_db_session, code="vg_attrs_insert")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        repo = ProviderVehicleGroupRepository(super_db_session)
+        vg = repo.upsert_seen(
+            p.id, loc.id, rate.id, "ECMR", "Economy",
+            example_models="Fiat Panda, Kia Picanto",
+            seats=5,
+            luggage=2,
+            transmission="manual",
+        )
+        assert vg.example_models == "Fiat Panda, Kia Picanto"
+        assert vg.seats == 5
+        assert vg.luggage == 2
+        assert vg.transmission == "manual"
+
+    def test_upsert_seen_updates_group_attributes_when_changed(self, super_db_session):
+        p = _provider(super_db_session, code="vg_attrs_update")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        repo = ProviderVehicleGroupRepository(super_db_session)
+        vg1 = repo.upsert_seen(
+            p.id, loc.id, rate.id, "FCAR", "Full Size",
+            example_models="VW Passat",
+            seats=5,
+            luggage=3,
+            transmission="manual",
+        )
+        vg2 = repo.upsert_seen(
+            p.id, loc.id, rate.id, "FCAR", "Full Size",
+            example_models="VW Passat, Skoda Octavia",
+            seats=5,
+            luggage=4,
+            transmission="automatic",
+        )
+        assert vg2.id == vg1.id
+        assert vg2.example_models == "VW Passat, Skoda Octavia"
+        assert vg2.luggage == 4
+        assert vg2.transmission == "automatic"
+
+    def test_upsert_seen_accepts_null_optional_attributes(self, super_db_session):
+        p = _provider(super_db_session, code="vg_attrs_null")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        repo = ProviderVehicleGroupRepository(super_db_session)
+        vg = repo.upsert_seen(
+            p.id, loc.id, rate.id, "CCAR", "Compact",
+            example_models="Renault Clio",
+        )
+        assert vg.example_models == "Renault Clio"
+        assert vg.seats is None
+        assert vg.luggage is None
+        assert vg.transmission is None
 
 
 class TestScrapeRunRepository:

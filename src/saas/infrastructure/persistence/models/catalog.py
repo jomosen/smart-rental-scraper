@@ -122,6 +122,10 @@ class ProviderVehicleGroup(Base):
     )
     external_code: Mapped[str] = mapped_column(String(64), nullable=False)
     external_name: Mapped[str] = mapped_column(Text, nullable=False)
+    example_models: Mapped[str] = mapped_column(Text, nullable=False)
+    seats: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    luggage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    transmission: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )

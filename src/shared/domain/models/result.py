@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -14,8 +14,12 @@ class Rate:
 @dataclass(frozen=True)
 class Car:
     model: str
-    group: str        # E.g.: "Economy", "SUV", "Compact"
-    description: str  # E.g.: "Manual, Air conditioning, 5 seats"
+    group: str           # E.g.: "Economy", "SUV", "Compact"
+    description: str     # E.g.: "Manual, Air conditioning, 5 seats"
+    example_models: str  # E.g.: "Fiat Panda, Kia Picanto" — provider-shown representative models
+    seats: Optional[int] = None
+    luggage: Optional[int] = None
+    transmission: Optional[str] = None  # 'manual' | 'automatic' | None
     rates: List[Rate] = field(default_factory=list)
 
 

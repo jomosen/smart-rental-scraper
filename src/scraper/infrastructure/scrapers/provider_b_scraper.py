@@ -119,6 +119,7 @@ class ProviderBScraper(BaseScraper):
                 model=model,
                 group=group,
                 description="",
+                example_models="",
                 rates=[Rate(
                     name=package_name,
                     currency="EUR",

@@ -107,7 +107,7 @@ def _results_with_groups(requests, groups: list[str], rate_name: str = "Test Rat
     """Return one BookingResult per request, each containing one Car per group."""
     cars = [
         Car(
-            model=f"Car {g}", group=g, description="",
+            model=f"Car {g}", group=g, description="", example_models="",
             rates=[Rate(name=rate_name, currency="EUR",
                        total=Decimal("70.00"), daily_price=Decimal("10.00"))],
         )
@@ -174,7 +174,7 @@ class TestOrchestratorZonePersistence:
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
         # Pre-seed one PVG so the empty-probe run has a group to replicate zones to
         vg_repo = ProviderVehicleGroupRepository(super_db_session)
-        vg_repo.upsert_seen(provider_id, location_id, rate_id, "ECMR", "Economy")
+        vg_repo.upsert_seen(provider_id, location_id, rate_id, "ECMR", "Economy", example_models="")
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -205,7 +205,7 @@ class TestOrchestratorZoneReplication:
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
         vg_repo = ProviderVehicleGroupRepository(super_db_session)
         for code in ("ECMR", "CCAR", "FCAR"):
-            vg_repo.upsert_seen(provider_id, location_id, rate_id, code, code)
+            vg_repo.upsert_seen(provider_id, location_id, rate_id, code, code, example_models="")
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -314,7 +314,7 @@ class TestOrchestratorObservationPersistence:
                     BookingResult(
                         provider_name="Orch Test Provider",
                         cars=[Car(
-                            model="Test Car", group="Economy", description="",
+                            model="Test Car", group="Economy", description="", example_models="",
                             rates=[Rate(name="Test Rate", currency="EUR",
                                        total=Decimal("70.00"), daily_price=Decimal("10.00"))],
                         )],

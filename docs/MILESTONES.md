@@ -373,3 +373,49 @@ Pendiente para futuro:
 - Mecanismo opcional de "warn me when provider launches a new group I haven't seen"
   (alerta proactiva, no bloqueo).
 - Interfaz para añadir mappings a una subscription activa sin re-onboardear.
+
+---
+
+## Vehicle group attributes — Phases 1–4
+
+**Goal.** Persist vehicle display attributes (`example_models`, `seats`, `luggage`, `transmission`) that providers expose on their search-result pages alongside each vehicle group, so the SaaS layer can surface them to tenants without an extra scrape.
+
+**What was built.**
+
+*Phase 1 — Schema + repository.*
+- Alembic migration `a1b2c3d4e5f6`: adds `example_models TEXT NOT NULL` (server_default `''` for existing rows, default then dropped), `seats INT NULL`, `luggage INT NULL`, `transmission VARCHAR(16) NULL` to `provider_vehicle_groups`.
+- `ProviderVehicleGroup` ORM model: 4 new `Mapped` columns.
+- `ProviderVehicleGroupRepository.upsert_seen`: extended with `example_models: str` (required), `seats/luggage/transmission: Optional`. On insert: all four persisted. On update: each field overwritten only if changed.
+- DATA_MODEL.md pseudo-DDL updated.
+- 3 new repository tests (`test_upsert_seen_persists_group_attributes`, `test_upsert_seen_updates_group_attributes_when_changed`, `test_upsert_seen_accepts_null_optional_attributes`).
+
+*Phase 2 — `Car` domain model.*
+- `Car` dataclass (`src/shared/domain/models/result.py`): added `example_models: str` (required, 4th positional field), `seats: Optional[int]`, `luggage: Optional[int]`, `transmission: Optional[str]`.
+- `RateFilter`: passes the 4 new fields through when reconstructing a `Car`.
+- `provider_a`, `provider_b`, `provider_c` scrapers: pass `example_models=""` as placeholder pending per-scraper parsing.
+- All test fixtures updated.
+
+*Phase 3 — provider_c parsing.*
+- `provider_c_scraper.py`: parses all 4 attributes from the provider's HTML.
+  - `example_models` ← `h3.brxe-sjwbok` text (same element already used for `model`).
+  - `seats` ← `[title="Número de plazas"]`; "5+2" → 7 (parts summed), empty → `None`.
+  - `luggage` ← `[title="Capacidad maletero"]`; pure digits → int, volumes ("6m³") or empty → `None`.
+  - `transmission` ← `[title*="Cambio"]`; "automático" in title → `"automatic"`, else `"manual"`.
+- Added `_parse_seats` and `_parse_luggage` as standalone helpers.
+- `tests/test_provider_c_scraper.py`: 12 unit tests covering both helpers and all edge cases.
+
+*Phase 4 — Orchestrator wiring.*
+- `SmartScraperOrchestrator`: `probe_groups: List[str]` replaced by `probe_cars: Dict[str, Car]` (first Car seen per group from probe results).
+- `_persist_zones`: iterates `probe_cars.items()` and passes `car.example_models/seats/luggage/transmission` to `upsert_seen` — attributes populated from the probe pass, not just on extraction.
+- `_persist_observations`: passes all 4 attributes from the extraction `car` to `upsert_seen`, keeping them up to date across runs.
+
+**Decisions taken.**
+
+- **`example_models` required at the DB level, but `""` is the sentinel for scrapers not yet migrated.** The DB constraint (NOT NULL) is satisfied; the business constraint ("empty = not yet scraped, not acceptable for a mature provider") is enforced at onboarding time, not in the scraper loop. `provider_a` and `provider_b` pass `""` until their parsing is implemented.
+- **`seats` "5+2" → 7.** The fold-out seats are summed into the total. The field stores total passenger capacity, not just fixed-seat count.
+- **`luggage` in m³ → `None`.** Van cargo volumes ("6m³", "12m³") are incommensurable with bag counts. Rather than force a misleading integer, the field is left null for volume-based providers.
+- **`transmission` derived from title attribute, not class.** Class names in the provider's HTML are Bricks Builder-generated and may change. The `title` attribute ("Cambio manual", "Cambio automático") is the human-readable label — more stable and more semantic.
+- **First Car per group wins in `probe_cars`.** Multiple probe searches may return the same group; taking the first is cheap and sufficient. Attributes for a group do not differ across searches for the same provider session.
+- **Attributes updated in-place on every `upsert_seen`.** If the provider renames a model list between scrapes, the next run overwrites the old value. No history is kept for attribute changes — they are display metadata, not pricing data.
+
+**Closure.** `pytest tests/` passes (97/97). Alembic head at `a1b2c3d4e5f6`.

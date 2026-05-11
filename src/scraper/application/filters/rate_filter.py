@@ -21,6 +21,10 @@ class RateFilter:
                 model=car.model,
                 group=car.group,
                 description=car.description,
+                example_models=car.example_models,
+                seats=car.seats,
+                luggage=car.luggage,
+                transmission=car.transmission,
                 rates=[r for r in car.rates if self._keep(r)],
             )
             for car in result.cars
