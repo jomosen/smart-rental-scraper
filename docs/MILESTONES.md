@@ -392,7 +392,10 @@ Pendiente para futuro:
 *Phase 2 — `Car` domain model.*
 - `Car` dataclass (`src/shared/domain/models/result.py`): added `example_models: str` (required, 4th positional field), `seats: Optional[int]`, `luggage: Optional[int]`, `transmission: Optional[str]`.
 - `RateFilter`: passes the 4 new fields through when reconstructing a `Car`.
-- `provider_a`, `provider_b`, `provider_c` scrapers: pass `example_models=""` as placeholder pending per-scraper parsing.
+- Scrapers updated to pass the four new attributes:
+  - `provider_c`: real parsing implemented in Phase 3 (see below).
+  - `provider_b`: real parsing implemented (see subsequent entry below).
+  - `provider_a`: still passes `example_models=""` as placeholder; parsing not yet implemented.
 - All test fixtures updated.
 
 *Phase 3 — provider_c parsing.*
@@ -411,7 +414,7 @@ Pendiente para futuro:
 
 **Decisions taken.**
 
-- **`example_models` required at the DB level, but `""` is the sentinel for scrapers not yet migrated.** The DB constraint (NOT NULL) is satisfied; the business constraint ("empty = not yet scraped, not acceptable for a mature provider") is enforced at onboarding time, not in the scraper loop. `provider_a` and `provider_b` pass `""` until their parsing is implemented.
+- **`example_models` required at the DB level, but `""` is the sentinel for scrapers not yet migrated.** The DB constraint (NOT NULL) is satisfied; the business constraint ("empty = not yet scraped, not acceptable for a mature provider") is enforced at onboarding time, not in the scraper loop. `provider_a` passes `""` until its parsing is implemented; `provider_b` and `provider_c` parse real values.
 - **`seats` "5+2" → 7.** The fold-out seats are summed into the total. The field stores total passenger capacity, not just fixed-seat count.
 - **`luggage` in m³ → `None`.** Van cargo volumes ("6m³", "12m³") are incommensurable with bag counts. Rather than force a misleading integer, the field is left null for volume-based providers.
 - **`transmission` derived from title attribute, not class.** Class names in the provider's HTML are Bricks Builder-generated and may change. The `title` attribute ("Cambio manual", "Cambio automático") is the human-readable label — more stable and more semantic.
@@ -419,3 +422,44 @@ Pendiente para futuro:
 - **Attributes updated in-place on every `upsert_seen`.** If the provider renames a model list between scrapes, the next run overwrites the old value. No history is kept for attribute changes — they are display metadata, not pricing data.
 
 **Closure.** `pytest tests/` passes (97/97). Alembic head at `a1b2c3d4e5f6`.
+
+---
+
+### provider_b — Vehicle group attributes (real parsing)
+
+*Context.* After the "Vehicle group attributes" work above, `provider_b` still passed `example_models=""` as a placeholder. Real parsing was added in a follow-up session using the provider's live results HTML.
+
+*Changes.*
+- `provider_b_scraper.py`:
+  - `example_models` ← `span.nombregrupo` text (same element already used for `model`).
+  - `seats` ← `.icono_container.persona .valor`; plain integer string → `int`, absent icon → `None`.
+  - `luggage` ← `.icono_container.maleta .valor` (first match); plain integer → `int`, absent → `None`.
+  - `transmission` ← CSS class presence: `.icono_container.manual` → `"manual"`, `.icono_container.automatico` → `"automatic"`, neither → `None`.
+  - Added `_parse_int` helper: `int(text.strip())` with `ValueError/AttributeError` → `None`.
+- `tests/test_provider_b_scraper.py` (new): 7 unit tests for `_parse_int` covering plain integers, whitespace, empty string, non-numeric text, and float strings.
+
+*Decisions taken.*
+- **`_parse_int` does not handle "5+2" sums.** provider_b displays seat counts as plain integers; the helper stays minimal. Summation logic lives in `_parse_seats` (provider_c only).
+- **`select_one(".icono_container.maleta .valor")` takes the first match.** Some groups show two bag icons (e.g., small + large). The first icon corresponds to carry-on capacity, which is the more meaningful field for car category comparisons.
+- **Groups with no `persona` icon get `seats=None`.** The B1 group uses a `data-seats="0"` attribute instead of the standard icon; `select_one` returns `None` correctly — unknown seats is more honest than zero.
+
+**Closure.** `pytest tests/` passes (104/104).
+
+---
+
+### Observación operacional — Rendimiento dispar de scrapers
+
+*Contexto.* Durante las sesiones de implementación de atributos de grupo de vehículo, se observó una diferencia significativa en el tiempo de extracción por búsqueda entre los scrapers.
+
+| Scraper | Tiempo estimado por búsqueda | Motivo principal |
+|---|---|---|
+| `provider_c` | ~5 s | Página de resultados carga en una sola petición; sin cambio de pestaña |
+| `provider_b` | ~30 s | El formulario abre una nueva pestaña; múltiples esperas de Materialize |
+
+*Implicaciones.*
+- Con los 10 durations de extracción actuales (`_DEFAULT_EXTRACTION_DURATIONS`) y un único representative date por zona, una sesión de provider_b con 3 zonas requiere ~15 min solo en extracción.
+- provider_c con el mismo escenario tarda ~2,5 min.
+
+*Triggers para optimizaciones diferidas.*
+- Esta observación activa **DD-3** (pool de scrapers / paralelismo) y **DD-4** (adaptive probe) de `docs/PRODUCT_SCOPE.md` cuando el volumen de proveedores o localizaciones crezca.
+- No se implementa ahora: el pipeline mono-proveedor actual es asumible en entorno de PoC/piloto.

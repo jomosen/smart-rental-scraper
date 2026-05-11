@@ -355,3 +355,33 @@ datos de los primeros tenants. No se anticipan aquí.
 > A llenar cuando v0 esté en producción y haya señal de los primeros
 > tenants. No anticipar contenido aquí; las decisiones de v1 dependen
 > de lo aprendido en v0.
+
+---
+
+## Decisiones diferidas
+
+Las siguientes decisiones de diseño han sido identificadas y descartadas deliberadamente para v0. Se documentan aquí para que no se reabran por accidente y para que el contexto de la decisión no se pierda.
+
+**DD-1 — Modelo de precios unificado entre proveedores.**
+No existe todavía una capa de normalización que reconcilie los grupos de vehículos ("Economy", "Compact", etc.) entre proveedores. El SaaS v0 expone precios por proveedor y grupo nativo; la comparación cross-proveedor es responsabilidad del consumidor de la API.
+*Trigger para reapertura:* Cuando un tenant pida explícitamente tablas comparativas cross-proveedor en la UI.
+
+**DD-2 — Clasificación asistida por IA de grupos de vehículos.**
+Se consideró usar un LLM para mapear grupos nativos a categorías estándar (ACRISS o similar). Se descarta por coste operativo y complejidad de evaluación en v0. La tabla `vehicle_group_mappings` está prevista en el modelo de datos pero no implementada.
+*Trigger para reapertura:* Cuando DD-1 se reactive y se disponga de un dataset de grupos suficiente para evaluar la calidad del mapeo.
+
+**DD-3 — Pool de scrapers / paralelismo de sesiones.**
+Actualmente el pipeline ejecuta un scraper a la vez por proveedor. Con múltiples proveedores o localizaciones, el tiempo total crece linealmente. El diseño actual permite paralelismo (cada `SmartScraperOrchestrator` es independiente), pero no se orquesta todavía.
+*Trigger para reapertura:* Cuando el tiempo de scraping completo supere el presupuesto de ventana nocturna (estimado: >4 h con 3 proveedores × 5 localizaciones).
+
+**DD-4 — Probe adaptativo (frecuencia variable según volatilidad).**
+El probe actual usa intervalos semanales fijos. Un sistema adaptativo reduciría búsquedas en zonas estables y aumentaría en zonas volátiles. Descartado en v0 por complejidad de implementación y ausencia de datos históricos suficientes para calibrar la volatilidad.
+*Trigger para reapertura:* Cuando haya ≥3 meses de histórico de observaciones y se detecte que el probe consume >30 % del tiempo de scraping en zonas que no cambian.
+
+**DD-5 — Integración directa con sistemas de reservas (GDS / channel managers).**
+Se descarta cualquier integración con sistemas externos de reservas (Amadeus, channel managers, APIs de proveedores) para v0. El scraper web es el único mecanismo de adquisición de precios.
+*Trigger para reapertura:* Cuando un proveedor ofrezca API propia con datos equivalentes y el coste de scraping web de ese proveedor justifique la migración.
+
+**DD-6 — Notificaciones proactivas de cambio de precio.**
+El SaaS v0 es pull-only: los tenants consultan precios bajo demanda. No se implementan alertas, webhooks ni notificaciones push cuando un precio cambia.
+*Trigger para reapertura:* Cuando un tenant pida explícitamente alertas y se disponga de una capa de mensajería (email, Slack, webhook) validada en producción.
