@@ -327,17 +327,15 @@ def step_activate_subscriptions(
 ) -> dict[tuple[str, str, str], str]:
     """Attempt to transition each subscription from pending_mapping → active.
 
-    Before activating, checks that every active provider_vehicle_group for the
-    subscription's (provider, location, rate) tuple has at least one
-    VehicleGroupMapping in this tenant. Subscriptions with unmapped groups stay
-    in 'pending_mapping' and a warning is printed to stderr.
+    A subscription becomes active when at least one active provider_vehicle_group
+    for the tuple has a VehicleGroupMapping in this tenant. Provider groups without
+    a mapping are out of the tenant's scope and are excluded from query outputs.
+
+    Subscriptions with zero mappings stay in 'pending_mapping' — a [warning] is
+    printed. Subscriptions with partial mappings are activated — an [info] is
+    printed listing the out-of-scope groups so the operator is aware.
 
     Returns {(provider_code, location_code, rate_code): 'active' | 'pending_mapping'}.
-
-    Note: validates that every active PVG has *some* mapping in this tenant, not
-    that every PVG is mapped to a *specific* client group — N:M mappings are
-    intentional and correct. A subscription becomes active only when the set of
-    active PVGs and the set of mapped PVGs are identical for that tuple.
     """
     # One query: all PVG IDs already mapped for this tenant
     mapped_pvg_ids: set[int] = set(
@@ -366,21 +364,35 @@ def step_activate_subscriptions(
         )
 
         unmapped = active_pvg_ids - mapped_pvg_ids
-        if unmapped:
-            unmapped_codes = session.scalars(
-                select(ProviderVehicleGroup.external_code).where(
-                    ProviderVehicleGroup.id.in_(unmapped)
-                )
-            ).all()
+
+        # Determine which mapped PVGs apply to THIS subscription's tuple
+        sub_mapped_pvg_ids = mapped_pvg_ids & active_pvg_ids
+
+        if not sub_mapped_pvg_ids:
+            # No mappings at all for this subscription's tuple → cannot activate
             print(
-                f"[warning] Subscription ({pcode}, {lcode}, {rcode}) has "
-                f"{len(unmapped)} unmapped active vehicle group(s): "
-                f"{', '.join(sorted(unmapped_codes))} — "
-                "leaving in 'pending_mapping'. Add mappings and re-run activation.",
+                f"[warning] Subscription ({pcode}, {lcode}, {rcode}) has no "
+                "mappings for this tuple — leaving in 'pending_mapping'. "
+                "Add at least one mapping to enable queries for this subscription.",
                 file=sys.stderr,
             )
             statuses[key] = "pending_mapping"
         else:
+            # Activate with whatever mappings exist; inform about unmapped groups
+            if unmapped:
+                unmapped_codes = session.scalars(
+                    select(ProviderVehicleGroup.external_code).where(
+                        ProviderVehicleGroup.id.in_(unmapped)
+                    )
+                ).all()
+                print(
+                    f"[info] Subscription ({pcode}, {lcode}, {rcode}) has "
+                    f"{len(unmapped)} unmapped active vehicle group(s): "
+                    f"{', '.join(sorted(unmapped_codes))}. "
+                    "These groups are not in this tenant's scope and won't "
+                    "appear in its queries. If that's intentional, ignore this notice.",
+                    file=sys.stderr,
+                )
             ts = session.get(TenantSubscription, sub_id)
             ts.status = "active"
             statuses[key] = "active"

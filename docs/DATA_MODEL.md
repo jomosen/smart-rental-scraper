@@ -44,7 +44,15 @@ pending_discovery → pending_mapping → active → paused → cancelled
                                           broken (mapping orphaned)
 ```
 
-A subscription can only become `active` when all relevant provider groups are mapped.
+A subscription stays in `pending_mapping` only when ZERO mappings exist for its tuple.
+Partial mappings are valid and activate the subscription with the declared scope.
+
+A subscription becomes `active` when at least one mapping exists for its tuple. Provider
+groups without a mapping in this tenant are out of the tenant's scope and do not appear
+in its queries. (Previously the requirement was "all groups mapped or explicitly ignored",
+but the "explicitly ignored" mechanism was never built and the strict completeness check
+blocked legitimate use cases where a customer doesn't operate every group the provider
+offers. See MILESTONES.md for the revision context.)
 
 **New provider groups appearing later** in an active subscription do not break the scrape. They land in `provider_vehicle_groups` as `active=true` but have no mapping, are excluded from pricing, and trigger a notification to the tenant.
 

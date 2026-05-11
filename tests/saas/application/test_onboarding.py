@@ -257,7 +257,7 @@ def test_creates_tenant_and_subscribes_active_when_all_mappings_complete(
         _cleanup(super_db_session, pid, tenant_id)
 
 
-def test_leaves_subscription_pending_when_provider_groups_unmapped(
+def test_leaves_subscription_pending_when_no_mappings_exist(
     super_db_session, tmp_path
 ):
     pid, lid, rid = _setup_catalog(super_db_session)
@@ -287,7 +287,7 @@ def test_leaves_subscription_pending_when_provider_groups_unmapped(
         _cleanup(super_db_session, pid, tenant_id)
 
 
-def test_leaves_subscription_pending_when_some_provider_groups_unmapped(
+def test_activates_subscription_with_partial_mappings(
     super_db_session, tmp_path, capsys
 ):
     pid, lid, rid = _setup_catalog(super_db_session)
@@ -310,13 +310,14 @@ def test_leaves_subscription_pending_when_some_provider_groups_unmapped(
 
         key = ("onb_test_sc", "ONB1", "test_rate")
         assert mapping_count == 1
-        assert statuses[key] == "pending_mapping"
+        assert statuses[key] == "active"
 
         with super_session(super_engine()) as s:
             ts = s.get(TenantSubscription, sub_ids[key])
-            assert ts.status == "pending_mapping"
+            assert ts.status == "active"
 
         captured = capsys.readouterr()
+        assert "[info]" in captured.err
         assert "SUV1" in captured.err
     finally:
         _cleanup(super_db_session, pid, tenant_id)
@@ -424,6 +425,73 @@ def test_fails_loud_on_duplicate_tenant_run(super_db_session, tmp_path):
 
     with pytest.raises(OnboardingError, match="already exists"):
         step_create_tenant(config, super_db_session)
+
+
+def test_activates_subscription_when_partial_scope_declared_explicitly(
+    super_db_session, tmp_path, capsys
+):
+    """Provider has 5 PVGs; tenant maps only 2. Subscription must activate and
+    [info] must mention the 3 out-of-scope groups."""
+    import textwrap as _tw
+    pid, lid, rid = _setup_catalog(super_db_session)
+    for code in ("PVG1", "PVG2", "PVG3", "PVG4", "PVG5"):
+        _setup_pvg(super_db_session, pid, lid, rid, code)
+    super_db_session.commit()
+
+    yaml_text = _tw.dedent("""\
+        tenant:
+          name: Partial Scope Test
+          currency: EUR
+          owner_email: owner@partial.com
+
+        vehicle_groups:
+          - code: compact
+            name: Compact
+            display_order: 1
+          - code: suv
+            name: SUV
+            display_order: 2
+
+        subscriptions:
+          - provider_code: onb_test_sc
+            location_code: ONB1
+            rate_code: test_rate
+            mappings:
+              - client_group_code: compact
+                external_codes:
+                  - PVG1
+              - client_group_code: suv
+                external_codes:
+                  - PVG2
+    """)
+
+    tenant_id = None
+    try:
+        config = _config_from_yaml(yaml_text, tmp_path)
+        catalog_ids = {("onb_test_sc", "ONB1", "test_rate"): (pid, lid, rid)}
+
+        with super_session(super_engine()) as s:
+            tenant_id = step_create_tenant(config, s)
+
+        with super_session(super_engine()) as s:
+            client_group_ids = step_create_users_and_groups(config, tenant_id, s)
+            step_create_mappings(config, catalog_ids, tenant_id, client_group_ids, s)
+            sub_ids = step_create_subscriptions(config, catalog_ids, tenant_id, s)
+            statuses = step_activate_subscriptions(sub_ids, catalog_ids, tenant_id, s)
+
+        key = ("onb_test_sc", "ONB1", "test_rate")
+        assert statuses[key] == "active"
+
+        with super_session(super_engine()) as s:
+            ts = s.get(TenantSubscription, sub_ids[key])
+            assert ts.status == "active"
+
+        captured = capsys.readouterr()
+        assert "[info]" in captured.err
+        # All 3 unmapped groups must appear in the info message
+        assert all(code in captured.err for code in ("PVG3", "PVG4", "PVG5"))
+    finally:
+        _cleanup(super_db_session, pid, tenant_id)
 
 
 def test_validate_catalog_handles_multiple_subscriptions_to_same_provider(

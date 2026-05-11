@@ -870,6 +870,56 @@ def test_coverage_differs_across_durations_within_same_row(super_db_session):
     assert row.coverage_by_duration[14] == 1
 
 
+def test_unmapped_provider_groups_do_not_appear_in_tenant_queries(super_db_session):
+    """Provider has 3 active PVGs; tenant maps only 1. get_provider_tariff must
+    return prices for the mapped group only, ignoring the cheaper unmapped ones."""
+    p = _seed_provider(super_db_session, "pq_t17")
+    loc = _seed_location(super_db_session, p.id)
+    rate = _seed_rate(super_db_session, p.id)
+
+    pvg_ecmr = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR")
+    pvg_ccar = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "CCAR")
+    pvg_fcar = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "FCAR")
+
+    run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
+    rep = date(2026, 6, 15)
+
+    # All 3 PVGs have zones and observations; CCAR/FCAR are cheaper (tempting false positives)
+    for pvg in (pvg_ecmr, pvg_ccar, pvg_fcar):
+        _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg.id,
+                   date(2026, 6, 1), date(2026, 8, 31), rep)
+    _seed_observation(super_db_session, p.id, loc.id, rate.id, pvg_ecmr.id, run.id,
+                      rep, 7, Decimal("45.00"))
+    _seed_observation(super_db_session, p.id, loc.id, rate.id, pvg_ccar.id, run.id,
+                      rep, 7, Decimal("35.00"))  # cheaper, but unmapped
+    _seed_observation(super_db_session, p.id, loc.id, rate.id, pvg_fcar.id, run.id,
+                      rep, 7, Decimal("30.00"))  # cheapest, but unmapped
+
+    t = _seed_tenant(super_db_session)
+    cvg = _seed_client_group(super_db_session, t.id)
+    _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
+    # Only ECMR is mapped; CCAR and FCAR are out of this tenant's scope
+    _seed_mapping(super_db_session, t.id, cvg.id, pvg_ecmr.id)
+
+    try:
+        service = PriceQueryService(super_db_session)
+        result = service.get_provider_tariff(
+            t.id, "pq_t17", "PQ1", "test_rate",
+            (date(2026, 6, 1), date(2026, 8, 31)),
+            ["compact"],
+            [7],
+        )
+
+        # Exactly 1 row (1 client_group × 1 zone) — ECMR's zone only
+        assert len(result.rows) == 1
+        row = result.rows[0]
+        # Price from ECMR only (45.00), not min(45, 35, 30) = 30
+        assert row.prices_by_duration[7] == Decimal("45.00")
+        assert row.coverage_by_duration is None  # provider mode, no coverage concept
+    finally:
+        _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id])
+
+
 def test_raises_when_session_tenant_mismatches_requested_tenant(super_db_session, db_session):
     """_assert_session_tenant_consistent raises ValueError on mismatch."""
     t1_id: uuid.UUID | None = None

@@ -336,3 +336,40 @@ Pulidos posteriores incluidos en este hito:
 - `TestOrchestratorZoneReplication` (3 tests) in `tests/saas/application/test_orchestrator_persistence.py`.
 
 **Closure.** `pytest tests/` passes (80/80, 74 pre-existing + 6 new).
+
+---
+
+### REVISION-1 — Subscription activation: completeness → partial
+
+Decisión original (DATA_MODEL.md Decisión 1, ya editada):
+"Una subscription solo puede llegar a `active` cuando todos los
+`provider_vehicle_groups` están mapeados o explícitamente ignorados."
+
+Realidad: el mecanismo de "explícitamente ignorados" nunca se construyó. La validación
+estricta bloqueaba casos legítimos (cliente con flota menor que el catálogo del provider).
+En el primer onboarding real con datos reales (provider Solcar, 14 grupos en catálogo,
+tenant Mardrive con 1 grupo mapeado), la subscription quedaba en `pending_mapping`
+indefinidamente sin forma de avanzar.
+
+Decisión revisada: una subscription se activa con cualquier número ≥1 de mappings. Los
+grupos no mapeados quedan fuera del scope del tenant y no aparecen en las queries de
+`PriceQueryService` (ya funciona así por construcción: lee `vehicle_group_mappings`, no
+`provider_vehicle_groups` directamente). Si en el futuro aparece el mecanismo de
+"explícitamente ignorado" o auditoría más estricta, se revisa entonces.
+
+Cambios:
+- `step_activate_subscriptions` en `steps.py`: activa con ≥1 mapping, [warning] solo
+  con 0 mappings, [info] (no bloqueante) con grupos fuera de scope.
+- DATA_MODEL.md Decisión 1: texto actualizado con nueva semántica y referencia a contexto.
+- Tests adaptados: `test_leaves_subscription_pending_when_no_mappings_exist` (ex
+  `...when_provider_groups_unmapped`), `test_activates_subscription_with_partial_mappings`
+  (ex `...when_some_provider_groups_unmapped`, aserción cambiada a `active`).
+- Tests nuevos: `test_activates_subscription_when_partial_scope_declared_explicitly`
+  (5 PVGs, 2 mapeados → active + [info] con 3 grupos), y
+  `test_unmapped_provider_groups_do_not_appear_in_tenant_queries`
+  (3 PVGs, 1 mapeado → get_provider_tariff devuelve solo el grupo mapeado).
+
+Pendiente para futuro:
+- Mecanismo opcional de "warn me when provider launches a new group I haven't seen"
+  (alerta proactiva, no bloqueo).
+- Interfaz para añadir mappings a una subscription activa sin re-onboardear.
