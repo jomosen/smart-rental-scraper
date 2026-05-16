@@ -664,6 +664,204 @@ los datos actuales son material de PoC, no histórico operacional.
   fidelidad histórica; el lector debe interpretar el contenido, no
   los códigos.
 
-**Closure.** Pendiente. La entrada se actualiza cuando el plan esté
-implementado, los tests pasen, y un scrape end-to-end haya populado
-la BD con datos clasificados correctamente.
+**Closure.** Implementación completada en cuatro prompts incrementales
+a Claude Code más tres sub-fixes:
+
+- **Prompt 1.** Migration `b1c2d3e4f5a6_replant_canonical_taxonomy_model.py`
+  con BD limpia, rename de tablas (`provider_vehicle_groups` →
+  `provider_vehicle_categories`, `client_*` → `tenant_*`), creación
+  de `canonical_vehicle_types`, ajuste de FKs y columnas nuevas en
+  PVC (canonical_type_id, classification_confidence,
+  classification_taxonomy_version, pending_review, fuel_type).
+  Modelos SQLAlchemy adaptados. Tests del repositorio reescritos.
+- **Sub-fix 1.** Reescritura de `_resolve_mappings` en
+  `PriceQueryService` con la semántica nueva de tres capas
+  (tenant_vehicle_group → canonical_type → PVC). 13 tests del
+  servicio actualizados.
+- **Sub-fix 2.** Defensive check en `step_create_mappings` del
+  onboarding: lanza `OnboardingError` claro cuando un PVC referenciado
+  por external_code aún no tiene clasificación canónica. 3 tests
+  rotos arreglados, 1 test nuevo.
+- **Prompt 2.** Script `scripts/seed_taxonomy.py` idempotente que
+  aplica `taxonomy.yaml` a BD. 10 tests del seed.
+- **Prompt 3.** `ClassificationService` como interfaz abstracta
+  (application layer) más implementación `GeminiClassificationService`
+  (Gemini Flash + Pro fallback con threshold 0.85). 12 tests
+  unitarios con cliente Gemini mockeado.
+- **Prompt 4.** Wiring del scraper: `upsert_seen` adaptado para
+  llamar al `ClassificationService` y persistir clasificación;
+  composition root del scraper instancia el servicio; tests del
+  orchestrator usando `StubClassificationService`.
+- **Sub-fix 3.** `external_name` en `provider_vehicle_categories`
+  pasa a NULLABLE en BD (estaba NOT NULL pese a que el modelo lo
+  declaraba nullable). Migration adicional + commit `7317cc7`.
+
+**Estado final post-bloque.** 141 tests verdes, BD con schema nuevo
+y 15 canonical_vehicle_types poblados vía seed real.
+
+**Validación end-to-end pendiente.** El primer scrape real reveló
+que la política de agregación intra-provider estaba mal modelada
+(dos grupos del mismo provider con precios distintos pueden
+clasificar igual canónicamente y eso es información, no ruido).
+Eso abre el siguiente hito.
+
+---
+
+## Reversión de la política de agregación intra-provider
+
+> Hito en curso. Este es el aprendizaje más caro del bloque anterior —
+> caro en sentido conceptual, no de tiempo: una decisión arquitectónica
+> tomada antes de tener datos reales se revela incorrecta al primer
+> contacto con un scrape de verdad.
+
+**Goal.** Cambiar la política de agregación intra-provider en el
+modelo de datos: pasar de "varios grupos del provider con la misma
+canonical category se colapsan en una sola fila de
+`provider_vehicle_categories`" a "cada grupo del provider mantiene
+su propia fila; la agregación, si se desea, se aplica en query".
+
+**Cómo surgió.** Al ejecutar el primer scrape real tras los 4 prompts
+del bloque anterior, Solcar (provider_c) lanzó un error de violación
+de constraint unique:
+
+```
+duplicate key value violates unique constraint
+"uq_provider_vehicle_categories_canonical"
+DETAIL: Key (provider_id, provider_location_id, provider_rate_id,
+  canonical_type_id)=(1432, 1359, 1329, 162) already exists.
+```
+
+Gemini había clasificado dos grupos distintos del mismo provider en
+la misma categoría canónica (`INTERMEDIATE_AUTO`):
+
+- Grupo EA (Peugeot 2008, Opel Astra, 5p/4m, auto, 57€/día).
+- Grupo GA (Kia XCeed Hybrid, 5p/4m, auto, 69€/día).
+
+La constraint `UNIQUE (provider, location, rate, canonical_type_id)`,
+diseñada precisamente para garantizar "una fila por canonical en cada
+tupla", saltó.
+
+**Por qué la política original era incorrecta.** La inspección del
+caso real abrió una pregunta más profunda: ¿por qué Solcar separa EA
+y GA si semánticamente son ambos crossovers automáticos? Porque
+cuesta cobrar 12€/día más por uno que por otro. **Los providers crean
+tantos grupos como tiers de precio quieren distinguir.** Su
+estructura de grupos *es* su estructura de pricing. Colapsar dos
+grupos en una sola fila destruye exactamente esa información, que es
+la que el producto del cliente necesita para tomar decisiones.
+
+El razonamiento original al adoptar la política de agregación
+intra-provider era: "si Gemini clasifica dos grupos como el mismo
+canonical, semánticamente son el mismo coche; aplicamos `min` en
+persistencia y simplificamos el modelo". El razonamiento estaba
+contaminado por una asunción no examinada: que la taxonomía
+canónica de 15 categorías era tan fina como la del provider más
+fino del mercado. Falso. La taxonomía canónica es deliberadamente
+coarse (decisión consciente para que sea estable y reusable entre
+providers). Los providers reales segmentan más fino. Tratar de
+forzar su catálogo dentro del nuestro es la dirección incorrecta:
+debemos respetar su estructura y aplicar agregación solo cuando un
+consumidor la pida.
+
+**Decisiones nuevas.**
+
+- **Identidad de `provider_vehicle_categories`:** vuelve a ser
+  `(provider, location, rate, external_code)` cuando hay
+  `external_code`, o `(provider, location, rate, attributes_hash)`
+  cuando no. `canonical_type_id` deja de participar en la identidad
+  — es metadato de clasificación.
+- **Múltiples filas con la misma `canonical_type_id`** dentro del
+  mismo provider son válidas y esperadas. La constraint partial
+  unique sobre `(provider, location, rate, canonical_type_id)`
+  desaparece.
+- **Política `min` intra-provider se mueve a query-time.** El
+  `PriceQueryService` aplica `GROUP BY canonical_type_id` con
+  `MIN(price_per_day)` al servir tarifarios. La persistencia
+  preserva la heterogeneidad completa.
+- **Clasificación batch por provider, no vehículo a vehículo.** El
+  `ClassificationService` recibe el catálogo completo del provider
+  con precios representativos de 7 días para cada grupo. El LLM
+  puede así razonar sobre la jerarquía interna del provider y
+  distribuir los grupos en categorías canónicas adyacentes en vez
+  de colapsarlos. Esto reduce el número de llamadas (~1 por
+  provider, no ~N por vehículo) y mejora la calidad de la
+  clasificación.
+- **Precio representativo de 7 días** se computa como media de los
+  precios observados durante el probe phase. Transient: usado solo
+  como input al LLM, no persistido.
+- **Reclasificación de un provider** se dispara en tres
+  situaciones: grupo nuevo en el catálogo, cambio de
+  `taxonomy_version`, o comando manual del operador.
+
+**Documentación actualizada.**
+
+- `DATA_MODEL.md`: Decisión 1 reescrita; nueva sección "Within-
+  provider heterogeneity: faithfully preserved"; Decisión 2 ajustada
+  para reflejar caché por provider; Decisión 3 con la nueva
+  semántica de PVC; schema (Part 2) con la nueva identidad; Part 3
+  con la query nueva (CTE adicional + `GROUP BY` + `MIN`).
+- `PRODUCT_SCOPE.md`: secciones "Clasificación automática",
+  "Heterogeneidad intra-provider" (nueva), y "Política N:M de
+  agregación (en query, no en persistencia)" reescritas.
+- Este `MILESTONES.md`: documentado aquí.
+
+**Lecciones explícitas para futuras decisiones.**
+
+- **Pre-validar contra datos reales antes de cristalizar políticas
+  de agregación.** Hubiera bastado mirar los precios de Solcar de
+  EA y GA antes de adoptar la política de agregación intra-provider.
+  El dato estaba en el repositorio (`provider_vehicle_groups` pre-
+  migración tenía precios accesibles vía joins con
+  `price_observations`). No se miró.
+- **Una taxonomía canónica que pretenda ser estable debe ser
+  deliberadamente más coarse que la del provider más fino.** El
+  pensamiento "voy a hacer la taxonomía suficientemente fina para
+  que cada grupo del provider caiga en una sola categoría" lleva
+  a una taxonomía que explota cada vez que se onboardea un provider
+  nuevo. La dirección correcta es la contraria: taxonomía coarse,
+  heterogeneidad respetada en persistencia, agregación en query.
+- **Probar el scrape end-to-end ANTES de cerrar el bloque.** El
+  bloque anterior se cerró con "141 tests verdes" pero los tests
+  no detectaron la colisión porque no había datos reales en la BD.
+  Los tests cubrían lógica de clasificación y persistencia pero no
+  el caso real de "dos grupos del mismo provider con la misma
+  canonical". Tener un mecanismo de "smoke test integrador" antes
+  de cerrar hitos grandes habría detectado esto.
+
+**What's NOT changing.**
+
+- `canonical_vehicle_types` y `taxonomy.yaml`: sin cambios.
+- `ClassificationService` como interfaz abstracta: se mantiene; lo
+  que cambia es su firma (`classify_provider_batch` en vez de
+  `classify`).
+- `tenant_vehicle_groups` y `tenant_vehicle_group_mappings`: sin
+  cambios estructurales. Los mappings siguen apuntando a canonicals.
+- `PriceQueryService` interface pública: sin cambios. El cliente
+  pide tarifarios y los recibe; solo cambia la implementación
+  interna (añade `GROUP BY` + `MIN`).
+- `homogeneous_zones`, `price_observations`,
+  `price_observation_heartbeats`: sin cambios estructurales.
+
+**Implementation plan (siguiente bloque de prompts).**
+
+1. Migration nueva que cambia la identidad de
+   `provider_vehicle_categories`: drop de la constraint
+   `uq_provider_vehicle_categories_canonical`; create de la nueva
+   `uq_provider_vehicle_categories_external_code` parcial.
+2. Refactor del `ClassificationService`: nueva firma batch
+   (`classify_provider_batch`). Implementación Gemini adaptada
+   al prompt nuevo (catálogo completo del provider con precios
+   representativos).
+3. Refactor del flujo del orchestrator: tras el probe phase,
+   calcular precio representativo medio de 7 días por cada grupo
+   descubierto, llamar al `ClassificationService` una vez para
+   todo el provider, persistir resultados antes de la extracción.
+4. Refactor de `upsert_seen`: identidad por external_code/hash;
+   `canonical_type_id` se setea desde el resultado del batch
+   classification, no por llamada inline.
+5. Refactor de `PriceQueryService`: añadir `GROUP BY canonical_type_id`
+   con `MIN(price_per_day)` en la query principal.
+6. BD limpia y re-ejecución del scrape end-to-end.
+7. Tests adaptados en cada paso.
+
+**Closure.** Pendiente.

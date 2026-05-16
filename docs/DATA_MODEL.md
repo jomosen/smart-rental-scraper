@@ -29,9 +29,9 @@ Deliberately deferred items appear at the end with their re-evaluation triggers.
 
 The product organizes vehicles in three layers, each with a distinct role:
 
-- `canonical_vehicle_types` — **the operator's taxonomy**. A curated, stable list of vehicle categories (e.g. `ECONOMY_PASSENGER`, `COMPACT_SUV`, `LUXURY_AUTO`). This is the **product's lingua franca**: the language in which the market is presented to all tenants by default. Maintained by the operator via a versioned YAML file (`taxonomy.yaml`) and applied to the database by an idempotent seed script.
+- `canonical_vehicle_types` — **the operator's taxonomy**. A curated, stable list of vehicle categories (e.g. `ECONOMY_MANUAL`, `COMPACT_SUV_AUTO`, `LUXURY_AUTO`). This is the **product's lingua franca**: the language in which the market is presented to all tenants by default. Maintained by the operator via a versioned YAML file (`taxonomy.yaml`) and applied to the database by an idempotent seed script.
 
-- `provider_vehicle_categories` — **what each provider offers within each canonical category**. One row per `(provider, canonical_type)` tuple. The row aggregates all observed groups from the provider that classify into that canonical category. Provider-side identifiers (`external_code`, `external_name`) are kept as documentary metadata when the provider exposes them, but they are **not part of the identity** of the row.
+- `provider_vehicle_categories` — **the provider's actual catalog**, classified onto the canonical taxonomy. One row per distinct provider group (i.e. per distinct `external_code` when the provider exposes codes, or per distinct attribute hash when it doesn't). The `canonical_type_id` on each row is **classification metadata, not identity**. Multiple rows of the same provider may carry the same `canonical_type_id` — that is expected and correct (see "Within-provider heterogeneity" below).
 
 - `tenant_vehicle_groups` — **optional, per-tenant taxonomy**. A tenant may declare its own naming for vehicle groups (e.g. "Compactos", "Familiares") and map them onto canonical types via `tenant_vehicle_group_mappings`. This layer is **opt-in**: a tenant that uses the canonical taxonomy directly does not need to configure anything.
 
@@ -41,25 +41,53 @@ The earlier model had only two layers (`provider_vehicle_groups` and `client_veh
 
 The three-layer model fixes this:
 
-- The stable identity of "a kind of vehicle" lives in the operator's taxonomy, not in the provider's interface.
-- Each provider's catalog is reduced to "which canonical types does this provider offer", regardless of how the provider chooses to expose its internal codes.
+- The stable identity of "a kind of vehicle" in the *product's language* lives in the operator's taxonomy.
+- Each provider's catalog is captured **faithfully** — one row per group the provider distinguishes — with each row tagged with the canonical category it belongs to.
 - Tenants without strong opinions consume the operator's taxonomy directly; tenants with their own internal language map onto canonical types.
 
 **Why curated taxonomy, not auto-generated.**
 
-The canonical taxonomy is small (10-15 categories) and changes rarely. It is decided by the operator with the dataset of real provider groups in hand. It is **deliberately coarse**: two provider groups that differ only in transmission may classify into the same canonical type, and that aggregation is intentional. Tenants that need finer granularity express it through `tenant_vehicle_groups`.
+The canonical taxonomy is small (~15 categories) and changes rarely. It is decided by the operator with the dataset of real provider groups in hand. It is **deliberately coarse**: two provider groups that differ only in transmission may classify into the same canonical type. Tenants that need finer granularity express it through `tenant_vehicle_groups`.
 
 **Why a YAML source of truth.**
 
 The taxonomy is product configuration, not application state. Each change (adding a category, deprecating one, refining a description) is reviewable as a git diff, revertible as a commit, and traceable to a moment in time. The seed script applies the YAML to the database idempotently. A `taxonomy_version` integer in the YAML increments with each change and is persisted in the database for cache-invalidation purposes (see Decision 2).
 
+**Within-provider heterogeneity: faithfully preserved.**
+
+A central design assumption of this model is that **a provider creates as many groups as price tiers it wants to distinguish**. When Solcar separates "Grupo EA" (Peugeot 2008 at €57/day) from "Grupo GA" (Kia XCeed Hybrid at €69/day), they are telling us those vehicles command different prices in their internal pricing strategy — even if both are crossovers that semantically fit `INTERMEDIATE_AUTO`.
+
+The model respects that:
+
+- Each distinct provider group → its own `provider_vehicle_categories` row.
+- Multiple rows may share `canonical_type_id`. There is **no in-database aggregation** of provider groups within a provider.
+- Aggregation (e.g. "what's the min price of `INTERMEDIATE_AUTO` in Solcar this week") happens at **query time** in `PriceQueryService`, not in persistence.
+- This preserves the full price signal of the provider for analytical and pricing purposes downstream.
+
+This is a reversal from an earlier design decision in this document, taken before we had real scrape data on the table. The decision was reversed when a real classification run produced unique-constraint violations on `(provider, canonical_type_id)` — which surfaced the underlying fact that real providers segment finer than our canonical taxonomy does. The aggregation policy that originally lived "inside the provider" now lives only "across providers" and "at query time" (see `PRODUCT_SCOPE.md`).
+
 **Classification of provider data into canonical types.**
 
-Every vehicle observed during a scrape must be classified into a canonical type before it becomes part of `provider_vehicle_categories`. Classification is performed by an LLM through an abstract `ClassificationService` interface (so the model provider is swappable). The primary implementation is Gemini Flash; if Flash returns a confidence below 0.85, a fallback escalates to Gemini Pro. If both fall below the threshold, the row is persisted with `canonical_type_id = NULL` and `pending_review = true`, awaiting manual classification by the operator. The LLM is never permitted to create new canonical categories on its own; if no existing category fits, the operator extends the taxonomy.
+Every vehicle observed during a scrape must be classified into a canonical type before it becomes part of `provider_vehicle_categories`. Classification is performed by an LLM through an abstract `ClassificationService` interface (so the model provider is swappable). The primary implementation is Gemini.
 
-**N:M aggregation within a provider.**
+Two important properties of the classification:
 
-When two provider groups classify into the same canonical type, they are aggregated into the same `provider_vehicle_categories` row. The price for that canonical type at that provider is the **minimum** of the prices of the contributing groups (consistent with the N:M policy already declared in `PRODUCT_SCOPE.md`). The aggregation is transparent to the tenant: the dashboard shows one row, not two.
+1. **Batch by provider, not vehicle-by-vehicle.** The classifier sees the *entire provider catalog at once* — all the groups the provider exposes, together with a representative 7-day price for each. This lets it reason about the provider's internal pricing hierarchy. If two groups command different prices within the same provider, the classifier is expected to distribute them across adjacent canonical categories rather than collapse them.
+
+2. **Confidence-aware fallback.** Gemini Flash is the primary model. If Flash returns a confidence below 0.85 for *any* vehicle in the batch, the whole batch is re-attempted with Gemini Pro. If individual vehicles remain below 0.85 even after Pro, those rows are persisted with `canonical_type_id = NULL` and `pending_review = true`, awaiting manual classification by the operator.
+
+The LLM is never permitted to create new canonical categories on its own; if no existing category fits, the operator extends the taxonomy.
+
+**The representative price.**
+
+The price passed to the LLM is computed as the **mean of 7-day prices observed during the probe phase**. This filters noise from any single date (weekends, peak seasons) and reflects the provider's "baseline" pricing for that group. It is **transient** — used only as classification input, not persisted as a column. The true price history lives in `price_observations`.
+
+**When the LLM fails (network, rate limit, error):** the row keeps any previously cached classification if one exists. If not, it is persisted with `canonical_type_id = NULL` and `pending_review = true`. The scrape itself does not abort.
+
+**When to reclassify a provider.** A provider's full classification is re-run in three situations:
+- A new group appears in the provider's catalog (the new group can shift the internal hierarchy interpretation).
+- `taxonomy_version` increments (a new canonical category was added, an existing one was refined).
+- The operator forces it via an explicit reclassification command.
 
 **Subscription lifecycle states.**
 
@@ -91,7 +119,13 @@ Curated by the operator (you), not by tenants.
 
 **Classification cache embedded in the catalog.**
 
-`provider_vehicle_categories.classification_taxonomy_version` doubles as a classification cache: a scrape can skip the LLM call entirely when the same `(provider, attributes-hash)` row already has a `canonical_type_id` set against the current `taxonomy_version`. When the taxonomy version increments, only the rows that are potentially affected (deprecated categories, `pending_review = true`, or flagged via `reclassify_on_seed` in the YAML) are re-classified. Untouched classifications are preserved.
+`provider_vehicle_categories.classification_taxonomy_version` doubles as a classification cache. Two scenarios where the LLM is **not** called:
+
+1. The provider's catalog has been classified before and the current `taxonomy_version` matches the cached `classification_taxonomy_version` on every row, AND no new groups have appeared in the provider's catalog since the last classification. In that case, the entire provider is skipped (no batch call).
+
+2. A taxonomy version bump touches only a subset of categories. Only providers whose existing classifications reference deprecated or `reclassify_on_seed: true` categories get re-classified; the rest are left untouched.
+
+Reclassification is always done at provider granularity (a whole batch at once), never per-vehicle. This reflects the batch nature of the `ClassificationService` (see Decision 1).
 
 ---
 
@@ -108,7 +142,9 @@ A `price_observation` belongs to a `(provider, location, rate, vehicle_category,
 
 **Tenant isolation in queries** is enforced by joining through `tenant_subscriptions`. If a tenant is not subscribed, the join returns nothing.
 
-**`price_observations` references `provider_vehicle_category_id`** — i.e. the `(provider, canonical_type)` row. Translation to `tenant_vehicle_group_id` (when the tenant has declared one) happens at query time via `tenant_vehicle_group_mappings`. This preserves the canonical observation as the audit-grade truth and lets tenants opt in or out of their own naming layer without affecting the underlying data.
+**`price_observations` references `provider_vehicle_category_id`** — i.e. a specific provider group (one row in `provider_vehicle_categories`). Each provider group has its own price history, even when several groups share the same `canonical_type_id`. Aggregation across PVCs of the same canonical category — within a provider or across providers — happens at query time in `PriceQueryService`, never in the observation itself.
+
+Translation to `tenant_vehicle_group_id` (when the tenant has declared one) happens at query time via `tenant_vehicle_group_mappings`. This preserves the raw observation as the audit-grade truth and lets tenants opt in or out of their own naming layer without affecting the underlying data.
 
 ---
 
@@ -417,9 +453,16 @@ provider_vehicle_categories
   first_seen_at   TIMESTAMPTZ
   last_seen_at    TIMESTAMPTZ
   active          BOOLEAN NOT NULL DEFAULT true
-  -- Identity: UNIQUE (provider_id, provider_location_id, provider_rate_id, canonical_type_id)
-  -- When canonical_type_id IS NULL, identity falls back to (provider_id, location, rate,
-  -- attributes_hash). attributes_hash is derived from (example_models, seats, luggage, transmission).
+  -- Identity: each distinct provider group is its own row. Identity key is:
+  --   - UNIQUE (provider_id, provider_location_id, provider_rate_id, external_code)
+  --     when external_code IS NOT NULL.
+  --   - UNIQUE (provider_id, provider_location_id, provider_rate_id, attributes_hash)
+  --     when external_code IS NULL. attributes_hash is a deterministic sha256-truncated
+  --     hex of (example_models, seats, luggage, transmission, fuel_type).
+  -- canonical_type_id is classification metadata, NOT part of identity. Multiple rows
+  -- of the same provider may share canonical_type_id (provider distinguishes price
+  -- tiers more finely than the canonical taxonomy does — see Decision 1, "Within-
+  -- provider heterogeneity"). Aggregation across them happens at query time.
 
 scrape_runs
   id PK
@@ -489,7 +532,7 @@ price_observation_heartbeats
 
 How the model answers the canonical client question:
 
-> *"For tenant T, give me prices for canonical categories {ECONOMY_PASSENGER, COMPACT_PASSENGER, LUXURY_AUTO} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
+> *"For tenant T, give me prices for canonical categories {ECONOMY_MANUAL, COMPACT_AUTO, INTERMEDIATE_AUTO} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
 
 (When the tenant has declared `tenant_vehicle_groups`, the query receives tenant group codes and resolves them to canonical types via `tenant_vehicle_group_mappings` before the rest of the flow.)
 
@@ -497,14 +540,15 @@ How the model answers the canonical client question:
 
 1. Resolve subscription S to its `(provider_id, location_id, rate_id)` tuple.
 2. If the request used tenant group codes, resolve them to canonical types via `tenant_vehicle_group_mappings`.
-3. Resolve canonical types to provider vehicle categories: `provider_vehicle_categories` filtered by `(provider, canonical_type_id IN ...)`.
+3. Resolve canonical types to provider vehicle categories: `provider_vehicle_categories` filtered by `(provider, canonical_type_id IN ...)`. **This may return multiple PVCs per canonical category** (a provider may have several groups tagged with the same canonical type — see Decision 1, "Within-provider heterogeneity").
 4. Find active zones in `homogeneous_zones` overlapping [D1, D2] for those provider vehicle categories.
-5. For each zone × duration, fetch the latest observation in `price_observations` for the zone's representative date.
-6. Return one row per (canonical_type or tenant_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
+5. For each zone × duration, fetch the latest observation in `price_observations` for the zone's representative date — one observation per PVC.
+6. **Aggregate per (canonical_type, zone, duration)**: when multiple PVCs of the same canonical contribute, apply the configured policy (default: `min`). The result is one price per (canonical_type, zone, duration) per provider.
+7. Return one row per (canonical_type or tenant_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
 
 ### Single SQL realization
 
-The whole flow collapses into one SQL with two CTEs:
+The query in SQL is similar to the earlier model but adds a `GROUP BY` for the aggregation step:
 
 ```sql
 WITH zones AS (
@@ -537,38 +581,51 @@ latest_observations AS (
     AND pickup_date IN (SELECT representative_date FROM zones)
     AND duration_days IN (1,2,3,4,5,6,7,14,21,28)
   ORDER BY provider_vehicle_category_id, pickup_date, duration_days, observed_at DESC
+),
+joined AS (
+  SELECT pvc.canonical_type_id,
+         z.start_date,
+         z.end_date,
+         z.representative_date,
+         lo.duration_days,
+         lo.price_per_day,
+         lo.currency
+  FROM zones z
+  JOIN provider_vehicle_categories pvc
+    ON pvc.id = z.provider_vehicle_category_id
+  JOIN latest_observations lo
+    ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
+   AND lo.pickup_date = z.representative_date
 )
-SELECT z.provider_vehicle_category_id,
-       z.representative_date,
-       z.start_date,
-       z.end_date,
-       lo.duration_days,
-       lo.price_per_day,
-       lo.total_price,
-       lo.currency
-FROM zones z
-JOIN latest_observations lo
-  ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
- AND lo.pickup_date = z.representative_date;
+SELECT canonical_type_id,
+       start_date,
+       end_date,
+       duration_days,
+       MIN(price_per_day) AS price_per_day,   -- min policy across PVCs
+       currency
+FROM joined
+GROUP BY canonical_type_id, start_date, end_date, duration_days, currency;
 ```
 
 The application layer then:
-- Joins to `provider_vehicle_categories` to translate `provider_vehicle_category_id` → `canonical_type_id` (a 1:1 join in the new model — no N:M complexity at this stage).
-- If the tenant has declared groups, joins to `tenant_vehicle_group_mappings` to translate canonical types back to the tenant's labels (this is where N:M is applied if the tenant has chosen aggregating mappings; `min` is the default policy).
+- Translates `canonical_type_id` to the tenant's label if applicable (via `tenant_vehicle_group_mappings`).
+- If the tenant maps multiple canonicals to a single tenant_vehicle_group, applies a second-level aggregation (default: `min` again) across canonicals.
 - Returns Format A directly, or expands to Format B if explicitly requested.
 
 ### Volume reasoning
 
-For a 31-day window, 3 canonical categories, 10 durations:
-- **Distinct prices in the answer:** ~60 (assuming ~2 zones in the window per category × 10 durations).
-- **Rows fetched from BD:** ~60 (one per zone × duration).
-- **Day×duration expansion (if Format B requested):** 930, computed in memory.
+For a 31-day window, 3 canonical categories, 10 durations, a provider that has on average 2 PVCs per canonical:
+- **PVCs touched:** ~6 (3 canonicals × 2 PVCs).
+- **Zones overlapping the window:** ~2 per PVC = ~12 zones.
+- **Observations fetched:** ~12 zones × 10 durations = ~120 rows.
+- **Rows in the output after aggregation:** ~60 (3 canonicals × 2 zones × 10 durations).
+- **Day×duration expansion (if Format B requested):** ~930, computed in memory.
 
-This is the validation that the model supports the canonical use case efficiently.
+The aggregation `GROUP BY` adds negligible cost; Postgres handles it efficiently with the available indexes.
 
 ### Index implication
 
-The main index on `price_observations` is dictated by this query:
+The main index on `price_observations` is unchanged from the earlier design:
 
 ```
 (provider_id, provider_location_id, provider_rate_id,
@@ -576,7 +633,7 @@ The main index on `price_observations` is dictated by this query:
  observed_at DESC)
 ```
 
-`DISTINCT ON` over this ordering is the idiomatic Postgres way to fetch "latest per tuple" and uses the index efficiently.
+`DISTINCT ON` over this ordering is the idiomatic Postgres way to fetch "latest per tuple" and uses the index efficiently. The subsequent `JOIN` to `provider_vehicle_categories` for the canonical aggregation is a small hash join on the in-memory result of the CTEs.
 
 ---
 
@@ -693,4 +750,7 @@ Single shared database, single region.
 - Authentication is **not** built locally. Do not add tables for passwords, sessions, password reset tokens, or any mechanism that would duplicate what an external identity provider does. The `users` table only holds the local identity bound to the external `sub`.
 - Tests for tenant isolation are part of the definition of "API done", not an optional nicety.
 - The LLM-based classification is wrapped behind an abstract `ClassificationService` interface. The interface must not leak provider-specific concepts (request shape, response shape, authentication). Implementations live in infrastructure; the rest of the system depends only on the interface. Confidence threshold (0.85) is hardcoded in the service composition.
+- Classification is **batch by provider**, not vehicle-by-vehicle. The classifier receives the complete provider catalog at once together with each group's representative 7-day price, so it can reason about the provider's internal pricing hierarchy. Calling the classifier with a single vehicle in isolation is supported by the interface but is **not** the production path — it loses the hierarchical context.
+- The representative 7-day price passed to the classifier is computed as the **mean of all 7-day prices observed during the probe phase** for that group. It is transient (used only as classifier input, not persisted). The true price history is in `price_observations`.
+- `provider_vehicle_categories` identity is `(provider, location, rate, external_code)` when `external_code` is non-null, or `(provider, location, rate, attributes_hash)` otherwise. `canonical_type_id` is **not** part of identity; multiple rows of the same provider may share it, by design (Decision 1).
 - The canonical taxonomy YAML is the source of truth. The seed script must be idempotent: running it twice on an unchanged YAML produces zero changes in BD. Running it after a YAML edit applies only the deltas.

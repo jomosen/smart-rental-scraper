@@ -114,42 +114,82 @@ canónica antes de persistirse en `provider_vehicle_categories`. La
 clasificación la realiza un LLM a través de una interfaz abstracta
 (`ClassificationService`):
 
+- **Clasificación batch por provider.** El LLM recibe el catálogo
+  completo del proveedor (todos sus grupos a la vez) junto con un
+  precio representativo de 7 días para cada grupo. Esto permite al
+  LLM razonar sobre la jerarquía interna de pricing del proveedor:
+  si dos grupos tienen precios distintos, probablemente pertenecen
+  a tiers distintos y debe distribuirlos en categorías canónicas
+  adyacentes en vez de colapsarlos.
 - **Modelo primario.** Gemini Flash (tier gratuito en v0).
 - **Fallback condicional.** Gemini Pro cuando Flash devuelve
-  confianza inferior a 0.85.
-- **Cuando ambos quedan por debajo del umbral**, el vehículo se
-  persiste con `canonical_type_id = NULL` y `pending_review = true`.
-  Queda fuera del producto hasta que el operador clasifique
-  manualmente o amplíe la taxonomía.
+  cualquier confianza inferior a 0.85 en la respuesta del batch.
+- **Cuando ambos quedan por debajo del umbral para un vehículo
+  concreto**, ese vehículo se persiste con `canonical_type_id = NULL`
+  y `pending_review = true`. Queda fuera del producto hasta que el
+  operador clasifique manualmente o amplíe la taxonomía.
 - **El LLM nunca crea categorías nuevas autónomamente.** Si ninguna
   categoría existente encaja, queda pending_review.
 
-Detalles de implementación (caché embebida en
-`provider_vehicle_categories`, comportamiento ante fallo del LLM,
-versionado de la taxonomía con re-clasificación selectiva) viven en
+**Cuándo se reclasifica un proveedor:**
+
+- Cuando aparece un grupo nuevo en su catálogo (la nueva pieza puede
+  desplazar la interpretación de la jerarquía interna).
+- Cuando se incrementa `taxonomy_version`.
+- Cuando el operador lo fuerza vía comando explícito.
+
+Detalles de implementación (caché por provider, precio representativo
+como media de 7-day prices del probe, comportamiento ante fallo del
+LLM, identidad de PVC por external_code o hash de atributos) viven en
 `DATA_MODEL.md` Decisiones 1 y 2.
 
-### Política N:M de agregación
+### Heterogeneidad intra-provider: respetada, no agregada
 
-Cuando dos `provider_vehicle_categories` rows (de proveedores
-distintos, o agregando varios grupos del mismo proveedor que el LLM
-clasificó en la misma categoría canónica) contribuyen al precio de
-una celda dada, la política por defecto es **mínimo**.
+El producto preserva fielmente la estructura de grupos que cada
+proveedor expone. **Un proveedor crea tantos grupos como tiers de
+precio quiere distinguir.** Si Solcar separa "Grupo EA" (Peugeot
+2008 a 57€/día) de "Grupo GA" (Kia XCeed Hybrid a 69€/día), está
+diciéndonos que para él son tiers distintos — aunque ambos sean
+crossovers automáticos que encajan semánticamente en
+`INTERMEDIATE_AUTO`.
+
+Cada grupo del proveedor → su propia fila en
+`provider_vehicle_categories`. La columna `canonical_type_id` es
+metadato de clasificación, no identidad. Pueden coexistir múltiples
+filas del mismo proveedor con la misma `canonical_type_id`. No hay
+agregación intra-proveedor en BD.
+
+Esto difiere de una decisión inicial del diseño que asumía
+agregación dentro del proveedor. La decisión se revirtió cuando
+una clasificación real produjo violaciones de unicidad sobre
+`(provider, canonical_type)` — síntoma de que los proveedores
+reales segmentan más fino que nuestra taxonomía canónica. La
+historia completa de la decisión está en `DATA_MODEL.md` Decisión 1.
+
+### Política N:M de agregación (en query, no en persistencia)
+
+Cuando varios `provider_vehicle_categories` rows contribuyen al
+precio de una celda dada en la respuesta a una consulta, la política
+de agregación por defecto es **mínimo**.
 
 Justificación: la utilidad del producto es competir con el mercado.
-El precio relevante de un proveedor para un tipo de coche es el más
-bajo que él ofrece, no el promedio entre variantes. Aplicado al
-nivel agregado: el precio del mercado mostrado al cliente es el más
-bajo accesible para ese tipo de coche.
+El precio relevante para una categoría canónica es el más bajo que
+está accesible para ese tipo de coche, no el promedio entre variantes.
 
-Esto aplica en dos niveles:
-- **Dentro de un mismo proveedor.** Si dos grupos del proveedor se
-  clasificaron en la misma categoría canónica, sus precios se
-  agregan con `min` antes de cruzarse con otros proveedores.
-- **Entre proveedores suscritos al mismo tenant.** En el tarifario
-  mínimo, se hace `min` entre proveedores. En el tarifario medio, se
-  hace `mean` (lo de `min` dentro de cada proveedor sigue aplicando
-  antes del cruce).
+Esto aplica en tres niveles, **todos resueltos en query time**, no
+en persistencia:
+
+- **Múltiples PVCs del mismo proveedor con la misma categoría
+  canónica.** Si Solcar tiene dos grupos clasificados como
+  `INTERMEDIATE_AUTO` con precios 57€ y 69€, la celda del tarifario
+  por proveedor muestra 57€ (el mínimo). Cada PVC mantiene su
+  histórico de precios completo en BD; la agregación se aplica
+  solo al servir.
+- **Entre proveedores en tarifario mínimo.** Se hace `min` entre
+  proveedores suscritos.
+- **Entre proveedores en tarifario medio.** Se hace `mean` entre
+  proveedores; el `min` intra-proveedor del primer nivel sigue
+  aplicando antes del cruce.
 
 Configurabilidad futura: cuando un tenant requiera otra política
 para sus `tenant_vehicle_group_mappings` (media, máximo, primero
