@@ -472,6 +472,32 @@ class TestProviderVehicleCategoryRepository:
         )
         assert total is not None
 
+    def test_upsert_seen_persists_none_external_name_as_null(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_null_extname")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+
+        canonical = CanonicalVehicleType(
+            code="UTEST_NULL_NAME", name="Test Null Name",
+            description="Test type for null external_name", taxonomy_version=1, active=True,
+        )
+        super_db_session.add(canonical)
+        super_db_session.flush()
+
+        stub = StubClassificationService({"EXT_NULL": "UTEST_NULL_NAME"}, taxonomy_version=1)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+
+        pvc = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="EXT_NULL", external_name=None,
+            example_models="Ford Ka", seats=5, luggage=1,
+            transmission="manual", fuel_type="gasoline",
+            classification_service=stub, taxonomy_version=1,
+        )
+
+        super_db_session.refresh(pvc)
+        assert pvc.external_name is None, "external_name=None must persist as SQL NULL, not empty string"
+
 
 class TestScrapeRunRepository:
     def test_create_and_mark_finished(self, super_db_session):

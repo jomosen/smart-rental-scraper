@@ -98,7 +98,7 @@ class ProviderVehicleCategoryRepository:
                 provider_location_id=provider_location_id,
                 provider_rate_id=provider_rate_id,
                 external_code=external_code,
-                external_name=external_name or "",  # NOT NULL in DB
+                external_name=external_name,
                 example_models=example_models,
                 seats=seats,
                 luggage=luggage,
