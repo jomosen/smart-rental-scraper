@@ -5,6 +5,24 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class VehicleClassificationInput:
+    """Input for batch provider classification.
+
+    Carries the same observed attributes as VehicleAttributes plus price context
+    that helps the LLM distinguish within-provider price tiers.
+    """
+    external_code: str | None
+    external_name: str | None
+    example_models: str
+    seats: int | None
+    luggage: int | None
+    transmission: str | None
+    fuel_type: str | None
+    representative_price_7d: float | None
+    representative_currency: str | None
+
+
+@dataclass(frozen=True)
 class VehicleAttributes:
     """Observed attributes of a vehicle group extracted by a scraper.
 

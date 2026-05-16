@@ -1,8 +1,8 @@
 """Unit tests for GeminiClassificationService.
 
-All tests mock _call_flash and/or _call_pro — no real Gemini API calls
-are made. A fake API key is used so the constructor's key-presence check
-passes without hitting the network.
+All tests mock _call_flash_batch and/or _call_pro_batch — no real Gemini API
+calls are made.  A fake API key is used so the constructor's key-presence
+check passes without hitting the network.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.saas.application.classification.dtos import ClassificationResult, VehicleAttributes
+from src.saas.application.classification.dtos import ClassificationResult, VehicleClassificationInput
 from src.saas.infrastructure.classification.gemini_service import (
     CanonicalTypeSpec,
     GeminiClassificationService,
@@ -21,6 +21,7 @@ from src.saas.infrastructure.classification.gemini_service import (
 # ---------------------------------------------------------------------------
 
 _FAKE_API_KEY = "fake-api-key-for-tests"
+_PROVIDER_CODE = "provider_a"
 
 _CANONICAL_TYPES = [
     CanonicalTypeSpec(
@@ -59,18 +60,20 @@ def _make_service(
     )
 
 
-def _attrs(**overrides) -> VehicleAttributes:
+def _vehicle(**overrides) -> VehicleClassificationInput:
     defaults = dict(
+        external_code=None,
+        external_name=None,
         example_models="Test Car",
         seats=5,
         luggage=2,
         transmission="manual",
         fuel_type=None,
-        external_code=None,
-        external_name=None,
+        representative_price_7d=50.0,
+        representative_currency="EUR",
     )
     defaults.update(overrides)
-    return VehicleAttributes(**defaults)
+    return VehicleClassificationInput(**defaults)
 
 
 def _result(
@@ -96,17 +99,18 @@ def _result(
 class TestFlashConfident:
     def test_returns_flash_result_and_skips_pro(self):
         svc = _make_service()
-        attrs = _attrs()
-        flash_return = _result("ECONOMY_MANUAL", 0.95)
+        vehicles = [_vehicle()]
+        flash_return = [_result("ECONOMY_MANUAL", 0.95)]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return) as mock_flash, \
-             patch.object(svc, "_call_pro") as mock_pro:
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return) as mock_flash, \
+             patch.object(svc, "_call_pro_batch") as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code == "ECONOMY_MANUAL"
-        assert result.confidence == 0.95
-        assert result.pending_review is False
-        mock_flash.assert_called_once_with(attrs)
+        assert len(results) == 1
+        assert results[0].canonical_type_code == "ECONOMY_MANUAL"
+        assert results[0].confidence == 0.95
+        assert results[0].pending_review is False
+        mock_flash.assert_called_once_with(_PROVIDER_CODE, vehicles)
         mock_pro.assert_not_called()
 
 
@@ -117,18 +121,18 @@ class TestFlashConfident:
 class TestEscalatesToPro:
     def test_escalates_when_flash_below_threshold(self):
         svc = _make_service()
-        attrs = _attrs()
-        flash_return = _result("ECONOMY_MANUAL", 0.70)
-        pro_return = _result("COMPACT_AUTO", 0.92)
+        vehicles = [_vehicle()]
+        flash_return = [_result("ECONOMY_MANUAL", 0.70)]
+        pro_return = [_result("COMPACT_AUTO", 0.92)]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return), \
-             patch.object(svc, "_call_pro", return_value=pro_return) as mock_pro:
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
+             patch.object(svc, "_call_pro_batch", return_value=pro_return) as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code == "COMPACT_AUTO"
-        assert result.confidence == 0.92
-        assert result.pending_review is False
-        mock_pro.assert_called_once_with(attrs)
+        assert results[0].canonical_type_code == "COMPACT_AUTO"
+        assert results[0].confidence == 0.92
+        assert results[0].pending_review is False
+        mock_pro.assert_called_once_with(_PROVIDER_CODE, vehicles)
 
 
 # ---------------------------------------------------------------------------
@@ -138,17 +142,17 @@ class TestEscalatesToPro:
 class TestBothBelowThreshold:
     def test_pending_review_with_max_confidence(self):
         svc = _make_service()
-        attrs = _attrs()
-        flash_return = _result("ECONOMY_MANUAL", 0.60)
-        pro_return = _result("COMPACT_AUTO", 0.70)
+        vehicles = [_vehicle()]
+        flash_return = [_result("ECONOMY_MANUAL", 0.60)]
+        pro_return = [_result("COMPACT_AUTO", 0.70)]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return), \
-             patch.object(svc, "_call_pro", return_value=pro_return):
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
+             patch.object(svc, "_call_pro_batch", return_value=pro_return):
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code is None
-        assert result.pending_review is True
-        assert result.confidence == pytest.approx(0.70)
+        assert results[0].canonical_type_code is None
+        assert results[0].pending_review is True
+        assert results[0].confidence == pytest.approx(0.70)
 
 
 # ---------------------------------------------------------------------------
@@ -158,15 +162,16 @@ class TestBothBelowThreshold:
 class TestFlashFails:
     def test_returns_pending_review_when_flash_raises(self):
         svc = _make_service()
-        attrs = _attrs()
+        vehicles = [_vehicle()]
 
-        with patch.object(svc, "_call_flash", side_effect=RuntimeError("network error")), \
-             patch.object(svc, "_call_pro") as mock_pro:
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", side_effect=RuntimeError("network error")), \
+             patch.object(svc, "_call_pro_batch") as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code is None
-        assert result.pending_review is True
-        assert result.confidence == 0.0
+        assert len(results) == 1
+        assert results[0].canonical_type_code is None
+        assert results[0].pending_review is True
+        assert results[0].confidence == 0.0
         mock_pro.assert_not_called()
 
 
@@ -177,16 +182,16 @@ class TestFlashFails:
 class TestProFallbackFails:
     def test_pending_review_with_flash_confidence_when_pro_raises(self):
         svc = _make_service()
-        attrs = _attrs()
-        flash_return = _result("ECONOMY_MANUAL", 0.70)
+        vehicles = [_vehicle()]
+        flash_return = [_result("ECONOMY_MANUAL", 0.70)]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return), \
-             patch.object(svc, "_call_pro", side_effect=RuntimeError("rate limit")):
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
+             patch.object(svc, "_call_pro_batch", side_effect=RuntimeError("rate limit")):
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code is None
-        assert result.pending_review is True
-        assert result.confidence == pytest.approx(0.70)
+        assert results[0].canonical_type_code is None
+        assert results[0].pending_review is True
+        assert results[0].confidence == pytest.approx(0.70)
 
 
 # ---------------------------------------------------------------------------
@@ -196,17 +201,16 @@ class TestProFallbackFails:
 class TestUnknownCanonicalCode:
     def test_rejects_unknown_code_from_llm(self):
         svc = _make_service()
-        attrs = _attrs()
-        flash_return = _result("UNKNOWN_CODE_XYZ", 0.95)
+        vehicles = [_vehicle()]
+        flash_return = [_result("UNKNOWN_CODE_XYZ", 0.95)]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return), \
-             patch.object(svc, "_call_pro") as mock_pro:
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
+             patch.object(svc, "_call_pro_batch") as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.canonical_type_code is None
-        assert result.pending_review is True
-        # Unknown code → confidence reset to 0.0 by _validate_code
-        assert result.confidence == 0.0
+        assert results[0].canonical_type_code is None
+        assert results[0].pending_review is True
+        assert results[0].confidence == 0.0
         mock_pro.assert_not_called()
 
 
@@ -217,18 +221,18 @@ class TestUnknownCanonicalCode:
 class TestTaxonomyVersionPropagates:
     def test_result_carries_service_taxonomy_version(self):
         svc = _make_service(taxonomy_version=5)
-        attrs = _attrs()
-        flash_return = ClassificationResult(
+        vehicles = [_vehicle()]
+        flash_return = [ClassificationResult(
             canonical_type_code="ECONOMY_MANUAL",
             confidence=0.97,
             taxonomy_version=5,
             pending_review=False,
-        )
+        )]
 
-        with patch.object(svc, "_call_flash", return_value=flash_return):
-            result = svc.classify(attrs)
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return):
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert result.taxonomy_version == 5
+        assert results[0].taxonomy_version == 5
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +246,6 @@ class TestRequiresApiKey:
             GeminiClassificationService(
                 canonical_types=_CANONICAL_TYPES,
                 taxonomy_version=1,
-                # api_key not passed — falls back to env var (deleted above)
             )
 
 
@@ -261,13 +264,13 @@ class TestRequiresCanonicalTypes:
 
 
 # ---------------------------------------------------------------------------
-# Test 12 — _build_prompt includes all canonicals and vehicle attributes
+# Test 12 — _build_batch_prompt includes all canonicals and vehicle attributes
 # ---------------------------------------------------------------------------
 
-class TestBuildPrompt:
-    def test_prompt_includes_all_canonicals_and_attributes(self):
+class TestBuildBatchPrompt:
+    def test_prompt_includes_all_canonicals_and_vehicle_attributes(self):
         svc = _make_service()
-        attrs = VehicleAttributes(
+        vehicles = [VehicleClassificationInput(
             example_models="Fiat Panda",
             seats=5,
             luggage=2,
@@ -275,31 +278,31 @@ class TestBuildPrompt:
             fuel_type="gasoline",
             external_code="A",
             external_name="Economy Group",
-        )
-        prompt = svc._build_prompt(attrs)
+            representative_price_7d=45.50,
+            representative_currency="EUR",
+        )]
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, vehicles)
 
-        # All three canonical codes must appear
         for ct in _CANONICAL_TYPES:
-            assert ct.code in prompt, f"Expected {ct.code!r} in prompt"
-            # Criteria from each canonical
+            assert ct.code in prompt
             for criterion in ct.criteria:
-                assert criterion in prompt, f"Expected criterion {criterion!r} in prompt"
-            # Examples from each canonical
+                assert criterion in prompt
             for example in ct.examples:
-                assert example in prompt, f"Expected example {example!r} in prompt"
+                assert example in prompt
 
-        # Vehicle attributes must appear
         assert "Fiat Panda" in prompt
-        assert "5" in prompt          # seats
-        assert "2" in prompt          # luggage
-        assert "manual" in prompt     # transmission
-        assert "gasoline" in prompt   # fuel_type
-        assert "\"A\"" in prompt or "'A'" in prompt or "\nA\n" in prompt or "code: A" in prompt or "A" in prompt
+        assert "5" in prompt
+        assert "2" in prompt
+        assert "manual" in prompt
+        assert "gasoline" in prompt
         assert "Economy Group" in prompt
+        assert "45.50" in prompt
+        assert "EUR" in prompt
+        assert _PROVIDER_CODE in prompt
 
 
 # ---------------------------------------------------------------------------
-# Test 13 (optional) — taxonomy_loader parses the real taxonomy.yaml
+# Test 13 — taxonomy_loader parses the real taxonomy.yaml
 # ---------------------------------------------------------------------------
 
 class TestTaxonomyLoader:
@@ -315,5 +318,41 @@ class TestTaxonomyLoader:
         codes = {s.code for s in specs}
         assert "ECONOMY_MANUAL" in codes
         eco = next(s for s in specs if s.code == "ECONOMY_MANUAL")
-        assert eco.description  # non-empty
+        assert eco.description
         assert len(eco.examples) > 0
+
+
+# ---------------------------------------------------------------------------
+# Test — mixed confidence batch: Pro called, Pro results used for all vehicles
+# ---------------------------------------------------------------------------
+
+class TestMixedConfidenceBatch:
+    def test_classify_provider_batch_handles_mixed_confidence(self):
+        svc = _make_service()
+        vehicles = [
+            _vehicle(external_code="EA", representative_price_7d=57.0),
+            _vehicle(external_code="GA", representative_price_7d=69.0),
+        ]
+        flash_results = [
+            _result("ECONOMY_MANUAL", 0.95),
+            _result("COMPACT_AUTO", 0.70),
+        ]
+        pro_results = [
+            _result("ECONOMY_MANUAL", 0.88),
+            _result("COMPACT_AUTO", 0.91),
+        ]
+
+        with patch.object(svc, "_call_flash_batch", return_value=flash_results) as mock_flash, \
+             patch.object(svc, "_call_pro_batch", return_value=pro_results) as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
+
+        mock_flash.assert_called_once()
+        mock_pro.assert_called_once()
+
+        assert results[0].canonical_type_code == "ECONOMY_MANUAL"
+        assert results[0].confidence == pytest.approx(0.88)
+        assert results[0].pending_review is False
+
+        assert results[1].canonical_type_code == "COMPACT_AUTO"
+        assert results[1].confidence == pytest.approx(0.91)
+        assert results[1].pending_review is False

@@ -100,7 +100,6 @@ def run_discovery_for_tuple(
         provider_location_id=provider_location_id,
         provider_rate_id=provider_rate_id,
         classification_service=classification_service,
-        taxonomy_version=taxonomy_version,
         provider_code=entry["scraper"],
         location_code=entry["location_id"],
         rate_code=entry["rate_name"],

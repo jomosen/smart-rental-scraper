@@ -984,6 +984,58 @@ def test_unmapped_provider_groups_do_not_appear_in_tenant_queries(super_db_sessi
         _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id])
 
 
+def test_get_provider_tariff_aggregates_multiple_pvcs_with_same_canonical_using_min(
+    super_db_session,
+):
+    """Two PVCs with the same canonical_type_id → get_provider_tariff returns min price."""
+    p = _seed_provider(super_db_session, "pq_agg_t01")
+    loc = _seed_location(super_db_session, p.id)
+    rate = _seed_rate(super_db_session, p.id)
+    ct = _seed_canonical_type(super_db_session, "pq_agg_t01_intermediate")
+
+    # Two distinct provider groups, both classified as the same canonical type
+    pvg_ea = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "EA",
+                       canonical_type_id=ct.id)
+    pvg_ga = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "GA",
+                       canonical_type_id=ct.id)
+
+    run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
+    rep = date(2026, 6, 15)
+
+    _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg_ea.id,
+               date(2026, 6, 1), date(2026, 8, 31), rep)
+    _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg_ga.id,
+               date(2026, 6, 1), date(2026, 8, 31), rep)
+
+    # EA is cheaper (€57/day), GA is more expensive (€69/day)
+    _seed_observation(super_db_session, p.id, loc.id, rate.id, pvg_ea.id, run.id,
+                      rep, 7, Decimal("57.00"))
+    _seed_observation(super_db_session, p.id, loc.id, rate.id, pvg_ga.id, run.id,
+                      rep, 7, Decimal("69.00"))
+
+    t = _seed_tenant(super_db_session)
+    cvg = _seed_client_group(super_db_session, t.id)
+    _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+
+    try:
+        service = PriceQueryService(super_db_session)
+        result = service.get_provider_tariff(
+            t.id, "pq_agg_t01", "PQ1", "test_rate",
+            (date(2026, 6, 1), date(2026, 8, 31)),
+            ["compact"],
+            [7],
+        )
+
+        assert len(result.rows) == 1, "One row per (client_group × zone)"
+        row = result.rows[0]
+        assert row.prices_by_duration[7] == Decimal("57.00"), \
+            "Must return min(57, 69) = 57 — aggregation at query time"
+    finally:
+        _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id],
+                 canonical_type_ids=[ct.id])
+
+
 def test_raises_when_session_tenant_mismatches_requested_tenant(super_db_session, db_session):
     """_assert_session_tenant_consistent raises ValueError on mismatch."""
     t1_id: uuid.UUID | None = None

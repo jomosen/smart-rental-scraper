@@ -22,6 +22,7 @@ from ..services.session_runner import run_session
 from .price_point_extractor import PricePointExtractor
 
 # SaaS persistence — accepted cross-boundary dependency for MVP ingestion layer.
+from ....saas.application.classification.dtos import ClassificationResult, VehicleClassificationInput
 from ....saas.application.classification.service import ClassificationService
 from ....saas.infrastructure.persistence.models.catalog import (
     HomogeneousZone as HzOrm,
@@ -55,18 +56,18 @@ class SmartScraperOrchestrator:
     Phase 1 — Probing:
         Runs 7-day searches spaced weekly to detect season boundaries.
 
-    Phase 2 — Analysis + zone persistence:
-        Detects homogeneous zones and writes them to homogeneous_zones via
-        HomogeneousZoneRepository.replace_zones_for_tuple().
+    Phase 2 — Analysis + PVC persistence + zone persistence:
+        Detects homogeneous zones. Classifies all probe cars via
+        classify_provider_batch (full catalog + prices). Persists PVCs.
+        Writes zones to homogeneous_zones.
 
     Phase 3 — Selective extraction + observation persistence:
         Runs extraction durations once per zone representative date and writes
         price observations via PriceObservationRepository.insert_if_changed().
 
-    Scrape lifecycle:
-        A ScrapeRun row is created at the start (status='running') and marked
-        'success' or 'failed' at the end. Failures are logged and the run is
-        marked without re-raising so the caller can continue with other providers.
+    Aggregation policy: multiple provider groups may share the same
+    canonical_type_id. Aggregation (MIN) happens at query time in
+    PriceQueryService, not during persistence.
     """
 
     def __init__(
@@ -81,7 +82,6 @@ class SmartScraperOrchestrator:
         provider_location_id: int,
         provider_rate_id: int,
         classification_service: ClassificationService,
-        taxonomy_version: int,
         provider_code: str = "",
         location_code: str = "",
         rate_code: str = "",
@@ -99,7 +99,6 @@ class SmartScraperOrchestrator:
         self._provider_location_id = provider_location_id
         self._provider_rate_id = provider_rate_id
         self._classification_service = classification_service
-        self._taxonomy_version = taxonomy_version
         self._provider_code = provider_code
         self._location_code = location_code
         self._rate_code = rate_code
@@ -147,13 +146,35 @@ class SmartScraperOrchestrator:
                 "[%s] Detected %d provider-level zone(s)",
                 self._provider_code, len(provider_zones),
             )
+
+            # Collect unique probe cars and compute mean 7-day price per group
             probe_cars: Dict[str, Car] = {}
+            group_daily_prices: Dict[str, List[float]] = {}
+            group_currency: Dict[str, str] = {}
             for result in probe_results:
-                if result and result.cars:
-                    for car in result.cars:
-                        if car.group not in probe_cars:
-                            probe_cars[car.group] = car
-            zones_count = self._persist_zones(provider_zones, probe_cars)
+                if not result or not result.cars:
+                    continue
+                for car in result.cars:
+                    if car.group not in probe_cars:
+                        probe_cars[car.group] = car
+                    for rate in car.rates:
+                        if rate.daily_price:
+                            group_daily_prices.setdefault(car.group, []).append(
+                                float(rate.daily_price)
+                            )
+                            if car.group not in group_currency and rate.currency:
+                                group_currency[car.group] = rate.currency
+
+            representative_prices: Dict[str, float] = {
+                g: sum(ps) / len(ps)
+                for g, ps in group_daily_prices.items()
+            }
+
+            code_to_classification = self._classify_probe_catalog(
+                probe_cars, representative_prices, group_currency
+            )
+            self._persist_pvcs(probe_cars, code_to_classification)
+            zones_count = self._persist_zones(provider_zones)
 
             # ── PHASE 3: Selective extraction ─────────────────────────────
             logger.info("[%s] Phase 3 — Extraction", self._provider_code)
@@ -165,7 +186,9 @@ class SmartScraperOrchestrator:
                               for s in short_searches]
             short_results = await self._run_session(short_requests)
 
-            inserted, skipped = self._persist_observations(short_requests, short_results, run_id)
+            inserted, skipped = self._persist_observations(
+                short_requests, short_results, run_id, code_to_classification
+            )
 
             elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._mark_run_finished(run_id, "success", {
@@ -199,6 +222,44 @@ class SmartScraperOrchestrator:
             raise
 
     # ------------------------------------------------------------------
+    # Classification (probe phase)
+    # ------------------------------------------------------------------
+
+    def _classify_probe_catalog(
+        self,
+        probe_cars: Dict[str, Car],
+        representative_prices: Dict[str, float],
+        group_currency: Dict[str, str],
+    ) -> Dict[str, ClassificationResult]:
+        """Batch-classify all cars seen in the probe phase.
+
+        Returns a dict mapping group_name → ClassificationResult.
+        Empty dict when no probe cars were seen.
+        """
+        if not probe_cars:
+            return {}
+
+        group_names = list(probe_cars.keys())
+        vehicles = [
+            VehicleClassificationInput(
+                external_code=name,
+                external_name=name,
+                example_models=probe_cars[name].example_models or "",
+                seats=probe_cars[name].seats,
+                luggage=probe_cars[name].luggage,
+                transmission=probe_cars[name].transmission,
+                fuel_type=None,
+                representative_price_7d=representative_prices.get(name),
+                representative_currency=group_currency.get(name),
+            )
+            for name in group_names
+        ]
+        results = self._classification_service.classify_provider_batch(
+            self._provider_code, vehicles
+        )
+        return dict(zip(group_names, results))
+
+    # ------------------------------------------------------------------
     # DB operations (sync — called from async context; fast enough for MVP)
     # ------------------------------------------------------------------
 
@@ -213,28 +274,26 @@ class SmartScraperOrchestrator:
             run_id = run.id
         return run_id
 
-    def _persist_zones(
+    def _persist_pvcs(
         self,
-        provider_zones: List[HomogeneousZone],
         probe_cars: Dict[str, Car],
-    ) -> int:
-        """Persist provider-level zones, replicated to every active
-        provider_vehicle_group of the tuple.
+        code_to_classification: Dict[str, ClassificationResult],
+    ) -> None:
+        """Upsert one PVC per car group seen in the probe phase."""
+        if not probe_cars:
+            return
 
-        Returns the total count of zone rows written (provider_zones × groups).
+        _pending_fallback = ClassificationResult(
+            canonical_type_code=None,
+            confidence=0.0,
+            taxonomy_version=0,
+            pending_review=True,
+        )
 
-        Limitation: only replicates zones to groups visible in this probe
-        OR already in catalog from previous runs. Groups that exist for
-        the provider but appear only in phase-3 extraction (rare) won't
-        get zones until the next run. Acceptable: subsequent runs close
-        the gap.
-        """
         with self._session_factory() as s:
             pvc_repo = ProviderVehicleCategoryRepository(s)
-            zone_repo = HomogeneousZoneRepository(s)
-
-            # Ensure all groups seen in probe are in the catalog
             for group_name, car in probe_cars.items():
+                classification = code_to_classification.get(group_name, _pending_fallback)
                 pvc_repo.upsert_seen(
                     provider_id=self._provider_id,
                     provider_location_id=self._provider_location_id,
@@ -246,9 +305,20 @@ class SmartScraperOrchestrator:
                     luggage=car.luggage,
                     transmission=car.transmission,
                     fuel_type=None,
-                    classification_service=self._classification_service,
-                    taxonomy_version=self._taxonomy_version,
+                    classification=classification,
                 )
+
+    def _persist_zones(
+        self,
+        provider_zones: List[HomogeneousZone],
+    ) -> int:
+        """Replicate provider-level zones to every active PVC for this tuple.
+
+        Returns total zone rows written (provider_zones × active PVCs).
+        """
+        with self._session_factory() as s:
+            pvc_repo = ProviderVehicleCategoryRepository(s)
+            zone_repo = HomogeneousZoneRepository(s)
 
             active_groups = pvc_repo.list_active_for_tuple(
                 self._provider_id,
@@ -299,10 +369,18 @@ class SmartScraperOrchestrator:
         requests: List[SearchRequest],
         results: List[BookingResult],
         run_id: int,
+        code_to_classification: Dict[str, ClassificationResult],
     ) -> Tuple[int, int]:
         """Persist price observations for all extraction results."""
         inserted = skipped = 0
         observed_at = datetime.now(timezone.utc)
+
+        _pending_fallback = ClassificationResult(
+            canonical_type_code=None,
+            confidence=0.0,
+            taxonomy_version=0,
+            pending_review=True,
+        )
 
         with self._session_factory() as s:
             pvc_repo = ProviderVehicleCategoryRepository(s)
@@ -316,21 +394,21 @@ class SmartScraperOrchestrator:
                 duration_days = search.rental_days
 
                 for car in result.cars:
+                    classification = code_to_classification.get(car.group, _pending_fallback)
+                    pvc = pvc_repo.upsert_seen(
+                        provider_id=self._provider_id,
+                        provider_location_id=self._provider_location_id,
+                        provider_rate_id=self._provider_rate_id,
+                        external_code=car.group,
+                        external_name=car.group,
+                        example_models=car.example_models,
+                        seats=car.seats,
+                        luggage=car.luggage,
+                        transmission=car.transmission,
+                        fuel_type=None,
+                        classification=classification,
+                    )
                     for rate in car.rates:
-                        pvc = pvc_repo.upsert_seen(
-                            provider_id=self._provider_id,
-                            provider_location_id=self._provider_location_id,
-                            provider_rate_id=self._provider_rate_id,
-                            external_code=car.group,
-                            external_name=car.group,
-                            example_models=car.example_models,
-                            seats=car.seats,
-                            luggage=car.luggage,
-                            transmission=car.transmission,
-                            fuel_type=None,
-                            classification_service=self._classification_service,
-                            taxonomy_version=self._taxonomy_version,
-                        )
                         did_insert = obs_repo.insert_if_changed(
                             provider_id=self._provider_id,
                             provider_location_id=self._provider_location_id,

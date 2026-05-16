@@ -173,6 +173,8 @@ class ProviderVehicleCategory(Base):
     # Documentary metadata (nullable — not all providers expose codes)
     external_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     external_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Identity fallback when external_code is NULL (sha256[:16] over attributes)
+    attributes_hash: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     # Lifecycle
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"

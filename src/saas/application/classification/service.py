@@ -1,37 +1,34 @@
 """Abstract classification service (Port). Implementations live in infrastructure."""
 from abc import ABC, abstractmethod
 
-from .dtos import ClassificationResult, VehicleAttributes
+from .dtos import ClassificationResult, VehicleClassificationInput
 
 
 class ClassificationService(ABC):
-    """Classify a vehicle's observed attributes into a canonical type.
+    """Classify a provider's vehicle catalog into canonical types in one batch call.
 
-    Implementations are responsible for:
-      - Calling the underlying classifier (LLM or otherwise).
-      - Handling fallback strategies.
-      - Returning pending_review=True when confidence is insufficient.
-      - Returning pending_review=True (with a previously cached
-        classification if available) when the underlying call fails.
+    The batch API gives the LLM full price-tier context so it can distinguish
+    groups like "Grupo EA at €57" vs "Grupo GA at €69" that both map to
+    INTERMEDIATE_AUTO.
 
-    The threshold for confidence is implementation-defined but should
-    match the project policy (currently 0.85, see DATA_MODEL.md
-    Decision 1).
+    Flash/Pro fallback strategy: if ANY vehicle in the batch returns confidence
+    below 0.85 (and is not already pending_review from an unknown code), the
+    entire batch is re-sent to Pro.  Unknown-code results do not trigger Pro —
+    they become pending_review immediately.
 
-    The list of canonical types and the current taxonomy_version are
-    injected at construction time, not passed per call. This decouples
-    the service from the DB session and allows test instantiation
-    without a live database.
+    Implementations must NOT raise on classification failure; instead return
+    pending_review=True results.  May raise on misconfiguration (missing API
+    key, empty taxonomy).
     """
 
     @abstractmethod
-    def classify(self, attributes: VehicleAttributes) -> ClassificationResult:
-        """Classify a single vehicle.
+    def classify_provider_batch(
+        self,
+        provider_code: str,
+        vehicles: list[VehicleClassificationInput],
+    ) -> list[ClassificationResult]:
+        """Classify an entire provider's vehicle catalog in a single call.
 
-        Implementations must NOT raise on classification failure;
-        instead return a result with pending_review=True.
-
-        May raise on misconfiguration (missing API key, empty taxonomy)
-        — these are operator errors, not runtime classification issues.
+        Returns one ClassificationResult per input vehicle, in the same order.
         """
         ...

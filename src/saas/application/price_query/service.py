@@ -433,10 +433,13 @@ class PriceQueryService:
                 ProviderVehicleCategory.canonical_type_id.is_not(None),
             )
         ).all()
-        canonical_to_pvc: dict[int, int] = {
-            pvc.canonical_type_id: pvc.id for pvc in pvcs
-        }
-        if not canonical_to_pvc:
+        # Multiple PVCs may share the same canonical_type_id (within-provider
+        # price tiers).  Aggregation to min() happens at query time in the
+        # caller — do NOT collapse to one PVC per canonical here.
+        canonical_to_pvcs: dict[int, list[int]] = {}
+        for pvc in pvcs:
+            canonical_to_pvcs.setdefault(pvc.canonical_type_id, []).append(pvc.id)
+        if not canonical_to_pvcs:
             return {}
 
         # Step 2: tenant mappings restricted to canonical types present in this tuple
@@ -445,7 +448,7 @@ class PriceQueryService:
                 TenantVehicleGroupMapping.tenant_id == tenant_id,
                 TenantVehicleGroupMapping.tenant_vehicle_group_id.in_(cvg_ids),
                 TenantVehicleGroupMapping.canonical_type_id.in_(
-                    list(canonical_to_pvc.keys())
+                    list(canonical_to_pvcs.keys())
                 ),
             )
         ).all()
@@ -453,8 +456,7 @@ class PriceQueryService:
         # Step 3: assemble {tvg_id: [pvc_id, ...]}
         result: dict[uuid.UUID, list[int]] = {}
         for m in mappings:
-            pvc_id = canonical_to_pvc.get(m.canonical_type_id)
-            if pvc_id is not None:
+            for pvc_id in canonical_to_pvcs.get(m.canonical_type_id, []):
                 result.setdefault(m.tenant_vehicle_group_id, []).append(pvc_id)
         return result
 

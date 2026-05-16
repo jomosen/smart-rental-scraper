@@ -9,8 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models.catalog import CanonicalVehicleType, ProviderVehicleCategory
-from ....application.classification.dtos import VehicleAttributes
-from ....application.classification.service import ClassificationService
+from ....application.classification.dtos import ClassificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -63,35 +62,33 @@ class ProviderVehicleCategoryRepository:
         luggage: Optional[int],
         transmission: Optional[str],
         fuel_type: Optional[str],
-        classification_service: ClassificationService,
-        taxonomy_version: int,
+        classification: ClassificationResult,
     ) -> ProviderVehicleCategory:
-        """Find or create a PVC, classify if needed, and update observed attributes.
+        """Find or create a PVC, apply the given classification, and update attributes.
 
-        Cache policy: if the row already has classification_taxonomy_version equal
-        to taxonomy_version, the LLM is not called — attributes are updated in
-        place and the existing classification is preserved.
+        Identity:
+          - external_code is not None → unique by (provider, location, rate, external_code)
+          - external_code is None     → unique by (provider, location, rate, attributes_hash)
 
-        Always returns a ProviderVehicleCategory (never None).
+        Classification is always applied — the caller is responsible for
+        deciding when to call the LLM (during the probe phase via
+        SmartScraperOrchestrator._classify_probe_catalog).
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc)
 
-        # Step 1: locate existing row
         if external_code is not None:
             pvc = self.get_by_external_code(
                 provider_id, provider_location_id, provider_rate_id, external_code
             )
+            row_hash: Optional[str] = None
         else:
-            pvc = self._find_by_attributes(
-                provider_id, provider_location_id, provider_rate_id,
-                example_models, seats, luggage, transmission, fuel_type,
+            row_hash = self._compute_hash(example_models, seats, luggage, transmission, fuel_type)
+            pvc = self._get_by_attributes_hash(
+                provider_id, provider_location_id, provider_rate_id, row_hash
             )
 
-        # Step 2: determine whether classification is needed
         is_new = pvc is None
-        need_classification = is_new or (pvc.classification_taxonomy_version != taxonomy_version)
 
-        # Step 3: create or update the row
         if is_new:
             pvc = ProviderVehicleCategory(
                 provider_id=provider_id,
@@ -104,6 +101,7 @@ class ProviderVehicleCategoryRepository:
                 luggage=luggage,
                 transmission=transmission,
                 fuel_type=fuel_type,
+                attributes_hash=row_hash,
                 active=True,
                 first_seen_at=now,
                 last_seen_at=now,
@@ -119,66 +117,21 @@ class ProviderVehicleCategoryRepository:
             if external_name is not None:
                 pvc.external_name = external_name
 
-        # Step 4: classify if version has changed or row is new
-        if need_classification:
-            attrs = VehicleAttributes(
-                example_models=example_models,
-                seats=seats,
-                luggage=luggage,
-                transmission=transmission,
-                fuel_type=fuel_type,
-                external_code=external_code,
-                external_name=external_name,
-            )
-            result = classification_service.classify(attrs)
-            self._apply_classification(pvc, result, is_new)
-
-        # Flush so the DB-assigned id is available and subsequent queries in
-        # the same session can see this row.
+        self._apply_classification(pvc, classification, is_new)
         self._s.flush()
         return pvc
 
     # ── Private ──────────────────────────────────────────────────────────────
 
-    def _find_by_attributes(
-        self,
-        provider_id: int,
-        provider_location_id: int,
-        provider_rate_id: int,
-        example_models: str,
-        seats: Optional[int],
-        luggage: Optional[int],
-        transmission: Optional[str],
-        fuel_type: Optional[str],
-    ) -> Optional[ProviderVehicleCategory]:
-        """Locate a PVC by vehicle attributes when the provider exposes no external_code."""
-        return self._s.scalar(
-            select(ProviderVehicleCategory).where(
-                ProviderVehicleCategory.provider_id == provider_id,
-                ProviderVehicleCategory.provider_location_id == provider_location_id,
-                ProviderVehicleCategory.provider_rate_id == provider_rate_id,
-                ProviderVehicleCategory.external_code.is_(None),
-                ProviderVehicleCategory.example_models == example_models,
-                ProviderVehicleCategory.seats == seats,
-                ProviderVehicleCategory.luggage == luggage,
-                ProviderVehicleCategory.transmission == transmission,
-                ProviderVehicleCategory.fuel_type == fuel_type,
-            )
-        )
-
     @staticmethod
-    def _attributes_hash(
+    def _compute_hash(
         example_models: str,
         seats: Optional[int],
         luggage: Optional[int],
         transmission: Optional[str],
         fuel_type: Optional[str],
     ) -> str:
-        """Deterministic 16-char hex hash of vehicle attributes.
-
-        Not stored in the DB — used for logging and debugging when
-        external_code is None.
-        """
+        """SHA256 truncated to 16 hex chars over stable vehicle attributes."""
         key = "|".join([
             example_models or "",
             str(seats) if seats is not None else "",
@@ -188,10 +141,27 @@ class ProviderVehicleCategoryRepository:
         ])
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
+    def _get_by_attributes_hash(
+        self,
+        provider_id: int,
+        provider_location_id: int,
+        provider_rate_id: int,
+        attributes_hash: str,
+    ) -> Optional[ProviderVehicleCategory]:
+        return self._s.scalar(
+            select(ProviderVehicleCategory).where(
+                ProviderVehicleCategory.provider_id == provider_id,
+                ProviderVehicleCategory.provider_location_id == provider_location_id,
+                ProviderVehicleCategory.provider_rate_id == provider_rate_id,
+                ProviderVehicleCategory.external_code.is_(None),
+                ProviderVehicleCategory.attributes_hash == attributes_hash,
+            )
+        )
+
     def _apply_classification(
         self,
         pvc: ProviderVehicleCategory,
-        result,
+        result: ClassificationResult,
         is_new: bool,
     ) -> None:
         """Write classification result onto the PVC row.
@@ -204,10 +174,8 @@ class ProviderVehicleCategoryRepository:
             canonical_type_id and pending_review=True.
         """
         if result.pending_review and not is_new and pvc.canonical_type_id is not None:
-            # Cached fallback: preserve previous canonical classification
             pvc.classification_confidence = result.confidence
             pvc.pending_review = True
-            # canonical_type_id and classification_taxonomy_version stay
             return
 
         if result.canonical_type_code is None:
@@ -217,7 +185,6 @@ class ProviderVehicleCategoryRepository:
             pvc.pending_review = True
             return
 
-        # Successful classification: look up the canonical row
         canonical = self._s.scalar(
             select(CanonicalVehicleType).where(
                 CanonicalVehicleType.code == result.canonical_type_code

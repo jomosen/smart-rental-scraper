@@ -82,11 +82,10 @@ def _make_orchestrator(
     session_factory,
     rate_name: str = "Test Rate",
     classification_service=None,
-    taxonomy_version: int = 1,
 ) -> SmartScraperOrchestrator:
     if classification_service is None:
         # Default stub: returns pending_review=True for any vehicle (no LLM calls)
-        classification_service = StubClassificationService({}, taxonomy_version=taxonomy_version)
+        classification_service = StubClassificationService({})
     return SmartScraperOrchestrator(
         factory=None,  # not used — _run_session is mocked
         probe=SeasonProbe(),
@@ -98,7 +97,6 @@ def _make_orchestrator(
         provider_location_id=location_id,
         provider_rate_id=rate_id,
         classification_service=classification_service,
-        taxonomy_version=taxonomy_version,
         provider_code="orch_test_sc",
         location_code="ORC",
         rate_code="Test Rate",

@@ -133,7 +133,6 @@ def build_container(
             provider_location_id=location_id,
             provider_rate_id=rate_id,
             classification_service=classification_service,
-            taxonomy_version=taxonomy_version,
             provider_code=entry["scraper"],
             location_code=entry["location_id"],
             rate_code=rate_name,
