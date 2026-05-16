@@ -26,6 +26,14 @@ def _parse_price(text: str) -> Decimal:
         return Decimal(0)
 
 
+def _parse_int(text: str) -> Optional[int]:
+    """Parses a plain integer string; returns None on failure or empty input."""
+    try:
+        return int(text.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
 class ProviderBScraper(BaseScraper):
     """Concrete scraper for Provider B."""
 
@@ -108,18 +116,31 @@ class ProviderBScraper(BaseScraper):
             package_el = item.select_one(".package-header h5")
             daily_el = item.select_one("div.package-price div strong.victoriacarscolor-text")
             total_el = item.select_one("strong.discount-prize") or item.select_one("strong.precio_tot")
+            seats_el = item.select_one(".icono_container.persona .valor")
+            luggage_el = item.select_one(".icono_container.maleta .valor")
 
             model = model_el.get_text(strip=True) if model_el else "Desconocido"
             group = group_el.get_text(strip=True) if group_el else ""
             package_name = package_el.get_text(strip=True) if package_el else ""
             daily_price = _parse_price(daily_el.get_text()) if daily_el else Decimal(0)
             total = _parse_price(total_el.get_text()) if total_el else Decimal(0)
+            seats = _parse_int(seats_el.get_text(strip=True)) if seats_el else None
+            luggage = _parse_int(luggage_el.get_text(strip=True)) if luggage_el else None
+            if item.select_one(".icono_container.manual"):
+                transmission = "manual"
+            elif item.select_one(".icono_container.automatico"):
+                transmission = "automatic"
+            else:
+                transmission = None
 
             cars.append(Car(
                 model=model,
                 group=group,
                 description="",
-                example_models="",
+                example_models=model,
+                seats=seats,
+                luggage=luggage,
+                transmission=transmission,
                 rates=[Rate(
                     name=package_name,
                     currency="EUR",

@@ -34,26 +34,37 @@ el tenant monitoriza a través de sus suscripciones:
 3. **Tarifario mínimo.** Igual que el medio, agregando con `min` en
    lugar de `mean`.
 
-El input común de las tres es `(date_range, client_vehicle_groups,
+El input común de las tres es `(date_range, vehicle_categories,
 durations)`. La consulta por proveedor añade `provider`. La consulta
 opera siempre en el contexto de un tenant — las suscripciones del
 tenant determinan qué datos son visibles.
 
+Por defecto, `vehicle_categories` se refiere a las **categorías
+canónicas** del producto (ver "Taxonomía canónica" más abajo). Si el
+tenant ha declarado `tenant_vehicle_groups` propios, los inputs
+pueden expresarse en esos términos y el sistema los traduce.
+
 ### Forma del output
 
 Las tres consultas devuelven Format A: una tabla con una fila por
-(grupo × tramo de fechas) y una columna por duración del bracket
+(categoría × tramo de fechas) y una columna por duración del bracket
 `{1, 2, 3, 4, 5, 6, 7, 14, 21, 28}` días.
 
-Ejemplo (tarifario por proveedor):
+Ejemplo (tarifario por proveedor, sin tenant_vehicle_groups
+declarados):
 
 ```
-Group | Period            | 1d | 2d | ... | 7d | 14d | 21d | 28d
-B     | 01–14 Jul         | 45 | 42 | ... | 38 |  35 |  33 |  32
-B     | 15 Jul – 31 Aug   | 65 | 60 | ... | 52 |  48 |  46 |  44
-C     | 01–14 Jul         | 55 | 51 | ... | 47 |  43 |  40 |  39
-C     | 15 Jul – 31 Aug   | 78 | 72 | ... | 62 |  58 |  55 |  53
+Category               | Period            | 1d | 2d | ... | 7d | 14d | 21d | 28d
+ECONOMY_PASSENGER      | 01–14 Jul         | 45 | 42 | ... | 38 |  35 |  33 |  32
+ECONOMY_PASSENGER      | 15 Jul – 31 Aug   | 65 | 60 | ... | 52 |  48 |  46 |  44
+COMPACT_PASSENGER      | 01–14 Jul         | 55 | 51 | ... | 47 |  43 |  40 |  39
+COMPACT_PASSENGER      | 15 Jul – 31 Aug   | 78 | 72 | ... | 62 |  58 |  55 |  53
 ```
+
+Cuando el tenant tiene `tenant_vehicle_groups` declarados, las filas
+se etiquetan con los nombres del tenant (ej. "Compactos", "Familiar")
+en lugar de los códigos canónicos. La estructura y los datos son los
+mismos.
 
 Las filas no se etiquetan con identidad de proveedor ni con nombres
 internos de zona. Solo aparecen como rangos de fechas.
@@ -71,21 +82,79 @@ La rejilla de filas se construye así:
 Definición canónica de Format A: ver `DATA_MODEL.md` Decisión 10.
 Anatomía de la query SQL que lo materializa: `DATA_MODEL.md` Parte 3.
 
+### Taxonomía canónica como espina dorsal
+
+El producto v0 se organiza alrededor de una taxonomía canónica de
+vehículos (`canonical_vehicle_types`), curada por el operador y
+mantenida en `taxonomy.yaml` versionado en git. Categorías típicas:
+`ECONOMY_PASSENGER`, `COMPACT_PASSENGER`, `MID_SUV`, `LUXURY_AUTO`,
+`COMMERCIAL`, `MOTORCYCLE`, etc. La taxonomía es deliberadamente
+coarse (10-15 categorías) y estable.
+
+**Tres consecuencias importantes:**
+
+1. **Onboarding mínimo.** Un tenant nuevo puede consumir el producto
+   inmediatamente sin configurar nada. La taxonomía canónica le ofrece
+   un lenguaje listo para usar.
+
+2. **Capa propia opcional.** El tenant que prefiera su propio lenguaje
+   declara `tenant_vehicle_groups` y los mapea sobre categorías
+   canónicas vía `tenant_vehicle_group_mappings`. La capa propia es
+   opt-in; el producto funciona sin ella.
+
+3. **Comparabilidad entre tenants.** Como todos los tenants ven el
+   mercado en términos de la misma taxonomía base, los outputs son
+   estructuralmente comparables. Esto habilita futuras capacidades
+   de benchmark sin re-modelado.
+
+### Clasificación automática provider → categoría canónica
+
+Cada vehículo extraído durante el scrape se clasifica en una categoría
+canónica antes de persistirse en `provider_vehicle_categories`. La
+clasificación la realiza un LLM a través de una interfaz abstracta
+(`ClassificationService`):
+
+- **Modelo primario.** Gemini Flash (tier gratuito en v0).
+- **Fallback condicional.** Gemini Pro cuando Flash devuelve
+  confianza inferior a 0.85.
+- **Cuando ambos quedan por debajo del umbral**, el vehículo se
+  persiste con `canonical_type_id = NULL` y `pending_review = true`.
+  Queda fuera del producto hasta que el operador clasifique
+  manualmente o amplíe la taxonomía.
+- **El LLM nunca crea categorías nuevas autónomamente.** Si ninguna
+  categoría existente encaja, queda pending_review.
+
+Detalles de implementación (caché embebida en
+`provider_vehicle_categories`, comportamiento ante fallo del LLM,
+versionado de la taxonomía con re-clasificación selectiva) viven en
+`DATA_MODEL.md` Decisiones 1 y 2.
+
 ### Política N:M de agregación
 
-Cuando un `client_vehicle_group` mapea a varios `provider_vehicle_groups`
-del mismo proveedor (ej. "Compact" del cliente mapea a "COMPACT" y
-"COMPACT_AUTO" del proveedor), el precio del proveedor para ese
-client_group en una celda dada es el **mínimo** entre los precios de
-los provider_groups mapeados.
+Cuando dos `provider_vehicle_categories` rows (de proveedores
+distintos, o agregando varios grupos del mismo proveedor que el LLM
+clasificó en la misma categoría canónica) contribuyen al precio de
+una celda dada, la política por defecto es **mínimo**.
 
 Justificación: la utilidad del producto es competir con el mercado.
-El precio relevante del proveedor es el más bajo que él ofrece para
-ese tipo de coche, no el promedio entre variantes.
+El precio relevante de un proveedor para un tipo de coche es el más
+bajo que él ofrece, no el promedio entre variantes. Aplicado al
+nivel agregado: el precio del mercado mostrado al cliente es el más
+bajo accesible para ese tipo de coche.
+
+Esto aplica en dos niveles:
+- **Dentro de un mismo proveedor.** Si dos grupos del proveedor se
+  clasificaron en la misma categoría canónica, sus precios se
+  agregan con `min` antes de cruzarse con otros proveedores.
+- **Entre proveedores suscritos al mismo tenant.** En el tarifario
+  mínimo, se hace `min` entre proveedores. En el tarifario medio, se
+  hace `mean` (lo de `min` dentro de cada proveedor sigue aplicando
+  antes del cruce).
 
 Configurabilidad futura: cuando un tenant requiera otra política
-(media, máximo, primero declarado), se añade un campo
-`aggregation_policy` a `vehicle_group_mappings`. No es necesario en v0.
+para sus `tenant_vehicle_group_mappings` (media, máximo, primero
+declarado), se añade un campo `aggregation_policy` al mapeo. No es
+necesario en v0.
 
 ### Cobertura
 
@@ -96,9 +165,11 @@ Casos típicos donde coverage es menor que el total de suscripciones:
 
 - Un proveedor no cubre el rango temporal de la celda (su `period_days`
   se queda corto).
-- Un proveedor no tiene observación para ese (grupo × duración) en
+- Un proveedor no tiene observación para ese (categoría × duración) en
   esa zona — fallo de scrape, o el proveedor no ofrece esa duración.
 - Un proveedor tiene la suscripción en estado distinto de `active`.
+- Un proveedor no ofrece nada en esa categoría canónica (no tiene
+  ningún grupo clasificado allí).
 
 Sin este campo, el cliente consume agregados de muestras desiguales
 sin saberlo. Es un error de producto, no una opcionalidad de UI.
@@ -146,13 +217,18 @@ de alcance (al final del documento).
   producto nunca aplicará precios automáticamente. Es decisión de
   producto, no técnica.
 
+- **Edición de la taxonomía canónica por el tenant.** La taxonomía
+  es del operador. Los tenants que necesiten lenguaje propio usan
+  `tenant_vehicle_groups`.
+
 ### Implicación de modelo
 
-El alcance v0 no requiere ningún cambio al modelo de datos respecto
-al cierre del Hito 4. El catálogo (providers, locations, rates,
-vehicle_groups), las observaciones globales, las zonas detectadas,
-las suscripciones y los mapeos N:M ya soportan las tres consultas.
-Toda la lógica vive en `PriceQueryService` (Hito 5D).
+El alcance v0 introduce cambios estructurales en el modelo de datos
+respecto al cierre del Hito 4: la taxonomía canónica como capa
+intermedia, la clasificación automática con LLM, y el renombrado de
+las tablas para reflejar la nueva semántica. El detalle está en
+`DATA_MODEL.md` Decisión 1. La lógica de consulta vive en
+`PriceQueryService` (Hito 5D, adaptado al nuevo modelo).
 
 ---
 
@@ -266,15 +342,17 @@ automático requiere horizonte mayor para que el cliente pueda
   no setean precios serios para fechas a 11 meses). Un horizonte
   de 6-9 meses captura la temporada operativa relevante y filtra
   ruido lejano.
-- Ampliar a este rango con la pipeline actual costaría ~28 minutos
+- Ampliar a este rango con la pipeline actual costaría más tiempo
   por proveedor en daily scrape (ver `SCRAPING_OPTIMIZATIONS.md`),
-  manejable para 1-2 clientes pero doloroso a partir de 10.
+  manejable para 1-2 clientes pero doloroso a partir de un
+  catálogo más amplio.
 - Por tanto, el primer cliente real con pricing automático
   dispara la activación de las optimizaciones diferidas: adaptive
   probe + frequency-decreasing layered strategy.
 
 **Trigger.** Primer cliente que onboardea con `period_days >= 180`
-y daily cadence sostenida.
+y daily cadence sostenida, o el scrape de todos los providers
+supera los 45 minutos en periodo de 180 días.
 
 ### Integración con sistema externo del cliente
 
@@ -321,7 +399,30 @@ especulativa.
 con justificación clara.
 
 **Implicación cuando llegue.** Columna `aggregation_policy` en
-`vehicle_group_mappings` con default `'min'`. Migración trivial.
+`tenant_vehicle_group_mappings` con default `'min'`. Migración trivial.
+
+### Pool de scrapers / paralelismo de sesiones
+
+**Por qué se difiere.** Con 2 proveedores activos el tiempo total
+es manejable (~25 min). El diseño actual permite paralelismo (cada
+`SmartScraperOrchestrator` es independiente), pero no se orquesta
+todavía.
+
+**Trigger.** Cuando el tiempo de scraping completo supere el
+presupuesto de ventana nocturna (estimado: >4 h con 3+ proveedores
+de rendimiento mixto, ver MILESTONES sobre la disparidad ~5s vs
+~30s/búsqueda).
+
+### Integración directa con sistemas de reservas (GDS / channel managers)
+
+**Por qué se difiere.** El scraper web es el único mecanismo de
+adquisición de precios en v0. No hay integración con APIs de
+proveedores, GDS (Amadeus, Sabre), ni channel managers.
+
+**Trigger.** Cuando un proveedor ofrezca API propia con datos
+equivalentes y el coste de scraping web de ese proveedor justifique
+la migración. O cuando un cliente del tipo channel-manager pida
+publicar sus tarifas vía nuestro sistema.
 
 ---
 
@@ -355,33 +456,3 @@ datos de los primeros tenants. No se anticipan aquí.
 > A llenar cuando v0 esté en producción y haya señal de los primeros
 > tenants. No anticipar contenido aquí; las decisiones de v1 dependen
 > de lo aprendido en v0.
-
----
-
-## Decisiones diferidas
-
-Las siguientes decisiones de diseño han sido identificadas y descartadas deliberadamente para v0. Se documentan aquí para que no se reabran por accidente y para que el contexto de la decisión no se pierda.
-
-**DD-1 — Modelo de precios unificado entre proveedores.**
-No existe todavía una capa de normalización que reconcilie los grupos de vehículos ("Economy", "Compact", etc.) entre proveedores. El SaaS v0 expone precios por proveedor y grupo nativo; la comparación cross-proveedor es responsabilidad del consumidor de la API.
-*Trigger para reapertura:* Cuando un tenant pida explícitamente tablas comparativas cross-proveedor en la UI.
-
-**DD-2 — Clasificación asistida por IA de grupos de vehículos.**
-Se consideró usar un LLM para mapear grupos nativos a categorías estándar (ACRISS o similar). Se descarta por coste operativo y complejidad de evaluación en v0. La tabla `vehicle_group_mappings` está prevista en el modelo de datos pero no implementada.
-*Trigger para reapertura:* Cuando DD-1 se reactive y se disponga de un dataset de grupos suficiente para evaluar la calidad del mapeo.
-
-**DD-3 — Pool de scrapers / paralelismo de sesiones.**
-Actualmente el pipeline ejecuta un scraper a la vez por proveedor. Con múltiples proveedores o localizaciones, el tiempo total crece linealmente. El diseño actual permite paralelismo (cada `SmartScraperOrchestrator` es independiente), pero no se orquesta todavía.
-*Trigger para reapertura:* Cuando el tiempo de scraping completo supere el presupuesto de ventana nocturna (estimado: >4 h con 3 proveedores × 5 localizaciones).
-
-**DD-4 — Probe adaptativo (frecuencia variable según volatilidad).**
-El probe actual usa intervalos semanales fijos. Un sistema adaptativo reduciría búsquedas en zonas estables y aumentaría en zonas volátiles. Descartado en v0 por complejidad de implementación y ausencia de datos históricos suficientes para calibrar la volatilidad.
-*Trigger para reapertura:* Cuando haya ≥3 meses de histórico de observaciones y se detecte que el probe consume >30 % del tiempo de scraping en zonas que no cambian.
-
-**DD-5 — Integración directa con sistemas de reservas (GDS / channel managers).**
-Se descarta cualquier integración con sistemas externos de reservas (Amadeus, channel managers, APIs de proveedores) para v0. El scraper web es el único mecanismo de adquisición de precios.
-*Trigger para reapertura:* Cuando un proveedor ofrezca API propia con datos equivalentes y el coste de scraping web de ese proveedor justifique la migración.
-
-**DD-6 — Notificaciones proactivas de cambio de precio.**
-El SaaS v0 es pull-only: los tenants consultan precios bajo demanda. No se implementan alertas, webhooks ni notificaciones push cuando un precio cambia.
-*Trigger para reapertura:* Cuando un tenant pida explícitamente alertas y se disponga de una capa de mensajería (email, Slack, webhook) validada en producción.

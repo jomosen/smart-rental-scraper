@@ -24,20 +24,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...infrastructure.persistence.models.catalog import (
+    CanonicalVehicleType,
     Provider,
     ProviderLocation,
     ProviderRate,
-    ProviderVehicleGroup,
+    ProviderVehicleCategory,
     ScrapeRun,
 )
 from ...infrastructure.persistence.models.tenant import (
-    ClientVehicleGroup,
     Tenant,
     TenantSubscription,
+    TenantVehicleGroup,
+    TenantVehicleGroupMapping,
     User,
-    VehicleGroupMapping,
 )
-from ...infrastructure.persistence.repositories import ProviderVehicleGroupRepository
+from ...infrastructure.persistence.repositories import ProviderVehicleCategoryRepository
 from .. import discovery
 from .config import OnboardingConfig
 
@@ -201,9 +202,9 @@ def step_create_users_and_groups(
     tenant_id: uuid.UUID,
     session: Session,
 ) -> dict[str, uuid.UUID]:
-    """Create the owner User and all ClientVehicleGroup rows.
+    """Create the owner User and all TenantVehicleGroup rows.
 
-    Returns {vehicle_group_code: client_vehicle_group_id}.
+    Returns {vehicle_group_code: tenant_vehicle_group_id}.
     Warns to stderr that external_auth_id is NULL until an identity provider is configured.
     """
     print(
@@ -221,16 +222,16 @@ def step_create_users_and_groups(
 
     client_group_ids: dict[str, uuid.UUID] = {}
     for grp in config.vehicle_groups:
-        cvg = ClientVehicleGroup(
+        tvg = TenantVehicleGroup(
             tenant_id=tenant_id,
             code=grp.code,
             name=grp.name,
             description=grp.description,
             display_order=grp.display_order,
         )
-        session.add(cvg)
+        session.add(tvg)
         session.flush()
-        client_group_ids[grp.code] = cvg.id
+        client_group_ids[grp.code] = tvg.id
 
     return client_group_ids
 
@@ -246,7 +247,7 @@ def step_create_mappings(
     client_group_ids: dict[str, uuid.UUID],
     session: Session,
 ) -> int:
-    """Create VehicleGroupMapping rows for every (client_group, provider_group) pair.
+    """Create TenantVehicleGroupMapping rows for every (tenant_group, canonical_type) pair.
 
     Iterates over subscriptions. Each subscription's mappings reference a
     client_group_code (vehicle group on the tenant side) and a list of provider
@@ -255,27 +256,37 @@ def step_create_mappings(
     Returns the total number of mapping rows created.
     Raises OnboardingError if a referenced provider_vehicle_group does not exist.
     """
-    repo = ProviderVehicleGroupRepository(session)
+    repo = ProviderVehicleCategoryRepository(session)
     count = 0
 
     for sub in config.subscriptions:
         key = (sub.provider_code, sub.location_code, sub.rate_code)
         pid, lid, rid = catalog_ids[key]
         for mapping in sub.mappings:
-            cvg_id = client_group_ids[mapping.client_group_code]
+            tvg_id = client_group_ids[mapping.client_group_code]
             for ext_code in mapping.external_codes:
-                pvg = repo.get_by_external_code(pid, lid, rid, ext_code)
-                if pvg is None:
+                pvc = repo.get_by_external_code(pid, lid, rid, ext_code)
+                if pvc is None:
                     raise OnboardingError(
-                        f"provider_vehicle_group not found: "
+                        f"provider_vehicle_category not found: "
                         f"({sub.provider_code}, {sub.location_code}, {sub.rate_code}) "
                         f"external_code='{ext_code}'. "
                         "Has discovery (step 3) completed for this provider?"
                     )
-                vm = VehicleGroupMapping(
+                if pvc.canonical_type_id is None:
+                    raise OnboardingError(
+                        f"provider_vehicle_category '{ext_code}' for "
+                        f"({sub.provider_code}, {sub.location_code}, {sub.rate_code}) "
+                        "exists but is not yet classified into a canonical vehicle type. "
+                        "Onboarding requires that all referenced provider vehicle "
+                        "categories have been classified. Run a scrape with the "
+                        "ClassificationService enabled before onboarding tenants, "
+                        "or manually classify the PVC in the database."
+                    )
+                vm = TenantVehicleGroupMapping(
                     tenant_id=tenant_id,
-                    client_vehicle_group_id=cvg_id,
-                    provider_vehicle_group_id=pvg.id,
+                    tenant_vehicle_group_id=tvg_id,
+                    canonical_type_id=pvc.canonical_type_id,
                 )
                 session.add(vm)
                 count += 1
@@ -327,21 +338,22 @@ def step_activate_subscriptions(
 ) -> dict[tuple[str, str, str], str]:
     """Attempt to transition each subscription from pending_mapping → active.
 
-    A subscription becomes active when at least one active provider_vehicle_group
-    for the tuple has a VehicleGroupMapping in this tenant. Provider groups without
-    a mapping are out of the tenant's scope and are excluded from query outputs.
+    A subscription becomes active when at least one canonical vehicle type
+    for the tuple (via an active ProviderVehicleCategory with a canonical_type_id)
+    has a TenantVehicleGroupMapping in this tenant.  PVCs without a
+    canonical_type_id are excluded — classification has not yet been run for them.
 
-    Subscriptions with zero mappings stay in 'pending_mapping' — a [warning] is
-    printed. Subscriptions with partial mappings are activated — an [info] is
-    printed listing the out-of-scope groups so the operator is aware.
+    Subscriptions with zero mapped canonical types stay in 'pending_mapping'.
+    Subscriptions with partial mappings are activated; an [info] is printed
+    listing the unmapped canonical type codes so the operator is aware.
 
     Returns {(provider_code, location_code, rate_code): 'active' | 'pending_mapping'}.
     """
-    # One query: all PVG IDs already mapped for this tenant
-    mapped_pvg_ids: set[int] = set(
+    # One query: all canonical_type_ids already mapped for this tenant
+    mapped_canonical_ids: set[int] = set(
         session.scalars(
-            select(VehicleGroupMapping.provider_vehicle_group_id).where(
-                VehicleGroupMapping.tenant_id == tenant_id
+            select(TenantVehicleGroupMapping.canonical_type_id).where(
+                TenantVehicleGroupMapping.tenant_id == tenant_id,
             )
         ).all()
     )
@@ -352,24 +364,22 @@ def step_activate_subscriptions(
         pcode, lcode, rcode = key
         pid, lid, rid = catalog_ids[key]
 
-        active_pvg_ids: set[int] = set(
+        active_canonical_ids: set[int] = set(
             session.scalars(
-                select(ProviderVehicleGroup.id).where(
-                    ProviderVehicleGroup.provider_id == pid,
-                    ProviderVehicleGroup.provider_location_id == lid,
-                    ProviderVehicleGroup.provider_rate_id == rid,
-                    ProviderVehicleGroup.active == True,
+                select(ProviderVehicleCategory.canonical_type_id).where(
+                    ProviderVehicleCategory.provider_id == pid,
+                    ProviderVehicleCategory.provider_location_id == lid,
+                    ProviderVehicleCategory.provider_rate_id == rid,
+                    ProviderVehicleCategory.active == True,
+                    ProviderVehicleCategory.canonical_type_id.is_not(None),
                 )
             ).all()
         )
 
-        unmapped = active_pvg_ids - mapped_pvg_ids
+        unmapped = active_canonical_ids - mapped_canonical_ids
+        sub_mapped_canonical_ids = mapped_canonical_ids & active_canonical_ids
 
-        # Determine which mapped PVGs apply to THIS subscription's tuple
-        sub_mapped_pvg_ids = mapped_pvg_ids & active_pvg_ids
-
-        if not sub_mapped_pvg_ids:
-            # No mappings at all for this subscription's tuple → cannot activate
+        if not sub_mapped_canonical_ids:
             print(
                 f"[warning] Subscription ({pcode}, {lcode}, {rcode}) has no "
                 "mappings for this tuple — leaving in 'pending_mapping'. "
@@ -378,18 +388,17 @@ def step_activate_subscriptions(
             )
             statuses[key] = "pending_mapping"
         else:
-            # Activate with whatever mappings exist; inform about unmapped groups
             if unmapped:
                 unmapped_codes = session.scalars(
-                    select(ProviderVehicleGroup.external_code).where(
-                        ProviderVehicleGroup.id.in_(unmapped)
+                    select(CanonicalVehicleType.code).where(
+                        CanonicalVehicleType.id.in_(unmapped)
                     )
                 ).all()
                 print(
                     f"[info] Subscription ({pcode}, {lcode}, {rcode}) has "
-                    f"{len(unmapped)} unmapped active vehicle group(s): "
+                    f"{len(unmapped)} unmapped active canonical type(s): "
                     f"{', '.join(sorted(unmapped_codes))}. "
-                    "These groups are not in this tenant's scope and won't "
+                    "These types are not in this tenant's scope and won't "
                     "appear in its queries. If that's intentional, ignore this notice.",
                     file=sys.stderr,
                 )

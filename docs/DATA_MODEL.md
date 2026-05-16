@@ -25,36 +25,53 @@ Deliberately deferred items appear at the end with their re-evaluation triggers.
 
 ## Part 1 — Decisions
 
-### 1. Vehicle group mapping
+### 1. Vehicle taxonomy (three-layer model)
 
-Three entities, N:M relation, manual mapping per tenant.
+The product organizes vehicles in three layers, each with a distinct role:
 
-- `client_vehicle_groups` — taxonomy defined by the tenant for their own business.
-- `provider_vehicle_groups` — groups discovered by scraping each `(provider, location, rate)` tuple. Catalog-side. The same provider monitored by two tenants in the same configuration shares the same provider group rows. Each row also carries display attributes populated by the scraper: `example_models` (required, e.g. `"Fiat Panda, Kia Picanto"`), `seats` (nullable int), `luggage` (nullable int), `transmission` (nullable varchar, `'manual'` or `'automatic'`). These attributes are written by `upsert_seen` on every probe and extraction pass; they are updated in-place when the provider changes them. `example_models` is NOT NULL — a provider that does not display example models is not worth scraping and should not be onboarded.
-- `vehicle_group_mappings` — N:M relation between the two, scoped to the tenant.
+- `canonical_vehicle_types` — **the operator's taxonomy**. A curated, stable list of vehicle categories (e.g. `ECONOMY_PASSENGER`, `COMPACT_SUV`, `LUXURY_AUTO`). This is the **product's lingua franca**: the language in which the market is presented to all tenants by default. Maintained by the operator via a versioned YAML file (`taxonomy.yaml`) and applied to the database by an idempotent seed script.
 
-**Why N:M, not N:1.** Two provider groups ("Compact" and "Compact Auto") may map to the same client group. Forcing uniqueness on either side breaks valid scenarios.
+- `provider_vehicle_categories` — **what each provider offers within each canonical category**. One row per `(provider, canonical_type)` tuple. The row aggregates all observed groups from the provider that classify into that canonical category. Provider-side identifiers (`external_code`, `external_name`) are kept as documentary metadata when the provider exposes them, but they are **not part of the identity** of the row.
 
-**Discovery is automatic; mapping is manual.** When a tenant subscribes to a `(provider, location, rate)` tuple for the first time, the system runs a discovery scrape and populates `provider_vehicle_groups`. The tenant then maps each one (or chooses to ignore it) before activating the subscription.
+- `tenant_vehicle_groups` — **optional, per-tenant taxonomy**. A tenant may declare its own naming for vehicle groups (e.g. "Compactos", "Familiares") and map them onto canonical types via `tenant_vehicle_group_mappings`. This layer is **opt-in**: a tenant that uses the canonical taxonomy directly does not need to configure anything.
 
-**Subscription lifecycle states:**
+**Why three layers and not two.**
+
+The earlier model had only two layers (`provider_vehicle_groups` and `client_vehicle_groups`), connected by a per-tenant mapping. That model assumed `provider.external_code` was a stable identifier of a vehicle group. In practice, that assumption breaks: some providers do not expose group codes in their public results at all; some have stopped doing so after a website modernization; the model representatives shown for a group may rotate over time even when the underlying group is stable. Building product identity on `external_code` left the system fragile and unable to onboard providers that don't expose codes.
+
+The three-layer model fixes this:
+
+- The stable identity of "a kind of vehicle" lives in the operator's taxonomy, not in the provider's interface.
+- Each provider's catalog is reduced to "which canonical types does this provider offer", regardless of how the provider chooses to expose its internal codes.
+- Tenants without strong opinions consume the operator's taxonomy directly; tenants with their own internal language map onto canonical types.
+
+**Why curated taxonomy, not auto-generated.**
+
+The canonical taxonomy is small (10-15 categories) and changes rarely. It is decided by the operator with the dataset of real provider groups in hand. It is **deliberately coarse**: two provider groups that differ only in transmission may classify into the same canonical type, and that aggregation is intentional. Tenants that need finer granularity express it through `tenant_vehicle_groups`.
+
+**Why a YAML source of truth.**
+
+The taxonomy is product configuration, not application state. Each change (adding a category, deprecating one, refining a description) is reviewable as a git diff, revertible as a commit, and traceable to a moment in time. The seed script applies the YAML to the database idempotently. A `taxonomy_version` integer in the YAML increments with each change and is persisted in the database for cache-invalidation purposes (see Decision 2).
+
+**Classification of provider data into canonical types.**
+
+Every vehicle observed during a scrape must be classified into a canonical type before it becomes part of `provider_vehicle_categories`. Classification is performed by an LLM through an abstract `ClassificationService` interface (so the model provider is swappable). The primary implementation is Gemini Flash; if Flash returns a confidence below 0.85, a fallback escalates to Gemini Pro. If both fall below the threshold, the row is persisted with `canonical_type_id = NULL` and `pending_review = true`, awaiting manual classification by the operator. The LLM is never permitted to create new canonical categories on its own; if no existing category fits, the operator extends the taxonomy.
+
+**N:M aggregation within a provider.**
+
+When two provider groups classify into the same canonical type, they are aggregated into the same `provider_vehicle_categories` row. The price for that canonical type at that provider is the **minimum** of the prices of the contributing groups (consistent with the N:M policy already declared in `PRODUCT_SCOPE.md`). The aggregation is transparent to the tenant: the dashboard shows one row, not two.
+
+**Subscription lifecycle states.**
+
 ```
 pending_discovery → pending_mapping → active → paused → cancelled
                                             ↓
                                           broken (mapping orphaned)
 ```
 
-A subscription stays in `pending_mapping` only when ZERO mappings exist for its tuple.
-Partial mappings are valid and activate the subscription with the declared scope.
+A subscription enters `pending_mapping` only when the tenant has declared `tenant_vehicle_groups` but has not yet mapped any of them. A subscription with no tenant groups declared at all is `active` from the start — it consumes the canonical taxonomy directly.
 
-A subscription becomes `active` when at least one mapping exists for its tuple. Provider
-groups without a mapping in this tenant are out of the tenant's scope and do not appear
-in its queries. (Previously the requirement was "all groups mapped or explicitly ignored",
-but the "explicitly ignored" mechanism was never built and the strict completeness check
-blocked legitimate use cases where a customer doesn't operate every group the provider
-offers. See MILESTONES.md for the revision context.)
-
-**New provider groups appearing later** in an active subscription do not break the scrape. They land in `provider_vehicle_groups` as `active=true` but have no mapping, are excluded from pricing, and trigger a notification to the tenant.
+A subscription stays in `pending_mapping` only when ZERO mappings exist for tenants that opted into custom groups. Partial mappings are valid and activate the subscription with the declared scope. Canonical categories without a mapping in this tenant are simply rendered with their canonical name in queries.
 
 ---
 
@@ -66,10 +83,15 @@ Curated by the operator (you), not by tenants.
 - `provider_locations` — locations supported by each provider (e.g. ALC, MAD).
 - `provider_rates` — rate plans available per provider.
 - `tenant_subscriptions` — what a tenant is monitoring. Joins to a specific `(provider, location, rate)` tuple.
+- `provider_vehicle_categories` — see Decision 1. The provider-side catalog rows now carry the canonical classification (`canonical_type_id`, `classification_confidence`, `classification_taxonomy_version`, `pending_review`) in addition to the observed display attributes.
 
 **Why curated, not BYO (bring-your-own-scraper).** Scraper quality is the operator's responsibility, not the tenant's. Each new scraper added is a product asset that benefits all existing tenants. SSRF and resource-abuse problems disappear.
 
 **Adding a new provider is operator work.** A developer implements `provider_X_scraper.py`, registers it in `SCRAPER_REGISTRY` (see `CLAUDE.md`), and the catalog gets a new entry. Tenants then subscribe through the UI.
+
+**Classification cache embedded in the catalog.**
+
+`provider_vehicle_categories.classification_taxonomy_version` doubles as a classification cache: a scrape can skip the LLM call entirely when the same `(provider, attributes-hash)` row already has a `canonical_type_id` set against the current `taxonomy_version`. When the taxonomy version increments, only the rows that are potentially affected (deprecated categories, `pending_review = true`, or flagged via `reclassify_on_seed` in the YAML) are re-classified. Untouched classifications are preserved.
 
 ---
 
@@ -77,7 +99,7 @@ Curated by the operator (you), not by tenants.
 
 Observations are **global**, not per tenant.
 
-A `price_observation` belongs to a `(provider, location, rate, vehicle_group, pickup_date, duration)` tuple. It does **not** carry `tenant_id`. All tenants subscribed to the same upstream tuple consume the same observations.
+A `price_observation` belongs to a `(provider, location, rate, vehicle_category, pickup_date, duration)` tuple. It does **not** carry `tenant_id`. All tenants subscribed to the same upstream tuple consume the same observations.
 
 **Why global.**
 - One scrape serves N tenants → marginal cost of an extra tenant on an existing tuple is near zero.
@@ -86,7 +108,7 @@ A `price_observation` belongs to a `(provider, location, rate, vehicle_group, pi
 
 **Tenant isolation in queries** is enforced by joining through `tenant_subscriptions`. If a tenant is not subscribed, the join returns nothing.
 
-**`price_observations` references `provider_vehicle_group_id`** (raw provider data). Translation to `client_vehicle_group_id` happens at query time via `vehicle_group_mappings`. This preserves the raw observation for audit/debugging and supports tenants that haven't yet mapped certain provider groups.
+**`price_observations` references `provider_vehicle_category_id`** — i.e. the `(provider, canonical_type)` row. Translation to `tenant_vehicle_group_id` (when the tenant has declared one) happens at query time via `tenant_vehicle_group_mappings`. This preserves the canonical observation as the audit-grade truth and lets tenants opt in or out of their own naming layer without affecting the underlying data.
 
 ---
 
@@ -123,7 +145,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 **Option C: do not persist synthetic data.** Only real scraped observations are stored. Expansion happens at query time.
 
-- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_group)` tuple and has a `representative_date` that is actually scraped.
+- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_category)` tuple and has a `representative_date` that is actually scraped.
 - `price_observations` — only contains real scrapes (representatives + probe points).
 - The application layer (`PriceQueryService` or equivalent) joins zones → representative → observation to answer "price for day X". Returns `is_inferred=true` when the day requested ≠ representative date.
 
@@ -135,6 +157,8 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 **Zone re-analysis: total replacement.** When `SeasonAnalyzer` runs again, old zones are flagged `active=false` and new ones inserted with `active=true`. Historical price queries reinterpret old observations under current zones. No SCD versioning of zones in the MVP.
 
 **Index on zones:** partial index `WHERE active=true`. Inactive zones are kept for potential future versioning, but should not weight regular query plans.
+
+**Aggregated market zones (across providers).** When the dashboard shows the market in aggregate ("market average" or "market minimum" across all subscribed providers), the time partition shown to the tenant is the **union of cut points** of the active zones across all providers within the tenant's scope. This produces a partition that is faithful to the heterogeneity of the market (when providers shift seasons on different dates, both shifts are visible). The union grid is computed at query time by `compute_intersected_grid` in `PriceQueryService` and is **not persisted** — it is a derivation, consistent with the broader rule against persisting synthetic data.
 
 ---
 
@@ -166,15 +190,16 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 **Layer 3 — Isolation tests (implemented for the data layer; required for any new feature touching tenant-scoped tables).** Verified by `test_app_user_sees_only_own_tenant` in `tests/saas/infrastructure/persistence/test_repositories.py`.
 
 **Catalog tables (no `tenant_id`, no RLS):**
-- `providers`, `provider_locations`, `provider_rates`, `provider_vehicle_groups`
+- `providers`, `provider_locations`, `provider_rates`
+- `canonical_vehicle_types`, `provider_vehicle_categories`
 - `homogeneous_zones`, `price_observations`, `price_observation_heartbeats`
 - `scrape_runs`
 
 **Tenant-scoped tables (with `tenant_id` and RLS):**
-- `users`, `client_vehicle_groups`, `vehicle_group_mappings`
+- `users`, `tenant_vehicle_groups`, `tenant_vehicle_group_mappings`
 - `tenant_subscriptions`, `pricing_rules`, `pricing_outputs`
 
-**Primary keys: UUIDs** for tenant-scoped entities. Catalog tables can use integers if preferred (their stable external IDs are codes like `provider_a` anyway).
+**Primary keys: UUIDs** for tenant-scoped entities. Catalog tables can use integers if preferred (their stable external IDs are codes like `provider_a` or canonical type codes like `ECONOMY_PASSENGER` anyway).
 
 **Postgres role structure.** Four roles, separating concerns:
 
@@ -195,15 +220,18 @@ Pragmatic mix, not uniform across all entities.
 
 **`tenant_subscriptions` — cancel and recreate.** Changes to provider, location, rate, or `period_days` are not edits. The current subscription is marked `cancelled` and a new one is created. Status `cancelled` is terminal. Historical observations remain visible to the tenant in read mode but the subscription does not participate in further scraping or pricing.
 
-**`client_vehicle_groups` and `vehicle_group_mappings` — mutable in place.** Renaming a group, adjusting a mapping is an edit. Historical pricing decisions remain auditable through `pricing_outputs.inputs_snapshot_jsonb`.
+**`tenant_vehicle_groups` and `tenant_vehicle_group_mappings` — mutable in place.** Renaming a group, adjusting a mapping is an edit. Historical pricing decisions remain auditable through `pricing_outputs.inputs_snapshot_jsonb`.
+
+**`canonical_vehicle_types` — sourced from YAML, applied to BD by idempotent seed.** Each YAML version increments `taxonomy_version`. The seed script (a) inserts new categories, (b) updates description/criteria fields when changed, (c) marks deprecated categories as `active = false` (never deletes — they may have historical references). See Decision 1 for re-classification semantics.
 
 **`pricing_rules` — explicit versioning.** Editing a rule does not UPDATE in place: a new row is created with `version = N+1`, the old row gets `superseded_at` and `superseded_by_id`. `pricing_outputs.rule_id` references the specific version used at calculation time.
 
-**`pricing_outputs.inputs_snapshot_jsonb`** captures the complete context of each pricing calculation: mapping in effect, competitor prices used, parameters consumed. This is the audit trail. It must be sufficient on its own to reconstruct any past decision.
+**`pricing_outputs.inputs_snapshot_jsonb`** captures the complete context of each pricing calculation: mapping in effect, competitor prices used, parameters consumed, taxonomy version. This is the audit trail. It must be sufficient on its own to reconstruct any past decision.
 
 **Why this mix.**
 - Subscriptions are operational contracts; their semantics change qualitatively when the upstream tuple changes. Cancel-and-recreate makes that explicit.
 - Group/mapping edits are interpretive; the snapshot in `pricing_outputs` already preserves audit value.
+- The canonical taxonomy is product-wide configuration; the YAML + version mechanism gives a single, reviewable source of truth.
 - Pricing rules carry direct economic consequence and are few in number; versioning them is cheap and high-value.
 
 ---
@@ -214,11 +242,13 @@ Pragmatic mix, not uniform across all entities.
 
 Output structure:
 ```
-Group | Zone (period)     | 1d | 2d | ... | 7d | 14d | 21d | 28d
-B     | Mid (01–14 Jul)   | 45 | 42 | ... | 38 |  35 |  33 |  32
-B     | High (15–31 Jul)  | 65 | 60 | ... | 52 |  48 |  46 |  44
+Category               | Zone (period)     | 1d | 2d | ... | 7d | 14d | 21d | 28d
+ECONOMY_PASSENGER      | Mid (01–14 Jul)   | 45 | 42 | ... | 38 |  35 |  33 |  32
+ECONOMY_PASSENGER      | High (15–31 Jul)  | 65 | 60 | ... | 52 |  48 |  46 |  44
 ...
 ```
+
+When the tenant has declared `tenant_vehicle_groups`, the rows are rendered with the tenant's labels instead of the canonical code (e.g. "Compactos" instead of `ECONOMY_PASSENGER`). The underlying data is the same; only the presentation layer changes.
 
 **Why Format A.**
 - Reflects how the rent-a-car pricing domain actually works (tariff table per season).
@@ -258,22 +288,26 @@ users
   -- stores the local identity row tied to the external one. Do NOT add
   -- columns for password_hash, session_token, password_reset_token, etc.
 
-client_vehicle_groups
+tenant_vehicle_groups
   id UUID PK
   tenant_id UUID FK
-  code           -- tenant-defined (e.g. "B", "C", "SUV")
+  code           -- tenant-defined (e.g. "Compactos", "Familiares", "SUV")
   name
   description
   display_order
+  -- Optional layer: tenants without custom groups use canonical types directly.
 
-vehicle_group_mappings
+tenant_vehicle_group_mappings
   id UUID PK
   tenant_id UUID FK
-  client_vehicle_group_id UUID FK
-  provider_vehicle_group_id UUID FK
+  tenant_vehicle_group_id UUID FK → tenant_vehicle_groups
+  canonical_type_id INT FK → canonical_vehicle_types
   created_at
   created_by
   notes
+  -- Maps tenant labels onto canonical types. N:M permitted: a tenant group
+  -- may map onto multiple canonical types, and the same canonical type may
+  -- appear in multiple tenant groups (the latter is rare but valid).
 
 tenant_subscriptions
   id UUID PK
@@ -292,7 +326,10 @@ tenant_subscriptions
 pricing_rules
   id UUID PK
   tenant_id UUID FK
-  client_vehicle_group_id UUID FK
+  canonical_type_id INT FK → canonical_vehicle_types
+                              -- rules operate on canonical types;
+                              -- tenants with custom groups resolve through
+                              -- tenant_vehicle_group_mappings at apply time
   name
   version INT NOT NULL
   condition_jsonb
@@ -307,18 +344,32 @@ pricing_rules
 pricing_outputs
   id UUID PK
   tenant_id UUID FK
-  client_vehicle_group_id UUID FK
+  canonical_type_id INT FK → canonical_vehicle_types
   pickup_date DATE
   duration_days INT
   computed_price NUMERIC(10,2)
   rule_id UUID FK → pricing_rules    -- specific version used
-  inputs_snapshot_jsonb               -- mapping, competitor prices, params
+  inputs_snapshot_jsonb               -- mapping, competitor prices, params,
+                                      -- taxonomy_version, classification_versions
   computed_at TIMESTAMPTZ
 ```
 
 ### Catalog (global, no `tenant_id`, no RLS)
 
 ```
+canonical_vehicle_types
+  id INT PK
+  code           VARCHAR(64) UNIQUE NOT NULL  -- e.g. 'ECONOMY_PASSENGER'
+  name           VARCHAR(128) NOT NULL        -- human-readable label
+  description    TEXT NOT NULL                -- criteria for inclusion
+  taxonomy_version INT NOT NULL               -- version when this row was last touched
+  active         BOOLEAN NOT NULL DEFAULT true
+  created_at     TIMESTAMPTZ
+  deprecated_at  TIMESTAMPTZ NULL
+  -- Source of truth: taxonomy.yaml. Applied to BD by an idempotent seed script.
+  -- Deprecated categories are never deleted; rows referencing them are
+  -- re-classified by the next seed run (when flagged) or by the next scrape.
+
 providers
   id PK
   code                                -- 'provider_a', 'provider_b', ...
@@ -345,20 +396,30 @@ provider_rates
   description
   active
 
-provider_vehicle_groups
+provider_vehicle_categories
   id PK
   provider_id FK
   provider_location_id FK
   provider_rate_id FK
-  external_code
-  external_name
-  example_models TEXT NOT NULL    -- e.g. "Fiat Panda, Kia Picanto" (required; '' until first scrape)
-  seats          INT NULL
-  luggage        INT NULL
-  transmission   VARCHAR(16) NULL -- 'manual' | 'automatic' | NULL
-  first_seen_at
-  last_seen_at
-  active
+  canonical_type_id INT FK → canonical_vehicle_types  -- nullable; NULL ⇒ pending classification
+  classification_confidence FLOAT NULL                 -- last LLM confidence (0..1)
+  classification_taxonomy_version INT NULL             -- version of taxonomy used at last classification
+  pending_review BOOLEAN NOT NULL DEFAULT false        -- operator attention required
+  -- Observed display attributes (last seen):
+  example_models  TEXT NOT NULL DEFAULT ''
+  seats           INT NULL
+  luggage         INT NULL
+  transmission    VARCHAR(16) NULL    -- 'manual' | 'automatic' | NULL
+  -- Documentary metadata when the provider exposes group identifiers:
+  external_code   VARCHAR(64) NULL
+  external_name   VARCHAR(128) NULL
+  -- Lifecycle:
+  first_seen_at   TIMESTAMPTZ
+  last_seen_at    TIMESTAMPTZ
+  active          BOOLEAN NOT NULL DEFAULT true
+  -- Identity: UNIQUE (provider_id, provider_location_id, provider_rate_id, canonical_type_id)
+  -- When canonical_type_id IS NULL, identity falls back to (provider_id, location, rate,
+  -- attributes_hash). attributes_hash is derived from (example_models, seats, luggage, transmission).
 
 scrape_runs
   id PK
@@ -376,7 +437,7 @@ homogeneous_zones
   provider_id FK
   provider_location_id FK
   provider_rate_id FK
-  provider_vehicle_group_id FK
+  provider_vehicle_category_id FK → provider_vehicle_categories
   start_date DATE
   end_date DATE
   representative_date DATE
@@ -389,7 +450,7 @@ price_observations
   provider_id
   provider_location_id
   provider_rate_id
-  provider_vehicle_group_id
+  provider_vehicle_category_id FK → provider_vehicle_categories
   scrape_run_id FK
   pickup_date DATE
   duration_days INT
@@ -406,20 +467,20 @@ price_observations
   -- existing partitions will fail with "no partition of relation
   -- found for row".
   -- Main index: (provider_id, provider_location_id, provider_rate_id,
-  --              provider_vehicle_group_id, pickup_date, duration_days,
+  --              provider_vehicle_category_id, pickup_date, duration_days,
   --              observed_at DESC)
 
 price_observation_heartbeats
   provider_id
   provider_location_id
   provider_rate_id
-  provider_vehicle_group_id
+  provider_vehicle_category_id FK → provider_vehicle_categories
   pickup_date DATE
   duration_days INT
   last_checked_at TIMESTAMPTZ
   last_price_per_day NUMERIC(10,2)
   PRIMARY KEY (provider_id, provider_location_id, provider_rate_id,
-               provider_vehicle_group_id, pickup_date, duration_days)
+               provider_vehicle_category_id, pickup_date, duration_days)
 ```
 
 ---
@@ -428,15 +489,18 @@ price_observation_heartbeats
 
 How the model answers the canonical client question:
 
-> *"For tenant T, give me prices for client groups {B, C, SUV} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
+> *"For tenant T, give me prices for canonical categories {ECONOMY_PASSENGER, COMPACT_PASSENGER, LUXURY_AUTO} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
+
+(When the tenant has declared `tenant_vehicle_groups`, the query receives tenant group codes and resolves them to canonical types via `tenant_vehicle_group_mappings` before the rest of the flow.)
 
 ### Conceptual flow
 
 1. Resolve subscription S to its `(provider_id, location_id, rate_id)` tuple.
-2. Resolve client groups {B, C, SUV} to provider groups via `vehicle_group_mappings`.
-3. Find active zones in `homogeneous_zones` overlapping [D1, D2] for those provider groups.
-4. For each zone × duration, fetch the latest observation in `price_observations` for the zone's representative date.
-5. Return one row per (client_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
+2. If the request used tenant group codes, resolve them to canonical types via `tenant_vehicle_group_mappings`.
+3. Resolve canonical types to provider vehicle categories: `provider_vehicle_categories` filtered by `(provider, canonical_type_id IN ...)`.
+4. Find active zones in `homogeneous_zones` overlapping [D1, D2] for those provider vehicle categories.
+5. For each zone × duration, fetch the latest observation in `price_observations` for the zone's representative date.
+6. Return one row per (canonical_type or tenant_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
 
 ### Single SQL realization
 
@@ -444,7 +508,7 @@ The whole flow collapses into one SQL with two CTEs:
 
 ```sql
 WITH zones AS (
-  SELECT provider_vehicle_group_id,
+  SELECT provider_vehicle_category_id,
          representative_date,
          start_date,
          end_date
@@ -452,14 +516,14 @@ WITH zones AS (
   WHERE provider_id = :P
     AND provider_location_id = :L
     AND provider_rate_id = :R
-    AND provider_vehicle_group_id IN (:provider_groups)
+    AND provider_vehicle_category_id IN (:provider_categories)
     AND active = true
     AND end_date >= :D1
     AND start_date <= :D2
 ),
 latest_observations AS (
-  SELECT DISTINCT ON (provider_vehicle_group_id, pickup_date, duration_days)
-         provider_vehicle_group_id,
+  SELECT DISTINCT ON (provider_vehicle_category_id, pickup_date, duration_days)
+         provider_vehicle_category_id,
          pickup_date,
          duration_days,
          price_per_day,
@@ -469,12 +533,12 @@ latest_observations AS (
   WHERE provider_id = :P
     AND provider_location_id = :L
     AND provider_rate_id = :R
-    AND provider_vehicle_group_id IN (:provider_groups)
+    AND provider_vehicle_category_id IN (:provider_categories)
     AND pickup_date IN (SELECT representative_date FROM zones)
     AND duration_days IN (1,2,3,4,5,6,7,14,21,28)
-  ORDER BY provider_vehicle_group_id, pickup_date, duration_days, observed_at DESC
+  ORDER BY provider_vehicle_category_id, pickup_date, duration_days, observed_at DESC
 )
-SELECT z.provider_vehicle_group_id,
+SELECT z.provider_vehicle_category_id,
        z.representative_date,
        z.start_date,
        z.end_date,
@@ -484,18 +548,19 @@ SELECT z.provider_vehicle_group_id,
        lo.currency
 FROM zones z
 JOIN latest_observations lo
-  ON lo.provider_vehicle_group_id = z.provider_vehicle_group_id
+  ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
  AND lo.pickup_date = z.representative_date;
 ```
 
 The application layer then:
-- Joins to `vehicle_group_mappings` to translate `provider_vehicle_group_id` → `client_vehicle_group_id` (handles N:M aggregation policy).
+- Joins to `provider_vehicle_categories` to translate `provider_vehicle_category_id` → `canonical_type_id` (a 1:1 join in the new model — no N:M complexity at this stage).
+- If the tenant has declared groups, joins to `tenant_vehicle_group_mappings` to translate canonical types back to the tenant's labels (this is where N:M is applied if the tenant has chosen aggregating mappings; `min` is the default policy).
 - Returns Format A directly, or expands to Format B if explicitly requested.
 
 ### Volume reasoning
 
-For a 31-day window, 3 client groups, 10 durations:
-- **Distinct prices in the answer:** ~60 (assuming ~2 zones in the window per group × 10 durations).
+For a 31-day window, 3 canonical categories, 10 durations:
+- **Distinct prices in the answer:** ~60 (assuming ~2 zones in the window per category × 10 durations).
 - **Rows fetched from BD:** ~60 (one per zone × duration).
 - **Day×duration expansion (if Format B requested):** 930, computed in memory.
 
@@ -507,7 +572,7 @@ The main index on `price_observations` is dictated by this query:
 
 ```
 (provider_id, provider_location_id, provider_rate_id,
- provider_vehicle_group_id, pickup_date, duration_days,
+ provider_vehicle_category_id, pickup_date, duration_days,
  observed_at DESC)
 ```
 
@@ -577,7 +642,7 @@ Zones are replaced wholesale on re-analysis. Group renames and mapping changes a
 
 **Trigger.** A client demands "show me how you saw the market 3 months ago, with the zones in effect at that time" or external audit pressure requires reconstructing past interpretive state byte-for-byte.
 
-**Migration.** Add `valid_from`/`valid_to` to `homogeneous_zones`, `client_vehicle_groups`, `vehicle_group_mappings`. Change relevant queries to use the time-effective row. Existing `inputs_snapshot_jsonb` in `pricing_outputs` already covers most audit cases without this.
+**Migration.** Add `valid_from`/`valid_to` to `homogeneous_zones`, `tenant_vehicle_groups`, `tenant_vehicle_group_mappings`. Change relevant queries to use the time-effective row. Existing `inputs_snapshot_jsonb` in `pricing_outputs` already covers most audit cases without this.
 
 ### Higher scrape frequency than daily
 
@@ -624,6 +689,8 @@ Single shared database, single region.
 
 - Generate real DDL from this document, not from intuition. If something is missing here, surface it before writing the migration.
 - The threshold for change detection (`PRICE_CHANGE_THRESHOLD`) compares against the **last recorded row in `price_observations`**, not against the heartbeat. This is a correctness point, not a style preference.
-- `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact.
+- `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact. Include `taxonomy_version` and the `classification_taxonomy_version` of every `provider_vehicle_categories` row consumed.
 - Authentication is **not** built locally. Do not add tables for passwords, sessions, password reset tokens, or any mechanism that would duplicate what an external identity provider does. The `users` table only holds the local identity bound to the external `sub`.
 - Tests for tenant isolation are part of the definition of "API done", not an optional nicety.
+- The LLM-based classification is wrapped behind an abstract `ClassificationService` interface. The interface must not leak provider-specific concepts (request shape, response shape, authentication). Implementations live in infrastructure; the rest of the system depends only on the interface. Confidence threshold (0.85) is hardcoded in the service composition.
+- The canonical taxonomy YAML is the source of truth. The seed script must be idempotent: running it twice on an unchanged YAML produces zero changes in BD. Running it after a YAML edit applies only the deltas.

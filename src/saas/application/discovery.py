@@ -13,6 +13,10 @@ import os
 from datetime import datetime
 from typing import Callable
 
+from pathlib import Path
+
+from src.saas.application.classification.taxonomy_loader import load_taxonomy_specs
+from src.saas.infrastructure.classification.gemini_service import GeminiClassificationService
 from src.scraper.application.factories.scraper_factory import ScraperFactory
 from src.scraper.application.filters.rate_filter import RateFilter
 from src.scraper.application.smart_scraping.price_point_extractor import PricePointExtractor
@@ -24,6 +28,8 @@ from src.scraper.domain.models.booking_provider import BookingProvider
 from src.scraper.infrastructure.playwright.playwright_driver import PlaywrightDriver
 from src.scraper.presentation.cli.container import SCRAPER_REGISTRY
 from src.shared.domain.models.search import Location
+
+_TAXONOMY_YAML = Path(__file__).resolve().parents[3] / "taxonomy.yaml"
 
 
 def build_scraper_factory(providers_json: list[dict]) -> ScraperFactory:
@@ -77,6 +83,12 @@ def run_discovery_for_tuple(
     threshold = float(os.environ.get("SEASON_PRICE_THRESHOLD", "0.05"))
     entry = providers_json_entry
 
+    canonical_specs, taxonomy_version = load_taxonomy_specs(_TAXONOMY_YAML)
+    classification_service = GeminiClassificationService(
+        canonical_types=canonical_specs,
+        taxonomy_version=taxonomy_version,
+    )
+
     orch = SmartScraperOrchestrator(
         factory=scraper_factory,
         probe=SeasonProbe(),
@@ -87,6 +99,8 @@ def run_discovery_for_tuple(
         provider_id=provider_id,
         provider_location_id=provider_location_id,
         provider_rate_id=provider_rate_id,
+        classification_service=classification_service,
+        taxonomy_version=taxonomy_version,
         provider_code=entry["scraper"],
         location_code=entry["location_id"],
         rate_code=entry["rate_name"],

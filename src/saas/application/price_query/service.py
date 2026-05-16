@@ -5,8 +5,8 @@ internally.  The caller controls the transaction scope.
 
 RLS note
 --------
-tenant_subscriptions, client_vehicle_groups, and vehicle_group_mappings are
-FORCE ROW LEVEL SECURITY tables.  When calling via the app role, the caller
+tenant_subscriptions, tenant_vehicle_groups, and tenant_vehicle_group_mappings
+are FORCE ROW LEVEL SECURITY tables.  When calling via the app role, the caller
 must set app.tenant_id (e.g. via tenant_context()) before invoking any method.
 Using super_session (BYPASSRLS) is valid for back-office use; application-layer
 tenant_id filtering is always applied regardless of role.
@@ -29,12 +29,12 @@ from ...infrastructure.persistence.models.catalog import (
     Provider,
     ProviderLocation,
     ProviderRate,
-    ProviderVehicleGroup,
+    ProviderVehicleCategory,
 )
 from ...infrastructure.persistence.models.tenant import (
-    ClientVehicleGroup,
     TenantSubscription,
-    VehicleGroupMapping,
+    TenantVehicleGroup,
+    TenantVehicleGroupMapping,
 )
 from .dtos import FormatARow, FormatATable, ZoneRange
 from .rejilla import compute_intersected_grid
@@ -134,7 +134,7 @@ class PriceQueryService:
         if not client_groups:
             return FormatATable(rows=[], metadata=metadata)
 
-        # Mappings: client_vehicle_group_id → [pvg_id, ...]
+        # Mappings: tenant_vehicle_group_id → [pvc_id, ...]
         client_to_pvgs = self._resolve_mappings(
             tenant_id, list(client_groups.values()), pid, lid, rid
         )
@@ -148,10 +148,10 @@ class PriceQueryService:
         if not zones:
             return FormatATable(rows=[], metadata=metadata)
 
-        # Group zones by pvg_id for efficient lookup
+        # Group zones by pvc_id for efficient lookup
         pvg_zones: dict[int, list] = {}
         for z in zones:
-            pvg_zones.setdefault(z.provider_vehicle_group_id, []).append(z)
+            pvg_zones.setdefault(z.provider_vehicle_category_id, []).append(z)
 
         rep_dates = list({z.representative_date for z in zones})
         obs = self._fetch_observations(pid, lid, rid, all_pvg_ids, rep_dates, list(durations))
@@ -287,10 +287,10 @@ class PriceQueryService:
             if not zones:
                 continue
 
-            # pvg_id → list of (start, end, rep) for zone lookups
+            # pvc_id → list of (start, end, rep) for zone lookups
             pvg_zone_map: dict[int, list[tuple[date, date, date]]] = {}
             for z in zones:
-                pvg_zone_map.setdefault(z.provider_vehicle_group_id, []).append(
+                pvg_zone_map.setdefault(z.provider_vehicle_category_id, []).append(
                     (z.start_date, z.end_date, z.representative_date)
                 )
 
@@ -392,13 +392,13 @@ class PriceQueryService:
         tenant_id: uuid.UUID,
         codes: list[str],
     ) -> dict[str, uuid.UUID]:
-        """Return {code: client_vehicle_group_id} for the requested codes."""
+        """Return {code: tenant_vehicle_group_id} for the requested codes."""
         if not codes:
             return {}
         groups = self._s.scalars(
-            select(ClientVehicleGroup).where(
-                ClientVehicleGroup.tenant_id == tenant_id,
-                ClientVehicleGroup.code.in_(codes),
+            select(TenantVehicleGroup).where(
+                TenantVehicleGroup.tenant_id == tenant_id,
+                TenantVehicleGroup.code.in_(codes),
             )
         ).all()
         return {g.code: g.id for g in groups}
@@ -411,38 +411,51 @@ class PriceQueryService:
         location_id: int,
         rate_id: int,
     ) -> dict[uuid.UUID, list[int]]:
-        """Return {cvg_id: [pvg_id, ...]} for the given (provider, location, rate) tuple.
+        """Return {tenant_vehicle_group_id: [pvc_id, ...]} for the tuple.
 
-        Only active provider_vehicle_groups are considered.
+        Three-layer traversal:
+          tenant_vehicle_group → canonical_type (via mapping)
+          canonical_type       → pvc (via PVC.canonical_type_id within the tuple)
+
+        Only classified, active PVCs (canonical_type_id IS NOT NULL) are
+        visible to tenant queries — unclassified PVCs are pending_review.
         """
         if not cvg_ids:
             return {}
 
-        pvgs = self._s.scalars(
-            select(ProviderVehicleGroup).where(
-                ProviderVehicleGroup.provider_id == provider_id,
-                ProviderVehicleGroup.provider_location_id == location_id,
-                ProviderVehicleGroup.provider_rate_id == rate_id,
-                ProviderVehicleGroup.active == True,
+        # Step 1: PVCs for this tuple → canonical_type → pvc_id lookup
+        pvcs = self._s.scalars(
+            select(ProviderVehicleCategory).where(
+                ProviderVehicleCategory.provider_id == provider_id,
+                ProviderVehicleCategory.provider_location_id == location_id,
+                ProviderVehicleCategory.provider_rate_id == rate_id,
+                ProviderVehicleCategory.active == True,
+                ProviderVehicleCategory.canonical_type_id.is_not(None),
             )
         ).all()
-        pvg_ids_for_tuple = [pvg.id for pvg in pvgs]
-        if not pvg_ids_for_tuple:
+        canonical_to_pvc: dict[int, int] = {
+            pvc.canonical_type_id: pvc.id for pvc in pvcs
+        }
+        if not canonical_to_pvc:
             return {}
 
+        # Step 2: tenant mappings restricted to canonical types present in this tuple
         mappings = self._s.scalars(
-            select(VehicleGroupMapping).where(
-                VehicleGroupMapping.tenant_id == tenant_id,
-                VehicleGroupMapping.client_vehicle_group_id.in_(cvg_ids),
-                VehicleGroupMapping.provider_vehicle_group_id.in_(pvg_ids_for_tuple),
+            select(TenantVehicleGroupMapping).where(
+                TenantVehicleGroupMapping.tenant_id == tenant_id,
+                TenantVehicleGroupMapping.tenant_vehicle_group_id.in_(cvg_ids),
+                TenantVehicleGroupMapping.canonical_type_id.in_(
+                    list(canonical_to_pvc.keys())
+                ),
             )
         ).all()
 
+        # Step 3: assemble {tvg_id: [pvc_id, ...]}
         result: dict[uuid.UUID, list[int]] = {}
         for m in mappings:
-            result.setdefault(m.client_vehicle_group_id, []).append(
-                m.provider_vehicle_group_id
-            )
+            pvc_id = canonical_to_pvc.get(m.canonical_type_id)
+            if pvc_id is not None:
+                result.setdefault(m.tenant_vehicle_group_id, []).append(pvc_id)
         return result
 
     def _load_zones(
@@ -454,7 +467,7 @@ class PriceQueryService:
         d1: date,
         d2: date,
     ) -> list:
-        """Load active homogeneous zones overlapping [d1, d2] for the given PVGs."""
+        """Load active homogeneous zones overlapping [d1, d2] for the given PVCs."""
         if not pvg_ids:
             return []
         return self._s.scalars(
@@ -462,7 +475,7 @@ class PriceQueryService:
                 HomogeneousZone.provider_id == provider_id,
                 HomogeneousZone.provider_location_id == location_id,
                 HomogeneousZone.provider_rate_id == rate_id,
-                HomogeneousZone.provider_vehicle_group_id.in_(pvg_ids),
+                HomogeneousZone.provider_vehicle_category_id.in_(pvg_ids),
                 HomogeneousZone.active == True,
                 HomogeneousZone.end_date >= d1,
                 HomogeneousZone.start_date <= d2,
@@ -487,8 +500,8 @@ class PriceQueryService:
             return {}
         rows = self._s.execute(
             text("""
-                SELECT DISTINCT ON (provider_vehicle_group_id, pickup_date, duration_days)
-                       provider_vehicle_group_id,
+                SELECT DISTINCT ON (provider_vehicle_category_id, pickup_date, duration_days)
+                       provider_vehicle_category_id,
                        pickup_date,
                        duration_days,
                        price_per_day
@@ -496,10 +509,10 @@ class PriceQueryService:
                 WHERE provider_id          = :pid
                   AND provider_location_id = :lid
                   AND provider_rate_id     = :rid
-                  AND provider_vehicle_group_id = ANY(:pvg_ids)
+                  AND provider_vehicle_category_id = ANY(:pvg_ids)
                   AND pickup_date          = ANY(:rep_dates)
                   AND duration_days        = ANY(:durations)
-                ORDER BY provider_vehicle_group_id,
+                ORDER BY provider_vehicle_category_id,
                          pickup_date,
                          duration_days,
                          observed_at DESC
@@ -514,7 +527,7 @@ class PriceQueryService:
             },
         )
         return {
-            (row.provider_vehicle_group_id, row.pickup_date, row.duration_days): row.price_per_day
+            (row.provider_vehicle_category_id, row.pickup_date, row.duration_days): row.price_per_day
             for row in rows
         }
 

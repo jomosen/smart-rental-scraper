@@ -73,8 +73,14 @@ class User(Base):
     tenant: Mapped[Tenant] = relationship(back_populates="users")
 
 
-class ClientVehicleGroup(Base):
-    __tablename__ = "client_vehicle_groups"
+class TenantVehicleGroup(Base):
+    """Optional per-tenant vehicle taxonomy layer.
+
+    Tenants that use the canonical taxonomy directly do not need to create
+    any rows here.  Only tenants with their own internal naming populate
+    this table and link via TenantVehicleGroupMapping.
+    """
+    __tablename__ = "tenant_vehicle_groups"
     __table_args__ = (
         UniqueConstraint(
             "tenant_id", "code", name="uq_client_vehicle_groups_tenant_code"
@@ -94,12 +100,17 @@ class ClientVehicleGroup(Base):
     )
 
 
-class VehicleGroupMapping(Base):
-    __tablename__ = "vehicle_group_mappings"
+class TenantVehicleGroupMapping(Base):
+    """Maps a tenant's vehicle group label onto one or more canonical types.
+
+    N:M: a tenant group may cover multiple canonical types, and the same
+    canonical type may appear in multiple tenant groups (rare but valid).
+    """
+    __tablename__ = "tenant_vehicle_group_mappings"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "client_vehicle_group_id", "provider_vehicle_group_id",
-            name="uq_vehicle_group_mappings_tuple",
+            "tenant_id", "tenant_vehicle_group_id", "canonical_type_id",
+            name="uq_tenant_vehicle_group_mappings_tuple",
         ),
     )
 
@@ -107,12 +118,12 @@ class VehicleGroupMapping(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_vehicle_group_mappings_tenant", ondelete="RESTRICT"), nullable=False
     )
-    client_vehicle_group_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("client_vehicle_groups.id", name="fk_vehicle_group_mappings_client_group", ondelete="RESTRICT"), nullable=False
+    tenant_vehicle_group_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenant_vehicle_groups.id", name="fk_vehicle_group_mappings_client_group", ondelete="RESTRICT"), nullable=False
     )
-    provider_vehicle_group_id: Mapped[int] = mapped_column(
+    canonical_type_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("provider_vehicle_groups.id", name="fk_vehicle_group_mappings_provider_group", ondelete="RESTRICT"),
+        ForeignKey("canonical_vehicle_types.id", name="fk_tenant_vehicle_group_mappings_canonical_type", ondelete="RESTRICT"),
         nullable=False,
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -176,8 +187,8 @@ class PricingRule(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_rules_tenant", ondelete="RESTRICT"), nullable=False
     )
-    client_vehicle_group_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("client_vehicle_groups.id", name="fk_pricing_rules_client_group", ondelete="RESTRICT"), nullable=False
+    canonical_type_id: Mapped[int] = mapped_column(
+        ForeignKey("canonical_vehicle_types.id", name="fk_pricing_rules_canonical_type", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
@@ -202,8 +213,8 @@ class PricingOutput(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_outputs_tenant", ondelete="RESTRICT"), nullable=False
     )
-    client_vehicle_group_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("client_vehicle_groups.id", name="fk_pricing_outputs_client_group", ondelete="RESTRICT"), nullable=False
+    canonical_type_id: Mapped[int] = mapped_column(
+        ForeignKey("canonical_vehicle_types.id", name="fk_pricing_outputs_canonical_type", ondelete="RESTRICT"), nullable=False
     )
     pickup_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -215,3 +226,11 @@ class PricingOutput(Base):
     computed_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility aliases for code that uses the old class names.
+# Removed in prompt 4 when the scraper is refactored.
+# ---------------------------------------------------------------------------
+ClientVehicleGroup = TenantVehicleGroup
+VehicleGroupMapping = TenantVehicleGroupMapping

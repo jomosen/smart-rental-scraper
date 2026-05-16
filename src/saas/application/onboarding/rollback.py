@@ -12,13 +12,13 @@ from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from ...infrastructure.persistence.models.tenant import (
-    ClientVehicleGroup,
     PricingOutput,
     PricingRule,
     Tenant,
     TenantSubscription,
+    TenantVehicleGroup,
+    TenantVehicleGroupMapping,
     User,
-    VehicleGroupMapping,
 )
 
 
@@ -28,9 +28,9 @@ def rollback_tenant(tenant_id: uuid.UUID, session: Session) -> None:
     Idempotent: silently succeeds if the tenant was never created or is
     already gone.
     """
-    # 1. Vehicle group mappings (FK → client_vehicle_groups, provider_vehicle_groups)
+    # 1. Vehicle group mappings (FK → tenant_vehicle_groups, canonical_vehicle_types)
     session.execute(
-        delete(VehicleGroupMapping).where(VehicleGroupMapping.tenant_id == tenant_id)
+        delete(TenantVehicleGroupMapping).where(TenantVehicleGroupMapping.tenant_id == tenant_id)
     )
     # 2. Subscriptions (FK → tenant, providers, …)
     session.execute(
@@ -49,9 +49,9 @@ def rollback_tenant(tenant_id: uuid.UUID, session: Session) -> None:
     session.execute(
         delete(PricingRule).where(PricingRule.tenant_id == tenant_id)
     )
-    # 5. Client vehicle groups (FK → tenant; referenced by vehicle_group_mappings already gone)
+    # 5. Tenant vehicle groups (FK → tenant; referenced by tenant_vehicle_group_mappings already gone)
     session.execute(
-        delete(ClientVehicleGroup).where(ClientVehicleGroup.tenant_id == tenant_id)
+        delete(TenantVehicleGroup).where(TenantVehicleGroup.tenant_id == tenant_id)
     )
     # 6. Users (FK → tenant)
     session.execute(

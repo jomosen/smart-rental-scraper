@@ -22,13 +22,14 @@ from ..services.session_runner import run_session
 from .price_point_extractor import PricePointExtractor
 
 # SaaS persistence — accepted cross-boundary dependency for MVP ingestion layer.
+from ....saas.application.classification.service import ClassificationService
 from ....saas.infrastructure.persistence.models.catalog import (
     HomogeneousZone as HzOrm,
 )
 from ....saas.infrastructure.persistence.repositories import (
     HomogeneousZoneRepository,
     PriceObservationRepository,
-    ProviderVehicleGroupRepository,
+    ProviderVehicleCategoryRepository,
     ScrapeRunRepository,
 )
 
@@ -79,6 +80,8 @@ class SmartScraperOrchestrator:
         provider_id: int,
         provider_location_id: int,
         provider_rate_id: int,
+        classification_service: ClassificationService,
+        taxonomy_version: int,
         provider_code: str = "",
         location_code: str = "",
         rate_code: str = "",
@@ -95,6 +98,8 @@ class SmartScraperOrchestrator:
         self._provider_id = provider_id
         self._provider_location_id = provider_location_id
         self._provider_rate_id = provider_rate_id
+        self._classification_service = classification_service
+        self._taxonomy_version = taxonomy_version
         self._provider_code = provider_code
         self._location_code = location_code
         self._rate_code = rate_code
@@ -225,24 +230,27 @@ class SmartScraperOrchestrator:
         the gap.
         """
         with self._session_factory() as s:
-            vg_repo = ProviderVehicleGroupRepository(s)
+            pvc_repo = ProviderVehicleCategoryRepository(s)
             zone_repo = HomogeneousZoneRepository(s)
 
             # Ensure all groups seen in probe are in the catalog
             for group_name, car in probe_cars.items():
-                vg_repo.upsert_seen(
-                    self._provider_id,
-                    self._provider_location_id,
-                    self._provider_rate_id,
-                    group_name,
-                    group_name,
+                pvc_repo.upsert_seen(
+                    provider_id=self._provider_id,
+                    provider_location_id=self._provider_location_id,
+                    provider_rate_id=self._provider_rate_id,
+                    external_code=group_name,
+                    external_name=group_name,
                     example_models=car.example_models,
                     seats=car.seats,
                     luggage=car.luggage,
                     transmission=car.transmission,
+                    fuel_type=None,
+                    classification_service=self._classification_service,
+                    taxonomy_version=self._taxonomy_version,
                 )
 
-            active_groups = vg_repo.list_active_for_tuple(
+            active_groups = pvc_repo.list_active_for_tuple(
                 self._provider_id,
                 self._provider_location_id,
                 self._provider_rate_id,
@@ -263,7 +271,7 @@ class SmartScraperOrchestrator:
                         provider_id=self._provider_id,
                         provider_location_id=self._provider_location_id,
                         provider_rate_id=self._provider_rate_id,
-                        provider_vehicle_group_id=vg.id,
+                        provider_vehicle_category_id=vg.id,
                         start_date=z.start_date,
                         end_date=z.end_date,
                         representative_date=z.representative_date,
@@ -297,7 +305,7 @@ class SmartScraperOrchestrator:
         observed_at = datetime.now(timezone.utc)
 
         with self._session_factory() as s:
-            vg_repo = ProviderVehicleGroupRepository(s)
+            pvc_repo = ProviderVehicleCategoryRepository(s)
             obs_repo = PriceObservationRepository(s)
 
             for req, result in zip(requests, results):
@@ -309,22 +317,25 @@ class SmartScraperOrchestrator:
 
                 for car in result.cars:
                     for rate in car.rates:
-                        vg = vg_repo.upsert_seen(
-                            self._provider_id,
-                            self._provider_location_id,
-                            self._provider_rate_id,
-                            car.group,
-                            car.group,
+                        pvc = pvc_repo.upsert_seen(
+                            provider_id=self._provider_id,
+                            provider_location_id=self._provider_location_id,
+                            provider_rate_id=self._provider_rate_id,
+                            external_code=car.group,
+                            external_name=car.group,
                             example_models=car.example_models,
                             seats=car.seats,
                             luggage=car.luggage,
                             transmission=car.transmission,
+                            fuel_type=None,
+                            classification_service=self._classification_service,
+                            taxonomy_version=self._taxonomy_version,
                         )
                         did_insert = obs_repo.insert_if_changed(
                             provider_id=self._provider_id,
                             provider_location_id=self._provider_location_id,
                             provider_rate_id=self._provider_rate_id,
-                            provider_vehicle_group_id=vg.id,
+                            provider_vehicle_category_id=pvc.id,
                             scrape_run_id=run_id,
                             pickup_date=pickup_date,
                             duration_days=duration_days,

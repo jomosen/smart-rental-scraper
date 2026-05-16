@@ -205,8 +205,7 @@ categories:
       a key signal: Mercedes, BMW, Audi, Lexus, etc. Not SUV body
       (those are PREMIUM_SUV_AUTO).
     criteria:
-      - "Premium-brand badge: Mercedes-Benz, BMW, Audi, Lexus, "
-        "Infiniti, Genesis, Volvo (some)"
+      - "Premium-brand badge: Mercedes-Benz, BMW, Audi, Lexus, Infiniti, Genesis, Volvo (some)"
       - "Sedan or hatchback body"
       - "Automatic transmission"
       - "5 seats, 3-4 luggage pieces"
@@ -248,8 +247,7 @@ categories:
       - "7 seats"
       - "Passenger orientation (windows on sides, full seats)"
       - "Automatic transmission"
-      - "Often classified by providers as 'Mini-van pasajeros'"
-        " or 'SUV 7-seater'"
+      - "Often classified by providers as 'Mini-van pasajeros' or 'SUV 7-seater'"
     examples:
       - "BMW Serie 2 Gran Tourer"
       - "Mercedes GLB"
@@ -299,8 +297,7 @@ categories:
     criteria:
       - "Cargo van body"
       - "Up to 5 passenger seats (typically just 2-5 up front)"
-      - "Large cargo bay (luggage typically >= 5 pieces in count "
-        "or expressed in m³)"
+      - "Large cargo bay (luggage typically >= 5 pieces in count or expressed in m³)"
       - "Manual transmission"
     examples:
       - "Peugeot Rifter"

@@ -11,9 +11,9 @@ from sqlalchemy import func, select
 
 from ...infrastructure.persistence.engine import app_engine
 from ...infrastructure.persistence.models.tenant import (
-    ClientVehicleGroup,
     Tenant,
     TenantSubscription,
+    TenantVehicleGroup,
 )
 from ...infrastructure.persistence.session import make_session_factory, tenant_context
 from ..price_query.service import PriceQueryService
@@ -183,9 +183,9 @@ def _run(argv=None) -> int:
         ) or 0
 
         groups_orm = session.scalars(
-            select(ClientVehicleGroup).where(
-                ClientVehicleGroup.tenant_id == tenant_id,
-                ClientVehicleGroup.code.in_(client_groups),
+            select(TenantVehicleGroup).where(
+                TenantVehicleGroup.tenant_id == tenant_id,
+                TenantVehicleGroup.code.in_(client_groups),
             )
         ).all()
         group_names = {g.code: g.name for g in groups_orm}

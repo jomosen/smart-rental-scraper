@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from src.saas.application.catalog_sync import CatalogSyncService
+from tests.saas.application._fakes import StubClassificationService
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.models.catalog import (
     HomogeneousZone as HzOrm,
@@ -23,10 +24,9 @@ from src.saas.infrastructure.persistence.models.catalog import (
     Provider,
     ProviderLocation,
     ProviderRate,
-    ProviderVehicleGroup,
+    ProviderVehicleCategory,
     ScrapeRun,
 )
-from src.saas.infrastructure.persistence.repositories import ProviderVehicleGroupRepository
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.application.smart_scraping.price_point_extractor import PricePointExtractor
 from src.scraper.application.smart_scraping.search_plan_builder import SearchPlanBuilder
@@ -68,7 +68,7 @@ def _cleanup_provider(session, provider_id: int) -> None:
     session.execute(delete(PriceObservationHeartbeat).where(PriceObservationHeartbeat.provider_id == provider_id))
     session.execute(delete(HzOrm).where(HzOrm.provider_id == provider_id))
     session.execute(delete(ScrapeRun).where(ScrapeRun.provider_id == provider_id))
-    session.execute(delete(ProviderVehicleGroup).where(ProviderVehicleGroup.provider_id == provider_id))
+    session.execute(delete(ProviderVehicleCategory).where(ProviderVehicleCategory.provider_id == provider_id))
     session.execute(delete(ProviderRate).where(ProviderRate.provider_id == provider_id))
     session.execute(delete(ProviderLocation).where(ProviderLocation.provider_id == provider_id))
     session.execute(delete(Provider).where(Provider.id == provider_id))
@@ -81,7 +81,12 @@ def _make_orchestrator(
     rate_id: int,
     session_factory,
     rate_name: str = "Test Rate",
+    classification_service=None,
+    taxonomy_version: int = 1,
 ) -> SmartScraperOrchestrator:
+    if classification_service is None:
+        # Default stub: returns pending_review=True for any vehicle (no LLM calls)
+        classification_service = StubClassificationService({}, taxonomy_version=taxonomy_version)
     return SmartScraperOrchestrator(
         factory=None,  # not used — _run_session is mocked
         probe=SeasonProbe(),
@@ -92,6 +97,8 @@ def _make_orchestrator(
         provider_id=provider_id,
         provider_location_id=location_id,
         provider_rate_id=rate_id,
+        classification_service=classification_service,
+        taxonomy_version=taxonomy_version,
         provider_code="orch_test_sc",
         location_code="ORC",
         rate_code="Test Rate",
@@ -172,9 +179,16 @@ class TestOrchestratorFailure:
 class TestOrchestratorZonePersistence:
     async def test_persists_zones_via_replace(self, super_db_session):
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
-        # Pre-seed one PVG so the empty-probe run has a group to replicate zones to
-        vg_repo = ProviderVehicleGroupRepository(super_db_session)
-        vg_repo.upsert_seen(provider_id, location_id, rate_id, "ECMR", "Economy", example_models="")
+        # Pre-seed one PVC so the empty-probe run has a group to replicate zones to
+        super_db_session.add(ProviderVehicleCategory(
+            provider_id=provider_id,
+            provider_location_id=location_id,
+            provider_rate_id=rate_id,
+            external_code="ECMR",
+            external_name="Economy",
+            example_models="",
+            active=True,
+        ))
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -203,9 +217,16 @@ class TestOrchestratorZoneReplication:
     ):
         """Zone rows equal provider_zones × active_groups after a run."""
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
-        vg_repo = ProviderVehicleGroupRepository(super_db_session)
         for code in ("ECMR", "CCAR", "FCAR"):
-            vg_repo.upsert_seen(provider_id, location_id, rate_id, code, code, example_models="")
+            super_db_session.add(ProviderVehicleCategory(
+                provider_id=provider_id,
+                provider_location_id=location_id,
+                provider_rate_id=rate_id,
+                external_code=code,
+                external_name=code,
+                example_models="",
+                active=True,
+            ))
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -231,8 +252,20 @@ class TestOrchestratorZoneReplication:
     async def test_zones_replicated_to_groups_discovered_in_probe(
         self, super_db_session
     ):
-        """Groups seen in probe are upserted and get zones even if catalog was empty."""
+        """Pre-classified groups seen in probe get zones replicated to them."""
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        # Pre-seed PVCs for groups the probe will return; ClassificationService
+        # (prompt 3) is responsible for creating rows for unknown codes.
+        for code in ("GrpA", "GrpB"):
+            super_db_session.add(ProviderVehicleCategory(
+                provider_id=provider_id,
+                provider_location_id=location_id,
+                provider_rate_id=rate_id,
+                external_code=code,
+                external_name=code,
+                example_models="",
+                active=True,
+            ))
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:
@@ -259,8 +292,8 @@ class TestOrchestratorZoneReplication:
             ).all()
             # 1 provider-level zone replicated to GrpA and GrpB = 2 zone rows
             assert len(zones) == 2
-            pvg_ids = {z.provider_vehicle_group_id for z in zones}
-            assert len(pvg_ids) == 2  # two distinct PVGs received zones
+            pvg_ids = {z.provider_vehicle_category_id for z in zones}
+            assert len(pvg_ids) == 2  # two distinct PVCs received zones
         finally:
             _cleanup_provider(super_db_session, provider_id)
 
@@ -295,6 +328,16 @@ class TestOrchestratorZoneReplication:
 class TestOrchestratorObservationPersistence:
     async def test_persists_observations_via_insert_if_changed(self, super_db_session):
         provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        # Pre-seed the PVC for "Economy" so upsert_seen can find and return it
+        super_db_session.add(ProviderVehicleCategory(
+            provider_id=provider_id,
+            provider_location_id=location_id,
+            provider_rate_id=rate_id,
+            external_code="Economy",
+            external_name="Economy",
+            example_models="",
+            active=True,
+        ))
         super_db_session.commit()
         session_factory = partial(super_session, super_engine())
         try:

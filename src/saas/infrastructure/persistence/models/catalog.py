@@ -18,6 +18,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Identity,
     Integer,
@@ -31,6 +32,31 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+
+class CanonicalVehicleType(Base):
+    """Operator-curated taxonomy.  Source of truth: taxonomy.yaml."""
+    __tablename__ = "canonical_vehicle_types"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_canonical_vehicle_types_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=True), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    taxonomy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    deprecated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    categories: Mapped[list[ProviderVehicleCategory]] = relationship(
+        back_populates="canonical_type"
+    )
 
 
 class Provider(Base):
@@ -55,7 +81,9 @@ class Provider(Base):
 
     locations: Mapped[list[ProviderLocation]] = relationship(back_populates="provider")
     rates: Mapped[list[ProviderRate]] = relationship(back_populates="provider")
-    vehicle_groups: Mapped[list[ProviderVehicleGroup]] = relationship(back_populates="provider")
+    vehicle_categories: Mapped[list[ProviderVehicleCategory]] = relationship(
+        back_populates="provider"
+    )
 
 
 class ProviderLocation(Base):
@@ -101,14 +129,15 @@ class ProviderRate(Base):
     provider: Mapped[Provider] = relationship(back_populates="rates")
 
 
-class ProviderVehicleGroup(Base):
-    __tablename__ = "provider_vehicle_groups"
-    __table_args__ = (
-        UniqueConstraint(
-            "provider_id", "provider_location_id", "provider_rate_id", "external_code",
-            name="uq_provider_vehicle_groups_tuple",
-        ),
-    )
+class ProviderVehicleCategory(Base):
+    """One row per (provider, canonical_type) tuple.
+
+    external_code / external_name are kept as documentary metadata when the
+    provider exposes internal identifiers, but they are NOT part of the row's
+    identity.  Classification into a canonical type is performed by
+    ClassificationService (implemented in prompt 3).
+    """
+    __tablename__ = "provider_vehicle_categories"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     provider_id: Mapped[int] = mapped_column(
@@ -120,12 +149,31 @@ class ProviderVehicleGroup(Base):
     provider_rate_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("provider_rates.id", name="fk_provider_vehicle_groups_rate", ondelete="RESTRICT"), nullable=False
     )
-    external_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    external_name: Mapped[str] = mapped_column(Text, nullable=False)
-    example_models: Mapped[str] = mapped_column(Text, nullable=False)
+    # Classification
+    canonical_type_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("canonical_vehicle_types.id", name="fk_provider_vehicle_categories_canonical_type", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    classification_confidence: Mapped[Optional[float]] = mapped_column(
+        Float(precision=53), nullable=True
+    )
+    classification_taxonomy_version: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    pending_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    # Observed display attributes (last seen)
+    example_models: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     seats: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     luggage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     transmission: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    fuel_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Documentary metadata (nullable — not all providers expose codes)
+    external_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    external_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Lifecycle
     first_seen_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )
@@ -134,7 +182,10 @@ class ProviderVehicleGroup(Base):
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
-    provider: Mapped[Provider] = relationship(back_populates="vehicle_groups")
+    provider: Mapped[Provider] = relationship(back_populates="vehicle_categories")
+    canonical_type: Mapped[Optional[CanonicalVehicleType]] = relationship(
+        back_populates="categories"
+    )
 
 
 class ScrapeRun(Base):
@@ -185,8 +236,8 @@ class HomogeneousZone(Base):
     provider_rate_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("provider_rates.id", name="fk_homogeneous_zones_rate", ondelete="RESTRICT"), nullable=False
     )
-    provider_vehicle_group_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("provider_vehicle_groups.id", name="fk_homogeneous_zones_vehicle_group", ondelete="RESTRICT"), nullable=False
+    provider_vehicle_category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("provider_vehicle_categories.id", name="fk_homogeneous_zones_vehicle_group", ondelete="RESTRICT"), nullable=False
     )
     start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     end_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
@@ -216,8 +267,8 @@ class PriceObservation(Base):
     provider_rate_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("provider_rates.id", name="fk_price_observations_rate", ondelete="RESTRICT"), nullable=False
     )
-    provider_vehicle_group_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("provider_vehicle_groups.id", name="fk_price_observations_vehicle_group", ondelete="RESTRICT"), nullable=False
+    provider_vehicle_category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("provider_vehicle_categories.id", name="fk_price_observations_vehicle_group", ondelete="RESTRICT"), nullable=False
     )
     scrape_run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("scrape_runs.id", name="fk_price_observations_scrape_run", ondelete="RESTRICT"), nullable=False
@@ -233,7 +284,7 @@ class PriceObservation(Base):
 
 
 class PriceObservationHeartbeat(Base):
-    """One row per (provider, location, rate, vehicle_group, pickup_date, duration).
+    """One row per (provider, location, rate, vehicle_category, pickup_date, duration).
 
     Updated in place on every scrape to avoid redundant price_observations
     inserts when the price has not changed.
@@ -249,8 +300,8 @@ class PriceObservationHeartbeat(Base):
     provider_rate_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("provider_rates.id", name="fk_heartbeats_rate", ondelete="RESTRICT"), nullable=False, primary_key=True
     )
-    provider_vehicle_group_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("provider_vehicle_groups.id", name="fk_heartbeats_vehicle_group", ondelete="RESTRICT"), nullable=False, primary_key=True
+    provider_vehicle_category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("provider_vehicle_categories.id", name="fk_heartbeats_vehicle_group", ondelete="RESTRICT"), nullable=False, primary_key=True
     )
     pickup_date: Mapped[datetime.date] = mapped_column(Date, nullable=False, primary_key=True)
     duration_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, primary_key=True)

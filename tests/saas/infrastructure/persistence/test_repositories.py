@@ -18,11 +18,12 @@ import pytest
 from sqlalchemy import delete, select, text
 
 from src.saas.infrastructure.persistence.models.catalog import (
+    CanonicalVehicleType,
     HomogeneousZone,
     Provider,
     ProviderLocation,
     ProviderRate,
-    ProviderVehicleGroup,
+    ProviderVehicleCategory,
     ScrapeRun,
 )
 from src.saas.infrastructure.persistence.models.tenant import Tenant, User
@@ -32,9 +33,10 @@ from src.saas.infrastructure.persistence.repositories import (
     ProviderLocationRepository,
     ProviderRateRepository,
     ProviderRepository,
-    ProviderVehicleGroupRepository,
+    ProviderVehicleCategoryRepository,
     ScrapeRunRepository,
 )
+from tests.saas.application._fakes import StubClassificationService
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +88,8 @@ def _vehicle_group(
     provider_location_id: int,
     provider_rate_id: int,
     external_code: str = "ECONOMY",
-) -> ProviderVehicleGroup:
-    vg = ProviderVehicleGroup(
+) -> ProviderVehicleCategory:
+    vg = ProviderVehicleCategory(
         provider_id=provider_id,
         provider_location_id=provider_location_id,
         provider_rate_id=provider_rate_id,
@@ -141,83 +143,334 @@ class TestProviderRepository:
         assert "broken_one" not in codes
 
 
-class TestProviderVehicleGroupRepository:
-    def test_upsert_seen_inserts_new(self, super_db_session):
-        p = _provider(super_db_session, code="vg_insert_test")
+class TestProviderVehicleCategoryRepository:
+    def test_get_by_external_code_found(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_get_found")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        repo = ProviderVehicleGroupRepository(super_db_session)
-        vg = repo.upsert_seen(p.id, loc.id, rate.id, "COMPACT", "Compact Car", example_models="Fiat 500, VW Polo")
-        assert vg.id is not None
-        assert vg.external_code == "COMPACT"
-        assert vg.external_name == "Compact Car"
+        _vehicle_group(super_db_session, p.id, loc.id, rate.id, external_code="ECMR")
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.get_by_external_code(p.id, loc.id, rate.id, "ECMR")
+        assert result is not None
+        assert result.external_code == "ECMR"
 
-    def test_upsert_seen_updates_existing(self, super_db_session):
-        p = _provider(super_db_session, code="vg_update_test")
+    def test_get_by_external_code_not_found(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_get_missing")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        repo = ProviderVehicleGroupRepository(super_db_session)
-        vg1 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV Old Name", example_models="Toyota RAV4")
-        first_seen = vg1.first_seen_at
-        vg2 = repo.upsert_seen(p.id, loc.id, rate.id, "SUV", "SUV New Name", example_models="Toyota RAV4")
-        assert vg2.id == vg1.id
-        assert vg2.external_name == "SUV New Name"
-        assert vg2.first_seen_at == first_seen
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        assert repo.get_by_external_code(p.id, loc.id, rate.id, "NO_SUCH") is None
 
-    def test_upsert_seen_persists_group_attributes(self, super_db_session):
-        p = _provider(super_db_session, code="vg_attrs_insert")
+    def test_list_active_for_tuple_returns_only_active(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_list_active")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        repo = ProviderVehicleGroupRepository(super_db_session)
-        vg = repo.upsert_seen(
-            p.id, loc.id, rate.id, "ECMR", "Economy",
-            example_models="Fiat Panda, Kia Picanto",
-            seats=5,
-            luggage=2,
-            transmission="manual",
+        active = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="ACTIVE", external_name="Active Car", example_models="", active=True,
         )
-        assert vg.example_models == "Fiat Panda, Kia Picanto"
-        assert vg.seats == 5
-        assert vg.luggage == 2
-        assert vg.transmission == "manual"
+        inactive = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="INACTIVE", external_name="Inactive Car", example_models="", active=False,
+        )
+        super_db_session.add_all([active, inactive])
+        super_db_session.flush()
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        results = repo.list_active_for_tuple(p.id, loc.id, rate.id)
+        codes = {r.external_code for r in results}
+        assert "ACTIVE" in codes
+        assert "INACTIVE" not in codes
+
+    def test_upsert_seen_updates_existing_row(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_upsert_update")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        existing = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="SUV", external_name="SUV Old Name",
+            example_models="Toyota RAV4", active=True,
+        )
+        super_db_session.add(existing)
+        super_db_session.flush()
+        first_seen = existing.first_seen_at
+
+        stub = StubClassificationService({}, taxonomy_version=1)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="SUV", external_name="SUV New Name",
+            example_models="Toyota RAV4, Honda CR-V",
+            seats=None, luggage=None, transmission=None, fuel_type=None,
+            classification_service=stub, taxonomy_version=1,
+        )
+        assert result.id == existing.id
+        assert result.external_name == "SUV New Name"
+        assert result.example_models == "Toyota RAV4, Honda CR-V"
+        assert result.first_seen_at == first_seen
 
     def test_upsert_seen_updates_group_attributes_when_changed(self, super_db_session):
-        p = _provider(super_db_session, code="vg_attrs_update")
+        p = _provider(super_db_session, code="pvc_attrs_update")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        repo = ProviderVehicleGroupRepository(super_db_session)
-        vg1 = repo.upsert_seen(
-            p.id, loc.id, rate.id, "FCAR", "Full Size",
-            example_models="VW Passat",
-            seats=5,
-            luggage=3,
-            transmission="manual",
+        existing = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="FCAR", external_name="Full Size",
+            example_models="VW Passat", seats=5, luggage=3,
+            transmission="manual", active=True,
         )
-        vg2 = repo.upsert_seen(
-            p.id, loc.id, rate.id, "FCAR", "Full Size",
-            example_models="VW Passat, Skoda Octavia",
-            seats=5,
-            luggage=4,
-            transmission="automatic",
-        )
-        assert vg2.id == vg1.id
-        assert vg2.example_models == "VW Passat, Skoda Octavia"
-        assert vg2.luggage == 4
-        assert vg2.transmission == "automatic"
+        super_db_session.add(existing)
+        super_db_session.flush()
 
-    def test_upsert_seen_accepts_null_optional_attributes(self, super_db_session):
-        p = _provider(super_db_session, code="vg_attrs_null")
+        stub = StubClassificationService({}, taxonomy_version=1)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="FCAR", external_name="Full Size",
+            example_models="VW Passat, Skoda Octavia",
+            seats=5, luggage=4, transmission="automatic", fuel_type=None,
+            classification_service=stub, taxonomy_version=1,
+        )
+        assert result.id == existing.id
+        assert result.example_models == "VW Passat, Skoda Octavia"
+        assert result.luggage == 4
+        assert result.transmission == "automatic"
+
+    # ------------------------------------------------------------------
+    # Classification-aware upsert_seen tests
+    # ------------------------------------------------------------------
+
+    def test_upsert_seen_classifies_new_pvc(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_cls_new")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        repo = ProviderVehicleGroupRepository(super_db_session)
-        vg = repo.upsert_seen(
-            p.id, loc.id, rate.id, "CCAR", "Compact",
-            example_models="Renault Clio",
+        ct = CanonicalVehicleType(
+            code="UTEST_ECO_MAN", name="Economy Manual (test)",
+            description="Small manual car", taxonomy_version=1, active=True,
         )
-        assert vg.example_models == "Renault Clio"
-        assert vg.seats is None
-        assert vg.luggage is None
-        assert vg.transmission is None
+        super_db_session.add(ct)
+        super_db_session.flush()
+
+        stub = StubClassificationService(
+            {"ECMR": "UTEST_ECO_MAN"}, taxonomy_version=1, default_confidence=0.95
+        )
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        pvc = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="ECMR", external_name="Economy",
+            example_models="Fiat Panda", seats=5, luggage=2,
+            transmission="manual", fuel_type=None,
+            classification_service=stub, taxonomy_version=1,
+        )
+
+        assert pvc.canonical_type_id == ct.id
+        assert pvc.classification_confidence == pytest.approx(0.95)
+        assert pvc.classification_taxonomy_version == 1
+        assert pvc.pending_review is False
+        assert stub.call_count == 1
+
+    def test_upsert_seen_skips_llm_when_taxonomy_version_matches(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_cls_cache")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        ct = CanonicalVehicleType(
+            code="UTEST_CMPCT_AUT", name="Compact Auto (test)",
+            description="Compact automatic car", taxonomy_version=3, active=True,
+        )
+        super_db_session.add(ct)
+        super_db_session.flush()
+
+        existing = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="CCAR", external_name="Compact",
+            example_models="Ford Focus", active=True,
+            canonical_type_id=ct.id,
+            classification_confidence=0.91,
+            classification_taxonomy_version=3,
+            pending_review=False,
+        )
+        super_db_session.add(existing)
+        super_db_session.flush()
+
+        stub = StubClassificationService({"CCAR": "UTEST_CMPCT_AUT"}, taxonomy_version=3)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="CCAR", external_name="Compact",
+            example_models="Ford Focus, VW Golf", seats=5, luggage=3,
+            transmission="automatic", fuel_type=None,
+            classification_service=stub, taxonomy_version=3,
+        )
+
+        assert stub.call_count == 0, "LLM must not be called when version matches"
+        assert result.canonical_type_id == ct.id
+        assert result.example_models == "Ford Focus, VW Golf"
+        assert result.last_seen_at is not None
+
+    def test_upsert_seen_reclassifies_when_taxonomy_version_changes(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_cls_reclassify")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        old_ct = CanonicalVehicleType(
+            code="OLD_CATEGORY", name="Old Category",
+            description="Old", taxonomy_version=3, active=False,
+        )
+        new_ct = CanonicalVehicleType(
+            code="NEW_CATEGORY", name="New Category",
+            description="New", taxonomy_version=4, active=True,
+        )
+        super_db_session.add_all([old_ct, new_ct])
+        super_db_session.flush()
+
+        existing = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="CCAR", external_name="Compact",
+            example_models="Ford Focus", active=True,
+            canonical_type_id=old_ct.id,
+            classification_taxonomy_version=3,
+            pending_review=False,
+        )
+        super_db_session.add(existing)
+        super_db_session.flush()
+
+        stub = StubClassificationService({"CCAR": "NEW_CATEGORY"}, taxonomy_version=4)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="CCAR", external_name="Compact",
+            example_models="Ford Focus, VW Golf", seats=5, luggage=3,
+            transmission="automatic", fuel_type=None,
+            classification_service=stub, taxonomy_version=4,
+        )
+
+        assert stub.call_count == 1
+        assert result.canonical_type_id == new_ct.id
+        assert result.classification_taxonomy_version == 4
+        assert result.pending_review is False
+
+    def test_upsert_seen_keeps_cached_classification_on_pending_review_for_existing_pvc(
+        self, super_db_session
+    ):
+        p = _provider(super_db_session, code="pvc_cls_cached_fallback")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+        ct = CanonicalVehicleType(
+            code="UTEST_ECO_FALL", name="Economy Fallback (test)",
+            description="Small manual car", taxonomy_version=3, active=True,
+        )
+        super_db_session.add(ct)
+        super_db_session.flush()
+
+        existing = ProviderVehicleCategory(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="ECMR", external_name="Economy",
+            example_models="Fiat Panda", active=True,
+            canonical_type_id=ct.id,
+            classification_confidence=0.91,
+            classification_taxonomy_version=3,
+            pending_review=False,
+        )
+        super_db_session.add(existing)
+        super_db_session.flush()
+        original_canonical_id = ct.id
+
+        # Stub for v4 returns pending_review (low confidence)
+        stub = StubClassificationService({}, taxonomy_version=4)  # empty map → pending
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        result = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="ECMR", external_name="Economy",
+            example_models="Fiat Panda", seats=5, luggage=2,
+            transmission="manual", fuel_type=None,
+            classification_service=stub, taxonomy_version=4,
+        )
+
+        assert result.canonical_type_id == original_canonical_id, \
+            "Previous canonical_type_id must be preserved on pending_review"
+        assert result.pending_review is True
+        assert result.classification_confidence == pytest.approx(0.0)
+        # taxonomy_version NOT updated — cached fallback keeps the old version
+        assert result.classification_taxonomy_version == 3
+
+    def test_upsert_seen_marks_pending_review_for_new_pvc_when_llm_uncertain(
+        self, super_db_session
+    ):
+        p = _provider(super_db_session, code="pvc_cls_new_pending")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+
+        stub = StubClassificationService({}, taxonomy_version=1)  # always pending
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        pvc = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="XCAR", external_name="Unknown Group",
+            example_models="Mystery Car", seats=None, luggage=None,
+            transmission=None, fuel_type=None,
+            classification_service=stub, taxonomy_version=1,
+        )
+
+        assert pvc.canonical_type_id is None
+        assert pvc.pending_review is True
+        assert pvc.classification_taxonomy_version == 1
+
+    def test_upsert_seen_marks_pending_review_when_canonical_not_found_in_db(
+        self, super_db_session
+    ):
+        p = _provider(super_db_session, code="pvc_cls_ghost")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+
+        # Stub returns 'GHOST_CATEGORY' but that code is not seeded in DB
+        stub = StubClassificationService({"ECMR": "GHOST_CATEGORY"}, taxonomy_version=1)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        pvc = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="ECMR", external_name="Economy",
+            example_models="Fiat Panda", seats=5, luggage=2,
+            transmission="manual", fuel_type=None,
+            classification_service=stub, taxonomy_version=1,
+        )
+
+        assert pvc.canonical_type_id is None
+        assert pvc.pending_review is True
+
+    def test_upsert_seen_uses_attribute_hash_when_no_external_code(self, super_db_session):
+        p = _provider(super_db_session, code="pvc_cls_no_code")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+
+        stub = StubClassificationService({}, taxonomy_version=1)
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+
+        # First call: creates new PVC (no external_code)
+        pvc1 = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code=None, external_name=None,
+            example_models="Fiat Panda", seats=5, luggage=2,
+            transmission="manual", fuel_type="gasoline",
+            classification_service=stub, taxonomy_version=1,
+        )
+        assert pvc1.id is not None
+        assert stub.call_count == 1
+
+        # Second call with same attributes: must find the existing row, not create a new one
+        pvc2 = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code=None, external_name=None,
+            example_models="Fiat Panda", seats=5, luggage=2,
+            transmission="manual", fuel_type="gasoline",
+            classification_service=stub, taxonomy_version=1,  # same version → cache hit
+            )
+        assert pvc2.id == pvc1.id, "Second call must return the same PVC, not create a new row"
+        # Version matches after first call → LLM not called again
+        assert stub.call_count == 1, "classify() must not be called a second time when version matches"
+
+        total = super_db_session.scalar(
+            select(ProviderVehicleCategory).where(
+                ProviderVehicleCategory.provider_id == p.id,
+                ProviderVehicleCategory.external_code.is_(None),
+            )
+        )
+        assert total is not None
 
 
 class TestScrapeRunRepository:
@@ -247,7 +500,7 @@ class TestHomogeneousZoneRepository:
             provider_id=p.id,
             provider_location_id=loc.id,
             provider_rate_id=rate.id,
-            provider_vehicle_group_id=vg.id,
+            provider_vehicle_category_id=vg.id,
             start_date=datetime.date(2026, 1, 1),
             end_date=datetime.date(2026, 1, 31),
             representative_date=datetime.date(2026, 1, 15),
@@ -260,7 +513,7 @@ class TestHomogeneousZoneRepository:
             provider_id=p.id,
             provider_location_id=loc.id,
             provider_rate_id=rate.id,
-            provider_vehicle_group_id=vg.id,
+            provider_vehicle_category_id=vg.id,
             start_date=datetime.date(2026, 2, 1),
             end_date=datetime.date(2026, 2, 28),
             representative_date=datetime.date(2026, 2, 15),

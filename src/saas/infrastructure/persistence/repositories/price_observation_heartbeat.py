@@ -18,7 +18,7 @@ class PriceObservationHeartbeatRepository:
         provider_id: int,
         provider_location_id: int,
         provider_rate_id: int,
-        provider_vehicle_group_id: int,
+        provider_vehicle_category_id: int,
         pickup_date: datetime.date,
         duration_days: int,
         price_per_day: Decimal,
@@ -29,23 +29,23 @@ class PriceObservationHeartbeatRepository:
             text("""
                 INSERT INTO price_observation_heartbeats
                     (provider_id, provider_location_id, provider_rate_id,
-                     provider_vehicle_group_id, pickup_date, duration_days,
+                     provider_vehicle_category_id, pickup_date, duration_days,
                      last_checked_at, last_price_per_day)
                 VALUES
                     (:provider_id, :provider_location_id, :provider_rate_id,
-                     :provider_vehicle_group_id, :pickup_date, :duration_days,
+                     :provider_vehicle_category_id, :pickup_date, :duration_days,
                      :last_checked_at, :last_price_per_day)
                 ON CONFLICT (provider_id, provider_location_id, provider_rate_id,
-                             provider_vehicle_group_id, pickup_date, duration_days)
+                             provider_vehicle_category_id, pickup_date, duration_days)
                 DO UPDATE SET
-                    last_checked_at   = EXCLUDED.last_checked_at,
+                    last_checked_at    = EXCLUDED.last_checked_at,
                     last_price_per_day = EXCLUDED.last_price_per_day
             """),
             {
                 "provider_id": provider_id,
                 "provider_location_id": provider_location_id,
                 "provider_rate_id": provider_rate_id,
-                "provider_vehicle_group_id": provider_vehicle_group_id,
+                "provider_vehicle_category_id": provider_vehicle_category_id,
                 "pickup_date": pickup_date,
                 "duration_days": duration_days,
                 "last_checked_at": checked_at,

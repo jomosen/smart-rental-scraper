@@ -30,21 +30,22 @@ from src.saas.application.onboarding.steps import (
 )
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.models.catalog import (
+    CanonicalVehicleType,
     HomogeneousZone,
     Provider,
     ProviderLocation,
     ProviderRate,
-    ProviderVehicleGroup,
+    ProviderVehicleCategory,
     PriceObservation,
     PriceObservationHeartbeat,
     ScrapeRun,
 )
 from src.saas.infrastructure.persistence.models.tenant import (
-    ClientVehicleGroup,
     Tenant,
     TenantSubscription,
+    TenantVehicleGroup,
+    TenantVehicleGroupMapping,
     User,
-    VehicleGroupMapping,
 )
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
@@ -99,34 +100,50 @@ def _setup_catalog(session) -> tuple[int, int, int]:
     return ids["Onboard Test Provider"]
 
 
-def _setup_pvg(session, pid: int, lid: int, rid: int, ext_code: str = "ECMR") -> ProviderVehicleGroup:
-    pvg = ProviderVehicleGroup(
+def _setup_pvg(
+    session,
+    pid: int,
+    lid: int,
+    rid: int,
+    ext_code: str = "ECMR",
+    canonical_type_id=None,
+) -> ProviderVehicleCategory:
+    pvg = ProviderVehicleCategory(
         provider_id=pid,
         provider_location_id=lid,
         provider_rate_id=rid,
         external_code=ext_code,
         external_name=ext_code,
         example_models="",
+        canonical_type_id=canonical_type_id,
     )
     session.add(pvg)
     session.flush()
     return pvg
 
 
-def _cleanup(session, provider_id: int, tenant_id=None) -> None:
+def _cleanup(
+    session,
+    provider_id: int,
+    tenant_id=None,
+    canonical_type_ids=None,
+) -> None:
     """Delete all test data in FK-safe order and commit."""
     session.rollback()
     if tenant_id is not None:
         rollback_tenant(tenant_id, session)
-    session.execute(delete(VehicleGroupMapping))
+    session.execute(delete(TenantVehicleGroupMapping))
     session.execute(delete(PriceObservation).where(PriceObservation.provider_id == provider_id))
     session.execute(delete(PriceObservationHeartbeat).where(PriceObservationHeartbeat.provider_id == provider_id))
     session.execute(delete(HomogeneousZone).where(HomogeneousZone.provider_id == provider_id))
     session.execute(delete(ScrapeRun).where(ScrapeRun.provider_id == provider_id))
-    session.execute(delete(ProviderVehicleGroup).where(ProviderVehicleGroup.provider_id == provider_id))
+    session.execute(delete(ProviderVehicleCategory).where(ProviderVehicleCategory.provider_id == provider_id))
     session.execute(delete(ProviderRate).where(ProviderRate.provider_id == provider_id))
     session.execute(delete(ProviderLocation).where(ProviderLocation.provider_id == provider_id))
     session.execute(delete(Provider).where(Provider.id == provider_id))
+    if canonical_type_ids:
+        for ctid in canonical_type_ids:
+            session.execute(delete(CanonicalVehicleType).where(CanonicalVehicleType.id == ctid))
     session.commit()
 
 
@@ -232,8 +249,15 @@ def test_creates_tenant_and_subscribes_active_when_all_mappings_complete(
     super_db_session, tmp_path
 ):
     pid, lid, rid = _setup_catalog(super_db_session)
-    _setup_pvg(super_db_session, pid, lid, rid, "ECMR")
+    ct_ecmr = CanonicalVehicleType(
+        code="ECMR_ONB01", name="Economy Manual ONB01",
+        description="Test canonical for ECMR", taxonomy_version=1,
+    )
+    super_db_session.add(ct_ecmr)
+    super_db_session.flush()
+    _setup_pvg(super_db_session, pid, lid, rid, "ECMR", canonical_type_id=ct_ecmr.id)
     super_db_session.commit()
+    ct_ids = [ct_ecmr.id]
     tenant_id = None
     try:
         config = _config_from_yaml(_VALID_YAML, tmp_path)
@@ -255,7 +279,7 @@ def test_creates_tenant_and_subscribes_active_when_all_mappings_complete(
             ts = s.get(TenantSubscription, sub_ids[key])
             assert ts.status == "active"
     finally:
-        _cleanup(super_db_session, pid, tenant_id)
+        _cleanup(super_db_session, pid, tenant_id, canonical_type_ids=ct_ids)
 
 
 def test_leaves_subscription_pending_when_no_mappings_exist(
@@ -292,9 +316,20 @@ def test_activates_subscription_with_partial_mappings(
     super_db_session, tmp_path, capsys
 ):
     pid, lid, rid = _setup_catalog(super_db_session)
-    _setup_pvg(super_db_session, pid, lid, rid, "ECMR")
-    _setup_pvg(super_db_session, pid, lid, rid, "SUV1")
+    ct_ecmr = CanonicalVehicleType(
+        code="ECMR_ONB02", name="Economy Manual ONB02",
+        description="Test canonical for ECMR", taxonomy_version=1,
+    )
+    ct_suv = CanonicalVehicleType(
+        code="SUV1_ONB02", name="SUV ONB02",
+        description="Test canonical for SUV1", taxonomy_version=1,
+    )
+    super_db_session.add_all([ct_ecmr, ct_suv])
+    super_db_session.flush()
+    _setup_pvg(super_db_session, pid, lid, rid, "ECMR", canonical_type_id=ct_ecmr.id)
+    _setup_pvg(super_db_session, pid, lid, rid, "SUV1", canonical_type_id=ct_suv.id)
     super_db_session.commit()
+    ct_ids = [ct_ecmr.id, ct_suv.id]
     tenant_id = None
     try:
         config = _config_from_yaml(_VALID_YAML, tmp_path)  # maps only ECMR
@@ -319,9 +354,10 @@ def test_activates_subscription_with_partial_mappings(
 
         captured = capsys.readouterr()
         assert "[info]" in captured.err
+        # [info] lists canonical type codes — SUV1_ONB02 contains "SUV1"
         assert "SUV1" in captured.err
     finally:
-        _cleanup(super_db_session, pid, tenant_id)
+        _cleanup(super_db_session, pid, tenant_id, canonical_type_ids=ct_ids)
 
 
 def test_rolls_back_tenant_when_discovery_fails(super_db_session, tmp_path):
@@ -435,9 +471,20 @@ def test_activates_subscription_when_partial_scope_declared_explicitly(
     [info] must mention the 3 out-of-scope groups."""
     import textwrap as _tw
     pid, lid, rid = _setup_catalog(super_db_session)
+    # Seed one canonical type per PVC so all are classified before onboarding
+    cts = []
     for code in ("PVG1", "PVG2", "PVG3", "PVG4", "PVG5"):
-        _setup_pvg(super_db_session, pid, lid, rid, code)
+        ct = CanonicalVehicleType(
+            code=f"{code}_ONB08", name=f"{code} ONB08",
+            description=f"Test canonical for {code}", taxonomy_version=1,
+        )
+        super_db_session.add(ct)
+        cts.append(ct)
+    super_db_session.flush()
+    for ct, ext_code in zip(cts, ("PVG1", "PVG2", "PVG3", "PVG4", "PVG5")):
+        _setup_pvg(super_db_session, pid, lid, rid, ext_code, canonical_type_id=ct.id)
     super_db_session.commit()
+    ct_ids = [ct.id for ct in cts]
 
     yaml_text = _tw.dedent("""\
         tenant:
@@ -489,10 +536,10 @@ def test_activates_subscription_when_partial_scope_declared_explicitly(
 
         captured = capsys.readouterr()
         assert "[info]" in captured.err
-        # All 3 unmapped groups must appear in the info message
+        # [info] lists canonical type codes — PVGn_ONB08 codes contain "PVGn"
         assert all(code in captured.err for code in ("PVG3", "PVG4", "PVG5"))
     finally:
-        _cleanup(super_db_session, pid, tenant_id)
+        _cleanup(super_db_session, pid, tenant_id, canonical_type_ids=ct_ids)
 
 
 def test_validate_catalog_handles_multiple_subscriptions_to_same_provider(
@@ -561,3 +608,26 @@ def test_validate_catalog_handles_multiple_subscriptions_to_same_provider(
     assert pid1 == pid2      # same provider
     assert lid1 != lid2      # different locations
     assert rid1 == rid2      # same rate
+
+
+def test_step_create_mappings_rejects_unclassified_pvc(
+    super_db_session, tmp_path
+):
+    """step_create_mappings raises OnboardingError when a referenced PVC has no canonical_type_id."""
+    pid, lid, rid = _setup_catalog(super_db_session)
+    _setup_pvg(super_db_session, pid, lid, rid, "ECMR", canonical_type_id=None)
+    super_db_session.commit()
+    tenant_id = None
+    try:
+        config = _config_from_yaml(_VALID_YAML, tmp_path)
+        catalog_ids = {("onb_test_sc", "ONB1", "test_rate"): (pid, lid, rid)}
+
+        with super_session(super_engine()) as s:
+            tenant_id = step_create_tenant(config, s)
+
+        with super_session(super_engine()) as s:
+            client_group_ids = step_create_users_and_groups(config, tenant_id, s)
+            with pytest.raises(OnboardingError, match="not yet classified"):
+                step_create_mappings(config, catalog_ids, tenant_id, client_group_ids, s)
+    finally:
+        _cleanup(super_db_session, pid, tenant_id)

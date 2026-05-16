@@ -463,3 +463,207 @@ Pendiente para futuro:
 *Triggers para optimizaciones diferidas.*
 - Esta observación activa **DD-3** (pool de scrapers / paralelismo) y **DD-4** (adaptive probe) de `docs/PRODUCT_SCOPE.md` cuando el volumen de proveedores o localizaciones crezca.
 - No se implementa ahora: el pipeline mono-proveedor actual es asumible en entorno de PoC/piloto.
+
+---
+
+## Modelo replantado — Taxonomía canónica como espina dorsal
+
+> Hito en curso. Esta entrada se completa cuando el replanteamiento esté
+> implementado y validado. Mientras tanto, sirve como anclaje del **por qué**
+> y del **qué cambia**, registrado en el momento de la decisión.
+
+**Goal.** Reorganizar el modelo de datos para que la identidad estable
+de "un tipo de vehículo" viva en una taxonomía canónica curada por el
+operador, no en el `external_code` de cada provider. Adoptar
+clasificación automática vía LLM (Gemini Flash + Pro fallback) durante
+el scrape. Renombrar las tablas para reflejar la nueva semántica.
+
+**Contexto del cambio.** El modelo anterior asumía que cada provider
+expone un código de grupo estable en su HTML, y construía la identidad
+de `provider_vehicle_groups` sobre `(provider, external_code)`. La
+realidad observada con providers reales:
+
+- Algunos providers no exponen códigos de grupo en su interfaz pública.
+- Al menos un provider los exponía y dejó de hacerlo tras una
+  modernización reciente de su web.
+- La tendencia del mercado es "menos información técnica visible para
+  el usuario", lo que sugiere que el patrón se va a debilitar más,
+  no a estabilizarse.
+
+Esto convierte la estrategia anterior de "mapping manual de
+provider_groups a client_groups" en frágil: para providers que no
+exponen códigos, el scraper tendría que inventar identificadores
+sintéticos potencialmente inestables (porque los modelos representativos
+mostrados pueden rotar entre scrapes), y el histórico se rompería.
+
+La taxonomía canónica resuelve el problema en su raíz: la identidad
+estable es la categoría canónica, no el código del provider. Los
+external_codes, cuando existen, se conservan como metadatos
+documentales pero no son parte de la estructura.
+
+**What changes (estructural).**
+
+- **Tabla nueva** `canonical_vehicle_types`: maestra de la taxonomía
+  del operador. Fuente de verdad: `taxonomy.yaml` versionado en git,
+  aplicado a BD por un seed script idempotente. Categorías típicas:
+  `ECONOMY_PASSENGER`, `COMPACT_PASSENGER`, `MID_SUV`, `LUXURY_AUTO`,
+  `COMMERCIAL`, `MOTORCYCLE`. La taxonomía es deliberadamente coarse
+  (10-15 categorías) y estable.
+- **Tabla renombrada** `provider_vehicle_groups` → `provider_vehicle_categories`.
+  Identidad nueva: `(provider_id, location_id, rate_id, canonical_type_id)`.
+  Columnas nuevas: `canonical_type_id` (FK, nullable),
+  `classification_confidence` (float, nullable),
+  `classification_taxonomy_version` (int, nullable),
+  `pending_review` (boolean, default false). Columnas `external_code` y
+  `external_name` pasan a ser opcionales y documentales.
+- **Tablas renombradas** (capa tenant, alineación léxica con `tenant_*`):
+  - `client_vehicle_groups` → `tenant_vehicle_groups`.
+  - `vehicle_group_mappings` → `tenant_vehicle_group_mappings`. Ahora
+    apunta a `canonical_vehicle_types`, no a `provider_vehicle_groups`.
+  - Columnas `client_vehicle_group_id` → `tenant_vehicle_group_id` en
+    todas las tablas afectadas.
+- **FK renombradas** en `homogeneous_zones`, `price_observations`,
+  `price_observation_heartbeats`:
+  `provider_vehicle_group_id` → `provider_vehicle_category_id`.
+- **Capa tenant ahora es opcional.** Un tenant que no declara
+  `tenant_vehicle_groups` consume el producto en lenguaje canónico
+  directamente.
+
+**What changes (comportamiento del scraper).**
+
+- Cada vehículo extraído se clasifica en una categoría canónica antes
+  de persistirse en `provider_vehicle_categories`.
+- Clasificación inline durante el scrape vía interfaz abstracta
+  `ClassificationService` (inversión de dependencia: ningún módulo del
+  producto se acopla a un proveedor LLM concreto).
+- Implementación primaria: Gemini Flash. Fallback condicional: Gemini
+  Pro cuando Flash devuelve confianza < 0.85. Umbral hardcoded en
+  código.
+- Si ambos modelos quedan por debajo del umbral: fila se persiste con
+  `canonical_type_id=NULL` y `pending_review=true`. El LLM nunca crea
+  categorías nuevas autónomamente.
+- Si el LLM falla (timeout, rate limit, error de red): se reutiliza la
+  clasificación previa cacheada para esa fila (vía atributos hash o
+  external_code); si no existe fila previa, se persiste con
+  `pending_review=true`. El scrape sigue.
+- Caché de clasificaciones embebida en la propia tabla
+  `provider_vehicle_categories` vía `classification_taxonomy_version`.
+  Cuando esa versión coincide con la versión actual de la taxonomía,
+  la clasificación se reutiliza sin llamar al LLM.
+
+**What changes (gestión de la taxonomía).**
+
+- Fuente de verdad: `taxonomy.yaml` en raíz del repo, versionado en git.
+- Cada cambio incrementa `taxonomy_version`. El seed script:
+  - Inserta categorías nuevas.
+  - Actualiza descripción/criterios cuando cambian.
+  - Marca como `active=false` categorías deprecadas (nunca borra).
+- Re-clasificación selectiva: filas en categorías deprecadas, filas con
+  `pending_review=true`, o filas explícitamente marcadas vía
+  `reclassify_on_seed: true` en el YAML. Resto se preserva.
+
+**Migration strategy.**
+
+BD limpia (no migración con datos): borrar las 33 filas existentes en
+`provider_vehicle_groups` (Solcar + Victoria) junto con sus zonas,
+observations, heartbeats y scrape_runs. El siguiente scrape repuebla
+todo con el modelo nuevo y la clasificación automática poblada.
+
+Esta decisión es viable porque no hay clientes en producción todavía y
+los datos actuales son material de PoC, no histórico operacional.
+
+**What also changes (consultas).**
+
+- `PriceQueryService` adapta sus tres métodos para usar
+  `canonical_vehicle_types` como ejes de fila por defecto.
+- Cuando el tenant tiene `tenant_vehicle_groups` declarados, el output
+  se etiqueta con sus labels (resolviendo via
+  `tenant_vehicle_group_mappings`); cuando no, se etiqueta con códigos
+  canónicos.
+- N:M policy `min` aplica en dos niveles ahora:
+  - Dentro de un provider (cuando varios grupos clasifican en la misma
+    categoría).
+  - Entre providers en consultas agregadas.
+
+**Decisions taken.**
+
+- **Identidad de provider_vehicle_categories es `(provider, canonical_type)`**,
+  no `(provider, external_code)`. external_code documental, no estructural.
+- **Capa tenant opcional.** Tenant sin `tenant_vehicle_groups` consume
+  el producto. La capa propia es opt-in para clientes que quieran su
+  lenguaje.
+- **Taxonomía gruesa, no fina.** 10-15 categorías. Si dos grupos del
+  provider caen en la misma categoría, se agregan; eso es decisión
+  consciente, no bug. Tenants que necesiten granularidad la expresan
+  en su propia capa.
+- **`tenant_vehicle_group_mappings` apunta a `canonical_vehicle_types`,
+  no a `provider_vehicle_categories`.** El cliente mapea contra el
+  lenguaje del operador, no contra cada provider individual. Reduce
+  drásticamente el número de mappings y aísla al cliente del catálogo
+  de cada provider.
+- **Full IA con inversión de dependencia.** `ClassificationService`
+  como interfaz abstracta. Gemini Flash + Pro como implementación;
+  cualquier otro proveedor LLM es swappable.
+- **Umbral de confianza 0.85 hardcoded en código.** No `.env`, no BD.
+  Cambiar el umbral requiere cambio de código deliberado.
+- **BD limpia, no migración con datos.** Viable hoy porque no hay
+  clientes en producción. Después de v0, cualquier cambio similar
+  requerirá migración con datos preservados.
+- **Provider_b también tiene parsing real**, descubierto durante el
+  enriquecimiento de atributos. Documentado en la entrada anterior
+  "provider_b — Vehicle group attributes (real parsing)". Provider_a
+  sigue siendo el único con placeholder `example_models=""`.
+
+**Deferred.**
+
+- **Mecanismo de "explícitamente ignorado"** para categorías canónicas
+  que el operador no quiere mostrar a ningún tenant. No necesario en
+  v0 — la taxonomía es curada, no incluye categorías que no se quieran
+  mostrar.
+- **Re-clasificación masiva por cambio de modelo LLM** (cuando se
+  migre del proveedor LLM primario a otro distinto). Por ahora se
+  asume que clasificaciones hechas con Gemini siguen válidas cuando
+  llegue otro modelo.
+- **Vista operacional para el operador sobre filas con `pending_review=true`.**
+  Necesaria a medio plazo para que la revisión manual no se acumule
+  en la sombra. No bloquea v0.
+- **Política de aggregación N:M configurable por mapeo** sigue
+  diferida (ya estaba antes); cuando llegue, vivirá en
+  `tenant_vehicle_group_mappings`.
+
+**Implementation plan.**
+
+1. Diseño de la taxonomía canónica por el operador. Trabajo de
+   pensamiento, no de programación. Output: `taxonomy.yaml` con
+   10-15 categorías y los 33 grupos actuales (Solcar + Victoria)
+   pre-clasificados manualmente para validar que la taxonomía cubre
+   el dataset real.
+2. Migration Alembic: crear `canonical_vehicle_types`, renombrar
+   `provider_vehicle_groups` → `provider_vehicle_categories` con las
+   columnas nuevas, renombrar `client_*` → `tenant_*`, renombrar FKs.
+3. Seed script idempotente que aplica `taxonomy.yaml` a BD.
+4. Implementación del `ClassificationService` (interfaz abstracta +
+   Gemini Flash + Gemini Pro fallback).
+5. Refactor de scrapers (`upsert_seen` y `_persist_zones`) para usar
+   la nueva clave de identidad y llamar al `ClassificationService`.
+6. Refactor de `PriceQueryService` para usar
+   `canonical_vehicle_types` como ejes de fila.
+7. Refactor de todos los tests afectados.
+8. Actualizar `CLAUDE.md` y `README.md` con la nueva semántica.
+9. BD limpia + scrape de validación end-to-end.
+
+**Notas operacionales.**
+
+- La entrada anterior "Observación operacional — Rendimiento dispar
+  de scrapers" hacía referencia a códigos `DD-3` y `DD-4` que existían
+  en una versión anterior de `PRODUCT_SCOPE.md`. Tras la consolidación
+  de "Decisiones diferidas" en ese documento, esas referencias quedan
+  ambiguas. La intención original era apuntar a "Pool de scrapers /
+  paralelismo" y a las optimizaciones diferidas de
+  `SCRAPING_OPTIMIZATIONS.md`. La nota se mantiene en el log por
+  fidelidad histórica; el lector debe interpretar el contenido, no
+  los códigos.
+
+**Closure.** Pendiente. La entrada se actualiza cuando el plan esté
+implementado, los tests pasen, y un scrape end-to-end haya populado
+la BD con datos clasificados correctamente.
