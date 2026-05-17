@@ -32,29 +32,61 @@ _REFERENCE_PATH = Path(__file__).parents[4] / "docs" / "acriss_reference.md"
 
 _MIXED_GROUPS_REMINDER = """\
 CRITICAL RULE FOR MIXED GROUPS:
-If the vehicle group contains multiple distinct models that map to
-different ACRISS codes (e.g. "VW Tiguan, VW T-Roc" → IFAR vs CGAR),
-classify to the HIGHEST tier present. Tier order:
 
-  M < E < C < I < S < F < P < L
-  Elite versions rank above their mainstream counterpart of the same size:
-  D > C, J > I, R > S, G > F, U > P, W > L, H > E, N > M.
+When a PVC groups multiple distinct vehicle models that map to DIFFERENT
+ACRISS codes, you MUST:
+  - Set acriss_code to the HIGHEST-TIER code (NEVER null).
+  - Set pending_review = true.
+  - Set confidence = 0.65.
+  - In reasoning, explain which models are present, which codes they
+    individually map to, and which one was chosen as highest tier.
 
-If categories tie, prefer body types in order: F (SUV) > G (Crossover)
-> M (MPV) > V (Van) > D (sedan) > W (wagon) > E (coupe) > T (convertible).
-If body types tie, prefer A (auto) > M (manual). If transmissions tie,
-prefer R (combustion) over hybrid/electric.
+Tier order (lowest to highest): M < E < C < I < S < F < P < L.
+Elite versions rank just above their mainstream counterpart of same size:
+  N > M ; H > E ; D > C ; J > I ; R > S ; G > F ; U > P ; W > L.
 
-In mixed-group cases:
-  - acriss_code = highest-tier code (NOT null)
-  - pending_review = true
-  - confidence = ~0.65
-  - reasoning = explicit explanation of which models were present, why
-    they map to different codes, and which one determined the choice.
+If categories tie, prefer body types in order:
+  F (SUV) > G (Crossover) > M (MPV) > V (Van) > D (sedan) > W (wagon)
+  > E (coupe) > T (convertible) > N (roadster).
 
-NEVER set acriss_code = null for a mixed group if any one of the models
-in the group matches a materialized code. Always assign the highest-tier
-one and mark pending_review = true.\
+If body types tie, prefer A (Auto) > M (Manual).
+If transmissions tie, prefer R (combustion) over hybrid/electric.
+
+ABSOLUTE RULE: NEVER set acriss_code = null for a mixed group when at
+least one of the models in the group matches a materialized code. This
+rule OVERRIDES the general "return null if no fit" guidance. Always
+assign the highest-tier code and mark pending_review = true.
+
+EXAMPLE (canonical mixed-group case):
+  Input PVC: example_models = "VW Tiguan, VW T-Roc"
+
+  Individual model classification:
+    - VW Tiguan → IFAR (Intermediate SUV, Auto, Combustion)
+    - VW T-Roc → CGAR (Compact Crossover, Auto, Combustion)
+
+  Mixed group resolution:
+    - Categories differ: I (Tiguan) > C (T-Roc). Choose I.
+    - Body types differ: F (Tiguan) > G (T-Roc). Choose F.
+    - Transmissions tie: both A.
+    - Fuels tie: both R.
+    - Highest-tier code: IFAR
+
+  Correct response:
+    {
+      "acriss_code": "IFAR",
+      "acriss_category": "I",
+      "acriss_body_type": "F",
+      "acriss_transmission": "A",
+      "acriss_fuel": "R",
+      "confidence": 0.65,
+      "pending_review": true,
+      "reasoning": "Mixed group of VW Tiguan (IFAR, Intermediate SUV)
+                    and VW T-Roc (CGAR, Compact Crossover). Selected
+                    IFAR as the highest-tier model in the group."
+    }
+
+  INCORRECT response (do NOT do this):
+    { "acriss_code": null, "pending_review": true, "confidence": 0.65 }
 """
 
 logger = logging.getLogger(__name__)
@@ -348,8 +380,6 @@ class GeminiClassificationService(ClassificationService):
             "You are an expert vehicle classifier for the car rental industry.\n\n"
             f"{self._acriss_reference}\n\n"
             "---\n\n"
-            f"{_MIXED_GROUPS_REMINDER}\n\n"
-            "---\n\n"
             "### MATERIALIZED CODES\n\n"
             "(The ONLY valid codes for this classification. "
             "Do not use any code not listed here.)\n\n"
@@ -357,6 +387,8 @@ class GeminiClassificationService(ClassificationService):
             "---\n\n"
             "### VEHICLES TO CLASSIFY\n\n"
             f"{section_vehicles}\n\n"
+            "---\n\n"
+            f"{_MIXED_GROUPS_REMINDER}\n\n"
             "---\n\n"
             "### OUTPUT FORMAT\n\n"
             f"{section_output}"

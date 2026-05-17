@@ -375,7 +375,18 @@ class TestBuildBatchPromptSections:
         prompt = svc._build_batch_prompt(_PROVIDER_CODE, [_vehicle()])
 
         assert "CRITICAL RULE FOR MIXED GROUPS" in prompt
-        assert "highest-tier" in prompt
+        assert "ABSOLUTE RULE" in prompt
+        assert "VW Tiguan" in prompt   # few-shot example present
+
+    def test_mixed_groups_reminder_positioned_after_vehicles(self):
+        svc = _make_service()
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, [_vehicle()])
+
+        vehicles_pos = prompt.index("VEHICLES TO CLASSIFY")
+        reminder_pos = prompt.index("CRITICAL RULE FOR MIXED GROUPS")
+        output_pos = prompt.index("OUTPUT FORMAT")
+
+        assert vehicles_pos < reminder_pos < output_pos
 
 
 # ---------------------------------------------------------------------------
