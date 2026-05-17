@@ -212,6 +212,25 @@ The `-v` flag is destructive: it wipes all scraped data and forces the init scri
 
 ---
 
+## Streamlit dashboard
+
+Para lanzar el dashboard local (requiere Postgres corriendo con datos de al menos un scrape):
+
+```bash
+streamlit run src/saas/presentation/streamlit/app.py
+```
+
+Abre <http://localhost:8501> en el navegador.
+
+El dashboard muestra los precios de la competencia agrupados por categoría ACRISS, con:
+
+- **Visión general** — tabla pivot con precio medio/día por categoría × provider; los grupos en revisión aparecen marcados con 🔍.
+- **Evolución temporal** — gráfico de líneas con la evolución del precio para una categoría a lo largo del periodo scrapeado.
+
+Los filtros de la barra lateral (fecha de pickup, duración, providers, categorías ACRISS, include pending review) actualizan ambas vistas. Los datos se cachean 60 segundos para evitar hits continuos a Postgres.
+
+---
+
 ## Tests
 
 ```bash
