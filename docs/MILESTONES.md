@@ -864,4 +864,81 @@ consumidor la pida.
 6. BD limpia y re-ejecución del scrape end-to-end.
 7. Tests adaptados en cada paso.
 
-**Closure.** Pendiente.
+**Closure.** Completado. Commit `91cb753`. 146 tests verdes. Migration
+`e7f8a9b0c1d2` en cabeza. La BD tiene 15 categorías v1 activas;
+el primer scrape real con clasificación batch revelará si alguna de ellas
+solapa con v2 (veremos en el siguiente hito de seed).
+
+---
+
+## Taxonomy v2 — 79 categorías canónicas agrupadas en 40 familias
+
+**Goal.** Evolucionar la taxonomía de 15 categorías coarse a 79 categorías
+con granularidad real (sedán 7 tiers, SUV 5 tiers, offroad/family/MPV/camper/
+van/coupé/convertible/moto). Añadir el campo `family` al modelo de datos para
+permitir queries como "rango de precio de la familia COMPACT_SUV".
+
+**Por qué ahora.** Las 15 categorías v1 eran un punto de partida deliberadamente
+coarse. Tras el primer scrape real con clasificación automática, se confirmó que
+un provider tipico tiene entre 8 y 14 grupos, varios de los cuales caen en la
+misma categoría v1 incluso cuando el LLM dispone de contexto de precio. La v2
+resuelve esto aumentando la granularidad a 79 categorías, organizadas en 40
+familias semánticas (cada familia = mismo tier dentro del mismo body type,
+diferenciado por transmisión manual/automática).
+
+**Decisiones tomadas.**
+
+- **79 categorías, 40 familias.** La taxonomía cubre sedán/hatchback (7 tiers),
+  SUV compacto/estándar/premium/lujo/ejecutivo (5 tiers), offroad, caravanas,
+  furgonetas de pasajeros, MPV, coupé, descapotable y moto. Los códigos siguen
+  el patrón `FAMILY_VARIANT` (e.g. `COMPACT_SUV_AUTO`, `COMPACT_SUV_MANUAL`).
+- **`family` como columna en BD, no como join a tabla propia.** El campo es
+  metadata estructural estable (no cambia entre versiones de forma aleatoria);
+  no merece una tabla propia. Una columna indexada es suficiente para
+  `GROUP BY family` en queries de precio.
+- **`family` no entra en el contexto del LLM.** El clasificador trabaja con
+  `code`, `description`, `criteria`, y `examples`. `family` es una agrupación
+  para el sistema, no una pista semántica para el modelo.
+- **`DEFAULT ''` permanente en BD.** Categorías v1 existentes reciben `family=''`
+  hasta que el seed las actualice o las deprece. La constraint NOT NULL se
+  satisface con el default; no hay filas inválidas en ningún momento.
+- **`taxonomy_version=2` en YAML.** El seed marca como `active=false` las
+  categorías que no aparecen en el YAML actual. De las 15 v1, las que también
+  estén en v2 (p.ej. `ECONOMY_MANUAL`, `ECONOMY_AUTO`, `COMPACT_MANUAL`,
+  `COMPACT_AUTO`, `INTERMEDIATE_MANUAL`, `INTERMEDIATE_AUTO`, `STANDARD_MANUAL`,
+  `STANDARD_AUTO`) se actualizan con el nuevo `family`; el resto se deprecan.
+
+**What was built.**
+
+- Alembic migration `f8a9b0c1d2e3`: `ADD COLUMN family VARCHAR(64) NOT NULL DEFAULT ''`
+  + índice `ix_canonical_vehicle_types_family`.
+- `CanonicalVehicleType` ORM: campo `family` con `default=""` (Python-side)
+  para que tests existentes no requieran cambios.
+- `CanonicalVehicleTypeRepository.upsert`: parámetro `family: str = ""`; se
+  persiste en insert y se actualiza en update.
+- `seed_taxonomy.py`: lee `family` del YAML (`cat.get("family", "")`) y lo
+  incluye en la detección de cambios (`existing.family != family`).
+- Tests en `test_seed_taxonomy.py`:
+  - `_cat()` helper extendido con `family: str = ""`.
+  - `TestSeedPersistsFamily` (3 tests): insert con family, update de family,
+    YAML sin campo family → default `""`.
+  - `TestSeedRealTaxonomy` (1 test): seed del `taxonomy.yaml` real verifica
+    79 categorías v2 activas y 40 familias distintas.
+- `test_parses_real_taxonomy_yaml` en `test_gemini_classification_service.py`
+  actualizado a `version=2, len(specs)=79`.
+
+**Deferred.**
+
+- **Seed real contra BD de producción.** El comando `python scripts/seed_taxonomy.py`
+  deprecará las v1 sin equivalente en v2 y actualizará el `family` de las que
+  sigan vigentes. No se ejecuta aquí — es operación del operador.
+- **Re-clasificación de PVCs existentes.** Las PVCs ya clasificadas con
+  categorías v1 que no existan en v2 quedarán con `canonical_type_id` apuntando
+  a filas `active=false`. La reclasificación se dispara en el siguiente scrape
+  con `classify_provider_batch` (que recibe las 79 categorías activas).
+- **Queries `BY FAMILY`.** El índice existe; el `PriceQueryService` todavía
+  no expone ningún endpoint agrupado por `family`. Diferido hasta que el
+  product scope lo incluya explícitamente.
+
+**Closure.** 150 tests verdes (146 anteriores + 4 nuevos). Migration
+`f8a9b0c1d2e3` en cabeza de Alembic.

@@ -313,8 +313,8 @@ class TestTaxonomyLoader:
         yaml_path = Path(__file__).resolve().parents[3] / "taxonomy.yaml"
         specs, version = load_taxonomy_specs(yaml_path)
 
-        assert version == 1
-        assert len(specs) == 15
+        assert version == 2
+        assert len(specs) == 79
         codes = {s.code for s in specs}
         assert "ECONOMY_MANUAL" in codes
         eco = next(s for s in specs if s.code == "ECONOMY_MANUAL")

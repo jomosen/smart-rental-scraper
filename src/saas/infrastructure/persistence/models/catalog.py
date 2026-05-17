@@ -43,6 +43,7 @@ class CanonicalVehicleType(Base):
 
     id: Mapped[int] = mapped_column(Integer, Identity(always=True), primary_key=True)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
+    family: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     taxonomy_version: Mapped[int] = mapped_column(Integer, nullable=False)

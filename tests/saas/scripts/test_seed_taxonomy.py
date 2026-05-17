@@ -36,8 +36,13 @@ def _yaml(categories: list[dict], version: int = 1, initial_classification=None)
     return data
 
 
-def _cat(code: str, name: str | None = None, description: str = "Test description") -> dict:
-    return {"code": code, "name": name or code, "description": description}
+def _cat(
+    code: str,
+    name: str | None = None,
+    description: str = "Test description",
+    family: str = "",
+) -> dict:
+    return {"code": code, "name": name or code, "description": description, "family": family}
 
 
 def _setup_provider_with_pvc(
@@ -364,3 +369,96 @@ class TestSeedEdgeCases:
         )
         assert ct is not None
         assert ct.active is True
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — family field is read from YAML and persisted
+# ---------------------------------------------------------------------------
+
+class TestSeedPersistsFamily:
+    def test_family_is_persisted_on_insert(self, super_db_session):
+        yaml_data = _yaml([_cat("SEED_T11_A", family="COMPACT")])
+        seed_taxonomy(super_db_session, yaml_data)
+
+        ct = super_db_session.scalar(
+            select(CanonicalVehicleType).where(CanonicalVehicleType.code == "SEED_T11_A")
+        )
+        assert ct is not None
+        assert ct.family == "COMPACT"
+
+    def test_family_is_updated_when_changed(self, super_db_session):
+        yaml_v1 = _yaml([_cat("SEED_T11_B", family="OLD_FAMILY")], version=1)
+        seed_taxonomy(super_db_session, yaml_v1)
+
+        yaml_v2 = _yaml([_cat("SEED_T11_B", family="NEW_FAMILY")], version=2)
+        stats = seed_taxonomy(super_db_session, yaml_v2)
+
+        assert stats.updated == 1
+        ct = super_db_session.scalar(
+            select(CanonicalVehicleType).where(CanonicalVehicleType.code == "SEED_T11_B")
+        )
+        assert ct.family == "NEW_FAMILY"
+
+    def test_family_defaults_to_empty_string_when_absent_from_yaml(self, super_db_session):
+        yaml_data = _yaml([_cat("SEED_T11_C")])  # no family key
+        seed_taxonomy(super_db_session, yaml_data)
+
+        ct = super_db_session.scalar(
+            select(CanonicalVehicleType).where(CanonicalVehicleType.code == "SEED_T11_C")
+        )
+        assert ct is not None
+        assert ct.family == ""
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — seeding real taxonomy.yaml produces 79 categories, 40 families
+# ---------------------------------------------------------------------------
+
+class TestSeedRealTaxonomy:
+    def test_real_taxonomy_v2_produces_correct_category_and_family_counts(
+        self, super_db_session
+    ):
+        """Seed the real taxonomy.yaml and verify structural counts.
+
+        This test reads from the actual taxonomy.yaml, inserts all categories
+        into the session (rolled back after the test), then checks:
+          - 79 active categories with taxonomy_version=2
+          - 40 distinct family values among those active categories
+        """
+        import yaml
+        from pathlib import Path
+        from sqlalchemy import func, text
+
+        yaml_path = Path(__file__).resolve().parents[3] / "taxonomy.yaml"
+        with open(yaml_path, encoding="utf-8") as f:
+            taxonomy_data = yaml.safe_load(f)
+
+        # Count pre-existing active rows so we can isolate newly inserted ones
+        pre_existing_active = super_db_session.scalar(
+            select(func.count()).select_from(CanonicalVehicleType)
+            .where(CanonicalVehicleType.active.is_(True))
+        )
+
+        seed_taxonomy(super_db_session, taxonomy_data)
+
+        active_v2 = super_db_session.scalar(
+            select(func.count()).select_from(CanonicalVehicleType).where(
+                CanonicalVehicleType.active.is_(True),
+                CanonicalVehicleType.taxonomy_version == 2,
+            )
+        )
+        assert active_v2 == 79, (
+            f"Expected 79 active v2 categories, got {active_v2}"
+        )
+
+        distinct_families = super_db_session.scalar(
+            select(func.count()).select_from(
+                select(CanonicalVehicleType.family)
+                .where(CanonicalVehicleType.active.is_(True))
+                .distinct()
+                .subquery()
+            )
+        )
+        assert distinct_families == 40, (
+            f"Expected 40 distinct families among active categories, got {distinct_families}"
+        )

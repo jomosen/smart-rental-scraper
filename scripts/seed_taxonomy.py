@@ -114,6 +114,7 @@ def seed_taxonomy(
 
     for cat in categories:
         code = cat["code"]
+        family = str(cat.get("family", "")).strip()
         name = cat["name"].strip()
         description = str(cat["description"]).strip()
 
@@ -122,15 +123,19 @@ def seed_taxonomy(
             if dry_run:
                 logger.info("WOULD insert canonical type: %s", code)
             else:
-                repo.upsert(code, name, description, version)
+                repo.upsert(code, name, description, version, family)
                 logger.info("Inserted canonical type: %s", code)
             stats.inserted += 1
-        elif existing.name != name or existing.description != description:
+        elif (
+            existing.name != name
+            or existing.description != description
+            or existing.family != family
+        ):
             if dry_run:
                 logger.info("WOULD update canonical type: %s", code)
             else:
-                repo.upsert(code, name, description, version)
-                logger.info("Updated description/name of canonical type: %s", code)
+                repo.upsert(code, name, description, version, family)
+                logger.info("Updated canonical type: %s", code)
             stats.updated += 1
         # else: fields unchanged — no-op, no log
 

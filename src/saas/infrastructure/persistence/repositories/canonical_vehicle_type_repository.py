@@ -29,16 +29,18 @@ class CanonicalVehicleTypeRepository:
         name: str,
         description: str,
         taxonomy_version: int,
+        family: str = "",
     ) -> CanonicalVehicleType:
         """Insert or update a canonical vehicle type by code.
 
-        Used by the seed script (prompt 2).  Idempotent: running twice on
-        the same YAML produces zero net changes.
+        Used by the seed script.  Idempotent: running twice on the same YAML
+        produces zero net changes.
         """
         row = self.get_by_code(code)
         if row is None:
             row = CanonicalVehicleType(
                 code=code,
+                family=family,
                 name=name,
                 description=description,
                 taxonomy_version=taxonomy_version,
@@ -47,6 +49,7 @@ class CanonicalVehicleTypeRepository:
             self._s.add(row)
             self._s.flush()
         else:
+            row.family = family
             row.name = name
             row.description = description
             row.taxonomy_version = taxonomy_version
