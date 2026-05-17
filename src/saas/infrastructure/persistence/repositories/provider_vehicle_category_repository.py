@@ -157,11 +157,23 @@ class ProviderVehicleCategoryRepository:
           - Existing PVC with a previous ACRISS classification: keep the cached
             classification, mark pending_review=True so the operator knows
             confidence dropped.
-          - New PVC or PVC with no previous classification: NULL ACRISS attrs,
-            pending_review=True.
+          - New PVC (or existing with no prior code) + LLM returned a candidate
+            code (e.g. mixed group resolved via rule 4): persist the code and
+            mark pending_review=True for operator review.
+          - New PVC (or existing with no prior code) + no candidate code: NULL
+            ACRISS attrs, pending_review=True.
         """
         if result.pending_review:
             if not is_new and pvc.acriss_category is not None:
+                pvc.classification_confidence = result.confidence
+                pvc.pending_review = True
+                return
+
+            if result.acriss_category is not None:
+                pvc.acriss_category = result.acriss_category
+                pvc.acriss_body_type = result.acriss_body_type
+                pvc.acriss_transmission = result.acriss_transmission
+                pvc.acriss_fuel = result.acriss_fuel
                 pvc.classification_confidence = result.confidence
                 pvc.pending_review = True
                 return

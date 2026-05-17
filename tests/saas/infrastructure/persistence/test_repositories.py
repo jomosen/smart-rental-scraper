@@ -41,6 +41,7 @@ from src.saas.infrastructure.persistence.repositories import (
 _ACRISS_EDMR = "EDMR"  # Economy Manual
 _ACRISS_CDAR = "CDAR"  # Compact Automatic
 _ACRISS_IDAR = "IDAR"  # Intermediate Automatic
+_ACRISS_IFAR = "IFAR"  # Intermediate SUV Automatic
 
 
 def _classification_result(
@@ -406,6 +407,45 @@ class TestProviderVehicleCategoryRepository:
 
         super_db_session.refresh(pvc)
         assert pvc.acriss_code is None
+        assert pvc.pending_review is True
+
+    def test_upsert_seen_persists_acriss_code_for_new_mixed_group_pvc(
+        self, super_db_session
+    ):
+        """Mixed group: LLM returns a best-guess code with pending_review=True.
+
+        The code must be written to the PVC (not nulled), and pending_review
+        must be True so the operator can review the assignment.
+        """
+        p = _provider(super_db_session, code="pvc_cls_mixed_group")
+        loc = _location(super_db_session, p.id)
+        rate = _rate(super_db_session, p.id)
+
+        mixed_group_result = ClassificationResult(
+            acriss_category="I",
+            acriss_body_type="F",
+            acriss_transmission="A",
+            acriss_fuel="R",
+            confidence=0.65,
+            pending_review=True,
+        )
+
+        repo = ProviderVehicleCategoryRepository(super_db_session)
+        pvc = repo.upsert_seen(
+            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
+            external_code="Grupo FA", external_name="Grupo FA",
+            example_models="VW Tiguan, VW T-Roc", seats=5, luggage=None,
+            classification=mixed_group_result,
+        )
+
+        super_db_session.refresh(pvc)
+        assert pvc.acriss_code == _ACRISS_IFAR, \
+            "Mixed group best-guess code must be persisted, not nulled"
+        assert pvc.acriss_category == "I"
+        assert pvc.acriss_body_type == "F"
+        assert pvc.acriss_transmission == "A"
+        assert pvc.acriss_fuel == "R"
+        assert pvc.classification_confidence == pytest.approx(0.65)
         assert pvc.pending_review is True
 
     def test_upsert_seen_uses_attribute_hash_when_no_external_code(self, super_db_session):
