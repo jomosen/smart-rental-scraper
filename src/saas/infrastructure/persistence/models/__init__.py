@@ -1,6 +1,6 @@
 from .base import Base
 from .catalog import (
-    CanonicalVehicleType,
+    AcrissCode,
     Provider,
     ProviderLocation,
     ProviderRate,
@@ -25,7 +25,7 @@ from .tenant import (
 
 __all__ = [
     "Base",
-    "CanonicalVehicleType",
+    "AcrissCode",
     "Provider",
     "ProviderLocation",
     "ProviderRate",

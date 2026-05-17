@@ -25,15 +25,15 @@ Deliberately deferred items appear at the end with their re-evaluation triggers.
 
 ## Part 1 — Decisions
 
-### 1. Vehicle taxonomy (three-layer model)
+### 1. Vehicle classification (three-layer model)
 
 The product organizes vehicles in three layers, each with a distinct role:
 
-- `canonical_vehicle_types` — **the operator's taxonomy**. A curated, stable list of vehicle categories (e.g. `ECONOMY_MANUAL`, `COMPACT_SUV_AUTO`, `LUXURY_AUTO`). This is the **product's lingua franca**: the language in which the market is presented to all tenants by default. Maintained by the operator via a versioned YAML file (`taxonomy.yaml`) and applied to the database by an idempotent seed script.
+- `acriss_codes` — **the ACRISS standard**, materialized as the operator-curated subset of codes that appear in this market. Each entry is a 4-character code (Category + Body Type + Transmission + Fuel). This is the **product's lingua franca**: the industry-standard language in which the market is presented to all tenants. Maintained by the operator via `acriss_codes.yaml` and applied to the database by an idempotent seed script (`scripts/seed_acriss_codes.py`).
 
-- `provider_vehicle_categories` — **the provider's actual catalog**, classified onto the canonical taxonomy. One row per distinct provider group (i.e. per distinct `external_code` when the provider exposes codes, or per distinct attribute hash when it doesn't). The `canonical_type_id` on each row is **classification metadata, not identity**. Multiple rows of the same provider may carry the same `canonical_type_id` — that is expected and correct (see "Within-provider heterogeneity" below).
+- `provider_vehicle_categories` — **the provider's actual catalog**, classified onto ACRISS codes. One row per distinct provider group (i.e. per distinct `external_code` when the provider exposes codes, or per distinct attribute hash when it doesn't). The 4-char `acriss_code` on each row is **classification metadata, not identity**. Multiple rows of the same provider may carry the same `acriss_code` — that is expected and correct (see "Within-provider heterogeneity" below).
 
-- `tenant_vehicle_groups` — **optional, per-tenant taxonomy**. A tenant may declare its own naming for vehicle groups (e.g. "Compactos", "Familiares") and map them onto canonical types via `tenant_vehicle_group_mappings`. This layer is **opt-in**: a tenant that uses the canonical taxonomy directly does not need to configure anything.
+- `tenant_vehicle_groups` — **optional, per-tenant taxonomy**. A tenant may declare its own naming for vehicle groups (e.g. "Compactos", "Familiares") and map them onto ACRISS codes via `tenant_vehicle_group_mappings`. This layer is **opt-in**: a tenant that uses ACRISS codes directly does not need to configure anything.
 
 **Why three layers and not two.**
 
@@ -41,52 +41,45 @@ The earlier model had only two layers (`provider_vehicle_groups` and `client_veh
 
 The three-layer model fixes this:
 
-- The stable identity of "a kind of vehicle" in the *product's language* lives in the operator's taxonomy.
-- Each provider's catalog is captured **faithfully** — one row per group the provider distinguishes — with each row tagged with the canonical category it belongs to.
-- Tenants without strong opinions consume the operator's taxonomy directly; tenants with their own internal language map onto canonical types.
+- The stable identity of "a kind of vehicle" in the *product's language* lives in the ACRISS standard.
+- Each provider's catalog is captured **faithfully** — one row per group the provider distinguishes — with each row tagged with the ACRISS code it belongs to.
+- Tenants without strong opinions consume ACRISS codes directly; tenants with their own internal language map onto ACRISS codes.
 
-**Why curated taxonomy, not auto-generated.**
+**Why ACRISS, not a custom taxonomy.**
 
-The canonical taxonomy is small (~15 categories) and changes rarely. It is decided by the operator with the dataset of real provider groups in hand. It is **deliberately coarse**: two provider groups that differ only in transmission may classify into the same canonical type. Tenants that need finer granularity express it through `tenant_vehicle_groups`.
-
-**Why a YAML source of truth.**
-
-The taxonomy is product configuration, not application state. Each change (adding a category, deprecating one, refining a description) is reviewable as a git diff, revertible as a commit, and traceable to a moment in time. The seed script applies the YAML to the database idempotently. A `taxonomy_version` integer in the YAML increments with each change and is persisted in the database for cache-invalidation purposes (see Decision 2).
+The ACRISS 4-character code (Category + Body Type + Transmission + Fuel) is the car rental industry standard used by GDS systems (Amadeus, Sabre, Travelport) and all major providers. Adopting it eliminates the translation layer that a custom taxonomy requires, makes classifications immediately interpretable to domain experts, and enables future GDS integrations without a conversion step. The materialized subset (`acriss_codes.yaml`) covers the ~26 codes observed in our market and is extended by the operator when a new code appears.
 
 **Within-provider heterogeneity: faithfully preserved.**
 
-A central design assumption of this model is that **a provider creates as many groups as price tiers it wants to distinguish**. When Solcar separates "Grupo EA" (Peugeot 2008 at €57/day) from "Grupo GA" (Kia XCeed Hybrid at €69/day), they are telling us those vehicles command different prices in their internal pricing strategy — even if both are crossovers that semantically fit `INTERMEDIATE_AUTO`.
+A central design assumption of this model is that **a provider creates as many groups as price tiers it wants to distinguish**. When a provider separates "Grupo EA" (Peugeot 2008 at €57/day) from "Grupo GA" (Kia XCeed Hybrid at €69/day), they are telling us those vehicles command different prices in their internal pricing strategy — even if both might classify as `IDAR`.
 
 The model respects that:
 
 - Each distinct provider group → its own `provider_vehicle_categories` row.
-- Multiple rows may share `canonical_type_id`. There is **no in-database aggregation** of provider groups within a provider.
-- Aggregation (e.g. "what's the min price of `INTERMEDIATE_AUTO` in Solcar this week") happens at **query time** in `PriceQueryService`, not in persistence.
+- Multiple rows may share `acriss_code`. There is **no in-database aggregation** of provider groups within a provider.
+- Aggregation (e.g. "what's the min price of `IDAR` in a provider this week") happens at **query time** in `PriceQueryService`, not in persistence.
 - This preserves the full price signal of the provider for analytical and pricing purposes downstream.
 
-This is a reversal from an earlier design decision in this document, taken before we had real scrape data on the table. The decision was reversed when a real classification run produced unique-constraint violations on `(provider, canonical_type_id)` — which surfaced the underlying fact that real providers segment finer than our canonical taxonomy does. The aggregation policy that originally lived "inside the provider" now lives only "across providers" and "at query time" (see `PRODUCT_SCOPE.md`).
+**Classification of provider data into ACRISS codes.**
 
-**Classification of provider data into canonical types.**
-
-Every vehicle observed during a scrape must be classified into a canonical type before it becomes part of `provider_vehicle_categories`. Classification is performed by an LLM through an abstract `ClassificationService` interface (so the model provider is swappable). The primary implementation is Gemini.
+Every vehicle observed during a scrape must be classified into an ACRISS code before it becomes part of `provider_vehicle_categories`. Classification is performed by an LLM through an abstract `ClassificationService` interface (so the model provider is swappable). The primary implementation is Gemini.
 
 Two important properties of the classification:
 
-1. **Batch by provider, not vehicle-by-vehicle.** The classifier sees the *entire provider catalog at once* — all the groups the provider exposes, together with a representative 7-day price for each. This lets it reason about the provider's internal pricing hierarchy. If two groups command different prices within the same provider, the classifier is expected to distribute them across adjacent canonical categories rather than collapse them.
+1. **Batch by provider, not vehicle-by-vehicle.** The classifier sees the *entire provider catalog at once* — all the groups the provider exposes, together with a representative 7-day price for each. This lets it reason about the provider's internal pricing hierarchy. If two groups command different prices within the same provider, the classifier is expected to distribute them across adjacent ACRISS categories rather than collapse them. The prompt includes the full `acriss_reference.md` (ACRISS standard description) plus the materialized subset of valid codes.
 
-2. **Confidence-aware fallback.** Gemini Flash is the primary model. If Flash returns a confidence below 0.85 for *any* vehicle in the batch, the whole batch is re-attempted with Gemini Pro. If individual vehicles remain below 0.85 even after Pro, those rows are persisted with `canonical_type_id = NULL` and `pending_review = true`, awaiting manual classification by the operator.
+2. **Confidence-aware fallback.** Gemini Flash is the primary model. If Flash returns a confidence below 0.85 for *any* vehicle in the batch, the whole batch is re-attempted with Gemini Pro. If individual vehicles remain below 0.85 even after Pro, those rows are persisted with `acriss_code = NULL` and `pending_review = true`, awaiting manual classification by the operator. Responses with confidence < 0.70 are immediately marked `pending_review` without Pro escalation.
 
-The LLM is never permitted to create new canonical categories on its own; if no existing category fits, the operator extends the taxonomy.
+The LLM is never permitted to use ACRISS codes not in the materialized subset; if the response contains an unknown code it is treated as `pending_review`.
 
 **The representative price.**
 
 The price passed to the LLM is computed as the **mean of 7-day prices observed during the probe phase**. This filters noise from any single date (weekends, peak seasons) and reflects the provider's "baseline" pricing for that group. It is **transient** — used only as classification input, not persisted as a column. The true price history lives in `price_observations`.
 
-**When the LLM fails (network, rate limit, error):** the row keeps any previously cached classification if one exists. If not, it is persisted with `canonical_type_id = NULL` and `pending_review = true`. The scrape itself does not abort.
+**When the LLM fails (network, rate limit, error):** the row keeps any previously cached classification if one exists. If not, it is persisted with `acriss_code = NULL` and `pending_review = true`. The scrape itself does not abort.
 
-**When to reclassify a provider.** A provider's full classification is re-run in three situations:
+**When to reclassify a provider.** A provider's full classification is re-run in two situations:
 - A new group appears in the provider's catalog (the new group can shift the internal hierarchy interpretation).
-- `taxonomy_version` increments (a new canonical category was added, an existing one was refined).
 - The operator forces it via an explicit reclassification command.
 
 **Subscription lifecycle states.**
@@ -111,21 +104,13 @@ Curated by the operator (you), not by tenants.
 - `provider_locations` — locations supported by each provider (e.g. ALC, MAD).
 - `provider_rates` — rate plans available per provider.
 - `tenant_subscriptions` — what a tenant is monitoring. Joins to a specific `(provider, location, rate)` tuple.
-- `provider_vehicle_categories` — see Decision 1. The provider-side catalog rows now carry the canonical classification (`canonical_type_id`, `classification_confidence`, `classification_taxonomy_version`, `pending_review`) in addition to the observed display attributes.
+- `provider_vehicle_categories` — see Decision 1. The provider-side catalog rows carry the ACRISS classification (`acriss_category`, `acriss_body_type`, `acriss_transmission`, `acriss_fuel`, generated `acriss_code`, `classification_confidence`, `pending_review`) in addition to the observed display attributes.
 
 **Why curated, not BYO (bring-your-own-scraper).** Scraper quality is the operator's responsibility, not the tenant's. Each new scraper added is a product asset that benefits all existing tenants. SSRF and resource-abuse problems disappear.
 
 **Adding a new provider is operator work.** A developer implements `provider_X_scraper.py`, registers it in `SCRAPER_REGISTRY` (see `CLAUDE.md`), and the catalog gets a new entry. Tenants then subscribe through the UI.
 
-**Classification cache embedded in the catalog.**
-
-`provider_vehicle_categories.classification_taxonomy_version` doubles as a classification cache. Two scenarios where the LLM is **not** called:
-
-1. The provider's catalog has been classified before and the current `taxonomy_version` matches the cached `classification_taxonomy_version` on every row, AND no new groups have appeared in the provider's catalog since the last classification. In that case, the entire provider is skipped (no batch call).
-
-2. A taxonomy version bump touches only a subset of categories. Only providers whose existing classifications reference deprecated or `reclassify_on_seed: true` categories get re-classified; the rest are left untouched.
-
-Reclassification is always done at provider granularity (a whole batch at once), never per-vehicle. This reflects the batch nature of the `ClassificationService` (see Decision 1).
+**Reclassification.** Classification is always done at provider granularity (a whole batch at once), never per-vehicle. This reflects the batch nature of the `ClassificationService` (see Decision 1). Reclassification is triggered when a new group appears in the provider's catalog or when the operator forces it explicitly.
 
 ---
 
@@ -227,7 +212,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 **Catalog tables (no `tenant_id`, no RLS):**
 - `providers`, `provider_locations`, `provider_rates`
-- `canonical_vehicle_types`, `provider_vehicle_categories`
+- `acriss_codes`, `provider_vehicle_categories`
 - `homogeneous_zones`, `price_observations`, `price_observation_heartbeats`
 - `scrape_runs`
 
@@ -258,7 +243,7 @@ Pragmatic mix, not uniform across all entities.
 
 **`tenant_vehicle_groups` and `tenant_vehicle_group_mappings` — mutable in place.** Renaming a group, adjusting a mapping is an edit. Historical pricing decisions remain auditable through `pricing_outputs.inputs_snapshot_jsonb`.
 
-**`canonical_vehicle_types` — sourced from YAML, applied to BD by idempotent seed.** Each YAML version increments `taxonomy_version`. The seed script (a) inserts new categories, (b) updates description/criteria fields when changed, (c) marks deprecated categories as `active = false` (never deletes — they may have historical references). See Decision 1 for re-classification semantics.
+**`acriss_codes` — sourced from `acriss_codes.yaml`, applied to DB by idempotent seed** (`scripts/seed_acriss_codes.py`). The seed script (a) inserts new codes, (b) updates display_name/description/criteria/examples when changed, (c) marks missing codes as `active = false` (never deletes — they may have historical FK references). See Decision 1 for re-classification semantics.
 
 **`pricing_rules` — explicit versioning.** Editing a rule does not UPDATE in place: a new row is created with `version = N+1`, the old row gets `superseded_at` and `superseded_by_id`. `pricing_outputs.rule_id` references the specific version used at calculation time.
 
@@ -337,12 +322,12 @@ tenant_vehicle_group_mappings
   id UUID PK
   tenant_id UUID FK
   tenant_vehicle_group_id UUID FK → tenant_vehicle_groups
-  canonical_type_id INT FK → canonical_vehicle_types
+  acriss_code VARCHAR(4) FK → acriss_codes.code
   created_at
   created_by
   notes
-  -- Maps tenant labels onto canonical types. N:M permitted: a tenant group
-  -- may map onto multiple canonical types, and the same canonical type may
+  -- Maps tenant labels onto ACRISS codes. N:M permitted: a tenant group
+  -- may map onto multiple ACRISS codes, and the same ACRISS code may
   -- appear in multiple tenant groups (the latter is rare but valid).
 
 tenant_subscriptions
@@ -362,8 +347,8 @@ tenant_subscriptions
 pricing_rules
   id UUID PK
   tenant_id UUID FK
-  canonical_type_id INT FK → canonical_vehicle_types
-                              -- rules operate on canonical types;
+  acriss_code VARCHAR(4) FK → acriss_codes.code
+                              -- rules operate on ACRISS codes;
                               -- tenants with custom groups resolve through
                               -- tenant_vehicle_group_mappings at apply time
   name
@@ -380,7 +365,7 @@ pricing_rules
 pricing_outputs
   id UUID PK
   tenant_id UUID FK
-  canonical_type_id INT FK → canonical_vehicle_types
+  acriss_code VARCHAR(4) FK → acriss_codes.code
   pickup_date DATE
   duration_days INT
   computed_price NUMERIC(10,2)
@@ -393,18 +378,21 @@ pricing_outputs
 ### Catalog (global, no `tenant_id`, no RLS)
 
 ```
-canonical_vehicle_types
-  id INT PK
-  code           VARCHAR(64) UNIQUE NOT NULL  -- e.g. 'ECONOMY_PASSENGER'
-  name           VARCHAR(128) NOT NULL        -- human-readable label
-  description    TEXT NOT NULL                -- criteria for inclusion
-  taxonomy_version INT NOT NULL               -- version when this row was last touched
+acriss_codes
+  code           VARCHAR(4) PK               -- e.g. 'CFAR', 'IDAR'
+  acriss_category    CHAR(1) NOT NULL        -- position 1
+  acriss_body_type   CHAR(1) NOT NULL        -- position 2
+  acriss_transmission CHAR(1) NOT NULL       -- position 3
+  acriss_fuel        CHAR(1) NOT NULL        -- position 4
+  display_name   VARCHAR(128) NOT NULL
+  description    TEXT NOT NULL DEFAULT ''
+  criteria       JSONB NOT NULL DEFAULT '[]'
+  examples       JSONB NOT NULL DEFAULT '[]'
   active         BOOLEAN NOT NULL DEFAULT true
   created_at     TIMESTAMPTZ
-  deprecated_at  TIMESTAMPTZ NULL
-  -- Source of truth: taxonomy.yaml. Applied to BD by an idempotent seed script.
-  -- Deprecated categories are never deleted; rows referencing them are
-  -- re-classified by the next seed run (when flagged) or by the next scrape.
+  last_updated_at TIMESTAMPTZ
+  -- Source of truth: acriss_codes.yaml. Applied to DB by scripts/seed_acriss_codes.py.
+  -- Deactivated codes are never deleted; they remain as FK references.
 
 providers
   id PK
@@ -437,18 +425,25 @@ provider_vehicle_categories
   provider_id FK
   provider_location_id FK
   provider_rate_id FK
-  canonical_type_id INT FK → canonical_vehicle_types  -- nullable; NULL ⇒ pending classification
-  classification_confidence FLOAT NULL                 -- last LLM confidence (0..1)
-  classification_taxonomy_version INT NULL             -- version of taxonomy used at last classification
-  pending_review BOOLEAN NOT NULL DEFAULT false        -- operator attention required
+  -- ACRISS classification (4 orthogonal attributes + generated code):
+  acriss_category    CHAR(1) NULL
+  acriss_body_type   CHAR(1) NULL
+  acriss_transmission CHAR(1) NULL
+  acriss_fuel        CHAR(1) NULL
+  acriss_code VARCHAR(4) GENERATED ALWAYS AS               -- NULL until all 4 attrs set
+    (acriss_category || acriss_body_type || acriss_transmission || acriss_fuel) STORED
+    FK → acriss_codes.code
+  classification_confidence FLOAT NULL                     -- last LLM confidence (0..1)
+  pending_review BOOLEAN NOT NULL DEFAULT false            -- operator attention required
   -- Observed display attributes (last seen):
   example_models  TEXT NOT NULL DEFAULT ''
   seats           INT NULL
   luggage         INT NULL
-  transmission    VARCHAR(16) NULL    -- 'manual' | 'automatic' | NULL
   -- Documentary metadata when the provider exposes group identifiers:
   external_code   VARCHAR(64) NULL
-  external_name   VARCHAR(128) NULL
+  external_name   TEXT NULL
+  -- Identity fallback when external_code is NULL:
+  attributes_hash VARCHAR(16) NULL  -- sha256[:16] of (example_models, seats, luggage)
   -- Lifecycle:
   first_seen_at   TIMESTAMPTZ
   last_seen_at    TIMESTAMPTZ
@@ -458,10 +453,10 @@ provider_vehicle_categories
   --     when external_code IS NOT NULL.
   --   - UNIQUE (provider_id, provider_location_id, provider_rate_id, attributes_hash)
   --     when external_code IS NULL. attributes_hash is a deterministic sha256-truncated
-  --     hex of (example_models, seats, luggage, transmission, fuel_type).
-  -- canonical_type_id is classification metadata, NOT part of identity. Multiple rows
-  -- of the same provider may share canonical_type_id (provider distinguishes price
-  -- tiers more finely than the canonical taxonomy does — see Decision 1, "Within-
+  --     hex of (example_models, seats, luggage).
+  -- acriss_code is classification metadata, NOT part of identity. Multiple rows
+  -- of the same provider may share acriss_code (provider distinguishes price
+  -- tiers more finely than ACRISS does — see Decision 1, "Within-
   -- provider heterogeneity"). Aggregation across them happens at query time.
 
 scrape_runs
@@ -532,19 +527,19 @@ price_observation_heartbeats
 
 How the model answers the canonical client question:
 
-> *"For tenant T, give me prices for canonical categories {ECONOMY_MANUAL, COMPACT_AUTO, INTERMEDIATE_AUTO} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
+> *"For tenant T, give me prices for ACRISS codes {EDAR, CDAR, IDAR} on subscription S, for pickup dates between D1 and D2, in durations {1,2,3,4,5,6,7,14,21,28}."*
 
-(When the tenant has declared `tenant_vehicle_groups`, the query receives tenant group codes and resolves them to canonical types via `tenant_vehicle_group_mappings` before the rest of the flow.)
+(When the tenant has declared `tenant_vehicle_groups`, the query receives tenant group codes and resolves them to ACRISS codes via `tenant_vehicle_group_mappings` before the rest of the flow.)
 
 ### Conceptual flow
 
 1. Resolve subscription S to its `(provider_id, location_id, rate_id)` tuple.
-2. If the request used tenant group codes, resolve them to canonical types via `tenant_vehicle_group_mappings`.
-3. Resolve canonical types to provider vehicle categories: `provider_vehicle_categories` filtered by `(provider, canonical_type_id IN ...)`. **This may return multiple PVCs per canonical category** (a provider may have several groups tagged with the same canonical type — see Decision 1, "Within-provider heterogeneity").
+2. If the request used tenant group codes, resolve them to ACRISS codes via `tenant_vehicle_group_mappings`.
+3. Resolve ACRISS codes to provider vehicle categories: `provider_vehicle_categories` filtered by `(provider, acriss_code IN ...)`. **This may return multiple PVCs per ACRISS code** (a provider may have several groups tagged with the same ACRISS code — see Decision 1, "Within-provider heterogeneity").
 4. Find active zones in `homogeneous_zones` overlapping [D1, D2] for those provider vehicle categories.
 5. For each zone × duration, fetch the latest observation in `price_observations` for the zone's representative date — one observation per PVC.
-6. **Aggregate per (canonical_type, zone, duration)**: when multiple PVCs of the same canonical contribute, apply the configured policy (default: `min`). The result is one price per (canonical_type, zone, duration) per provider.
-7. Return one row per (canonical_type or tenant_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
+6. **Aggregate per (acriss_code, zone, duration)**: when multiple PVCs of the same ACRISS code contribute, apply the configured policy (default: `min`). The result is one price per (acriss_code, zone, duration) per provider.
+7. Return one row per (acriss_code or tenant_group, zone, duration) with `is_inferred` flagged appropriately when expanding to specific dates.
 
 ### Single SQL realization
 
@@ -583,7 +578,7 @@ latest_observations AS (
   ORDER BY provider_vehicle_category_id, pickup_date, duration_days, observed_at DESC
 ),
 joined AS (
-  SELECT pvc.canonical_type_id,
+  SELECT pvc.acriss_code,
          z.start_date,
          z.end_date,
          z.representative_date,
@@ -597,14 +592,14 @@ joined AS (
     ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
    AND lo.pickup_date = z.representative_date
 )
-SELECT canonical_type_id,
+SELECT acriss_code,
        start_date,
        end_date,
        duration_days,
        MIN(price_per_day) AS price_per_day,   -- min policy across PVCs
        currency
 FROM joined
-GROUP BY canonical_type_id, start_date, end_date, duration_days, currency;
+GROUP BY acriss_code, start_date, end_date, duration_days, currency;
 ```
 
 The application layer then:
@@ -746,11 +741,11 @@ Single shared database, single region.
 
 - Generate real DDL from this document, not from intuition. If something is missing here, surface it before writing the migration.
 - The threshold for change detection (`PRICE_CHANGE_THRESHOLD`) compares against the **last recorded row in `price_observations`**, not against the heartbeat. This is a correctness point, not a style preference.
-- `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact. Include `taxonomy_version` and the `classification_taxonomy_version` of every `provider_vehicle_categories` row consumed.
+- `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact. Include the `acriss_code` and `classification_confidence` of every `provider_vehicle_categories` row consumed.
 - Authentication is **not** built locally. Do not add tables for passwords, sessions, password reset tokens, or any mechanism that would duplicate what an external identity provider does. The `users` table only holds the local identity bound to the external `sub`.
 - Tests for tenant isolation are part of the definition of "API done", not an optional nicety.
 - The LLM-based classification is wrapped behind an abstract `ClassificationService` interface. The interface must not leak provider-specific concepts (request shape, response shape, authentication). Implementations live in infrastructure; the rest of the system depends only on the interface. Confidence threshold (0.85) is hardcoded in the service composition.
 - Classification is **batch by provider**, not vehicle-by-vehicle. The classifier receives the complete provider catalog at once together with each group's representative 7-day price, so it can reason about the provider's internal pricing hierarchy. Calling the classifier with a single vehicle in isolation is supported by the interface but is **not** the production path — it loses the hierarchical context.
 - The representative 7-day price passed to the classifier is computed as the **mean of all 7-day prices observed during the probe phase** for that group. It is transient (used only as classifier input, not persisted). The true price history is in `price_observations`.
-- `provider_vehicle_categories` identity is `(provider, location, rate, external_code)` when `external_code` is non-null, or `(provider, location, rate, attributes_hash)` otherwise. `canonical_type_id` is **not** part of identity; multiple rows of the same provider may share it, by design (Decision 1).
-- The canonical taxonomy YAML is the source of truth. The seed script must be idempotent: running it twice on an unchanged YAML produces zero changes in BD. Running it after a YAML edit applies only the deltas.
+- `provider_vehicle_categories` identity is `(provider, location, rate, external_code)` when `external_code` is non-null, or `(provider, location, rate, attributes_hash)` otherwise. `acriss_code` is **not** part of identity; multiple rows of the same provider may share it, by design (Decision 1).
+- `acriss_codes.yaml` is the source of truth. `scripts/seed_acriss_codes.py` must be idempotent: running it twice on an unchanged YAML produces zero changes in DB. Running it after a YAML edit applies only the deltas.

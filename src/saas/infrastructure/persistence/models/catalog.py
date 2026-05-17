@@ -60,32 +60,6 @@ class AcrissCode(Base):
     )
 
 
-class CanonicalVehicleType(Base):
-    """Operator-curated taxonomy.  Source of truth: taxonomy.yaml.
-
-    Kept for historical reference and pricing rules; classification has
-    migrated to the ACRISS standard (see AcrissCode).
-    """
-    __tablename__ = "canonical_vehicle_types"
-    __table_args__ = (
-        UniqueConstraint("code", name="uq_canonical_vehicle_types_code"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, Identity(always=True), primary_key=True)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    family: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    taxonomy_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default="NOW()"
-    )
-    deprecated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-
 class Provider(Base):
     __tablename__ = "providers"
     __table_args__ = (

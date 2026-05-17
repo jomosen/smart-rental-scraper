@@ -1,5 +1,4 @@
 from .acriss_code_repository import AcrissCodeRepository
-from .canonical_vehicle_type_repository import CanonicalVehicleTypeRepository
 from .provider import ProviderRepository
 from .provider_location import ProviderLocationRepository
 from .provider_rate import ProviderRateRepository
@@ -11,7 +10,6 @@ from .price_observation_heartbeat import PriceObservationHeartbeatRepository
 
 __all__ = [
     "AcrissCodeRepository",
-    "CanonicalVehicleTypeRepository",
     "ProviderRepository",
     "ProviderLocationRepository",
     "ProviderRateRepository",

@@ -1014,3 +1014,55 @@ de traducción y facilita integraciones futuras.
 **Closure.** 161 tests verdes (150 anteriores + 14 nuevos en
 `test_acriss_code_repository.py` + 13 nuevos en `test_seed_acriss_codes.py`,
 neto de 16 eliminados de `test_seed_taxonomy.py`). Hito C cerrado.
+
+---
+
+## Hito Cleanup: Limpieza post-adopción de ACRISS
+
+**Objetivo.** Eliminar todos los artefactos de la taxonomía canónica personalizada
+(`canonical_vehicle_types`) ahora que ACRISS es el estándar de clasificación
+en producción.
+
+**Artefactos eliminados.**
+
+- `taxonomy.yaml` — reemplazado por `acriss_codes.yaml` desde Hito C.
+- `scripts/seed_taxonomy.py` — reemplazado por `scripts/seed_acriss_codes.py`.
+- `src/saas/infrastructure/persistence/repositories/canonical_vehicle_type_repository.py`
+  — clase `CanonicalVehicleTypeRepository` ya no tiene uso.
+- `src/saas/application/classification/taxonomy_loader.py` — reemplazado por
+  `acriss_loader.py`.
+
+**Código modificado.**
+
+- `catalog.py` — eliminada clase ORM `CanonicalVehicleType`.
+- `models/__init__.py` — `CanonicalVehicleType` → `AcrissCode` en imports y `__all__`.
+- `repositories/__init__.py` — eliminado `CanonicalVehicleTypeRepository`.
+- `tenant.py` (`PricingRule`, `PricingOutput`) — eliminado `ForeignKey` a
+  `canonical_vehicle_types` (FK caído por CASCADE en la migración); columna
+  `canonical_type_id` se mantiene como `Integer` sin FK hasta que esas entidades
+  sean implementadas formalmente.
+- `steps.py` — docstrings actualizadas: "canonical vehicle type" / `canonical_type_id`
+  → "ACRISS code" / `acriss_code`.
+- `rollback.py` — comentario inline actualizado.
+
+**Migración Alembic.**
+
+- `h0i1j2k3l4m5_drop_canonical_vehicle_types.py`: `DROP TABLE IF EXISTS
+  canonical_vehicle_types CASCADE`. Elimina la tabla y sus FK constraints en cascada
+  (las referencias desde `pricing_rules` y `pricing_outputs` quedan como columnas
+  `INTEGER` sin FK).
+
+**Documentación actualizada.**
+
+- `DATA_MODEL.md` — Decision 1 reescrita para reflejar ACRISS en lugar de taxonomía
+  propia; Decision 2 y 9 actualizadas; pseudo-DDL de `canonical_vehicle_types`
+  reemplazado por `acriss_codes`; pseudo-DDL de `pvc` actualizado a columnas ACRISS;
+  FKs de `tenant_vehicle_group_mappings`, `pricing_rules`, `pricing_outputs` y el
+  ejemplo de consulta SQL actualizados a `acriss_code`.
+- `CLAUDE.md` — sin referencias a `taxonomy.yaml`, `seed_taxonomy.py` ni
+  `CanonicalVehicleType` (ya estaba limpio desde Hito C).
+- `README.md` — sin referencias a artefactos de taxonomía (ya estaba limpio).
+
+**Closure.** 172 tests verdes. Ninguna referencia a `CanonicalVehicleType`,
+`canonical_vehicle_type`, `taxonomy_loader`, `seed_taxonomy` ni `taxonomy.yaml`
+en `src/` ni `tests/`. Hito Cleanup cerrado.

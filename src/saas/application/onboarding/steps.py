@@ -246,14 +246,14 @@ def step_create_mappings(
     client_group_ids: dict[str, uuid.UUID],
     session: Session,
 ) -> int:
-    """Create TenantVehicleGroupMapping rows for every (tenant_group, canonical_type) pair.
+    """Create TenantVehicleGroupMapping rows for every (tenant_group, acriss_code) pair.
 
     Iterates over subscriptions. Each subscription's mappings reference a
     client_group_code (vehicle group on the tenant side) and a list of provider
     external_codes for that subscription's (provider, location, rate) tuple.
 
     Returns the total number of mapping rows created.
-    Raises OnboardingError if a referenced provider_vehicle_group does not exist.
+    Raises OnboardingError if a referenced provider_vehicle_category does not exist.
     """
     repo = ProviderVehicleCategoryRepository(session)
     count = 0
@@ -337,14 +337,14 @@ def step_activate_subscriptions(
 ) -> dict[tuple[str, str, str], str]:
     """Attempt to transition each subscription from pending_mapping → active.
 
-    A subscription becomes active when at least one canonical vehicle type
-    for the tuple (via an active ProviderVehicleCategory with a canonical_type_id)
-    has a TenantVehicleGroupMapping in this tenant.  PVCs without a
-    canonical_type_id are excluded — classification has not yet been run for them.
+    A subscription becomes active when at least one ACRISS code
+    for the tuple (via an active ProviderVehicleCategory with an acriss_code)
+    has a TenantVehicleGroupMapping in this tenant.  PVCs without an
+    acriss_code are excluded — classification has not yet been run for them.
 
-    Subscriptions with zero mapped canonical types stay in 'pending_mapping'.
+    Subscriptions with zero mapped ACRISS codes stay in 'pending_mapping'.
     Subscriptions with partial mappings are activated; an [info] is printed
-    listing the unmapped canonical type codes so the operator is aware.
+    listing the unmapped ACRISS codes so the operator is aware.
 
     Returns {(provider_code, location_code, rate_code): 'active' | 'pending_mapping'}.
     """

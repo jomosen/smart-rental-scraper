@@ -187,9 +187,7 @@ class PricingRule(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_rules_tenant", ondelete="RESTRICT"), nullable=False
     )
-    canonical_type_id: Mapped[int] = mapped_column(
-        ForeignKey("canonical_vehicle_types.id", name="fk_pricing_rules_canonical_type", ondelete="RESTRICT"), nullable=False
-    )
+    canonical_type_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     condition_jsonb: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
@@ -213,9 +211,7 @@ class PricingOutput(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_outputs_tenant", ondelete="RESTRICT"), nullable=False
     )
-    canonical_type_id: Mapped[int] = mapped_column(
-        ForeignKey("canonical_vehicle_types.id", name="fk_pricing_outputs_canonical_type", ondelete="RESTRICT"), nullable=False
-    )
+    canonical_type_id: Mapped[int] = mapped_column(Integer, nullable=False)
     pickup_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     computed_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)

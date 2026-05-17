@@ -28,7 +28,7 @@ def rollback_tenant(tenant_id: uuid.UUID, session: Session) -> None:
     Idempotent: silently succeeds if the tenant was never created or is
     already gone.
     """
-    # 1. Vehicle group mappings (FK → tenant_vehicle_groups, canonical_vehicle_types)
+    # 1. Vehicle group mappings (FK → tenant_vehicle_groups, acriss_codes)
     session.execute(
         delete(TenantVehicleGroupMapping).where(TenantVehicleGroupMapping.tenant_id == tenant_id)
     )
