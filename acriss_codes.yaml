@@ -1,0 +1,505 @@
+# ACRISS Codes — materialized subset for our market
+#
+# This file is the source of truth for the `acriss_codes` table. The seed
+# script applies it idempotently. ACRISS itself is the canonical standard
+# (https://www.acriss.org/); this file only declares which ACRISS codes we
+# materialize for classification, with display names and LLM context.
+#
+# Each entry is a 4-character ACRISS code:
+#   Position 1: Category (M, N, E, H, C, D, I, J, S, R, F, G, P, U, L, W, O, X)
+#   Position 2: Body type (B, C, D, W, V, L, S, T, F, J, X, P, Q, Z, E, M, R, H, Y, N, G, K)
+#   Position 3: Transmission (M, N, C, A, B, D, E)
+#   Position 4: Fuel/Air (R, D, V, H, I, E, C, L, S, A, B, M, F, U, X, Z, N)
+#
+# The default for fuel is R (Combustion Engine + Air). Providers explicitly
+# mark hybrid (H) or electric (E/C) when applicable.
+#
+# When the LLM does not find a matching code, the PVC is marked
+# `pending_review` rather than forced into an inappropriate code.
+
+acriss_codes:
+
+  # ──────────────────────────────────────────────────────────────
+  # ECONOMY — Sub-compact city cars
+  # ──────────────────────────────────────────────────────────────
+
+  - code: EDMR
+    display_name: Económico Manual
+    description: >
+      Sub-compact city car (length < 3.95m), manual transmission,
+      combustion engine. Smallest tier in the passenger car market.
+      Mainstream brand. Cheapest rental option for urban use.
+    criteria:
+      - "Sub-compact body (length < 3.95m)"
+      - "4-5 doors, 4-5 seats with limited rear space"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Mainstream economy brand"
+    examples:
+      - "Fiat 500"
+      - "Fiat Panda"
+      - "Kia Picanto"
+      - "Hyundai i10"
+      - "Toyota Aygo"
+
+  - code: EDMH
+    display_name: Económico Manual Híbrido
+    description: >
+      Sub-compact city car with hybrid powertrain, manual transmission.
+      Same size and tier as EDMR but explicitly hybrid (mild or full).
+    criteria:
+      - "Sub-compact body"
+      - "Manual transmission"
+      - "Hybrid powertrain (explicit)"
+    examples:
+      - "Fiat Panda Hybrid"
+      - "Toyota Yaris Hybrid (manual variants)"
+
+  - code: EDAR
+    display_name: Económico Automático
+    description: >
+      Sub-compact city car, automatic transmission, combustion engine.
+      Economy tier, mainstream brand.
+    criteria:
+      - "Sub-compact body"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream economy brand"
+    examples:
+      - "Toyota Yaris Auto"
+      - "Suzuki Swift Auto"
+      - "Kia Picanto Auto"
+      - "Hyundai i10 Auto"
+
+  # ──────────────────────────────────────────────────────────────
+  # COMPACT — Compact passenger cars (4.0-4.3m)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: CDMR
+    display_name: Compacto Manual
+    description: >
+      Compact passenger car, manual transmission, combustion engine.
+      Larger than ECONOMY. Typically 4-4.3m, 5 doors, 5 fixed seats.
+      Mainstream brand.
+    criteria:
+      - "Compact size (length 4.0-4.3m)"
+      - "5 doors, 5 fixed seats with real luggage space"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Mainstream brand (not premium)"
+    examples:
+      - "VW Polo"
+      - "Opel Corsa"
+      - "Renault Clio"
+      - "Peugeot 208"
+      - "Ford Fiesta"
+      - "Citroën C3"
+
+  - code: CDAR
+    display_name: Compacto Automático
+    description: >
+      Compact passenger car, automatic transmission, combustion engine.
+      Mainstream brand, urban use.
+    criteria:
+      - "Compact size (length 4.0-4.3m)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "VW Polo Auto"
+      - "Opel Corsa Auto"
+      - "Renault Clio Auto"
+      - "Peugeot 208 Auto"
+      - "Fiat 600"
+
+  # ──────────────────────────────────────────────────────────────
+  # COMPACT CROSSOVER — Urban SUVs (small)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: CGMR
+    display_name: SUV Urbano Manual
+    description: >
+      Compact crossover/urban SUV, manual transmission, combustion engine.
+      Length 4.0-4.4m. Soft-roader, no real 4x4. Mainstream brand.
+      Distinct from CFMR by softer profile (crossover, not pure SUV).
+    criteria:
+      - "Compact crossover body (length 4.0-4.4m)"
+      - "Raised driving position but urban-oriented"
+      - "Soft-roader, no real 4x4"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "SEAT Arona"
+      - "Opel Crossland"
+      - "Renault Captur (manual)"
+      - "Peugeot 2008 (manual)"
+
+  - code: CGAR
+    display_name: SUV Urbano Automático
+    description: >
+      Compact crossover/urban SUV, automatic transmission, combustion engine.
+      Length 4.0-4.4m. Soft-roader. Mainstream brand. Very popular urban
+      rental.
+    criteria:
+      - "Compact crossover body (length 4.0-4.4m)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Soft-roader, urban-oriented"
+      - "Mainstream brand"
+    examples:
+      - "VW T-Roc"
+      - "Ford Puma"
+      - "Skoda Kamiq"
+      - "Hyundai Kona"
+      - "Mini Countryman"
+      - "Hyundai Bayon"
+
+  - code: CGAH
+    display_name: SUV Urbano Automático Híbrido
+    description: >
+      Compact crossover with hybrid powertrain, automatic. Same size and
+      use as CGAR but explicitly hybrid.
+    criteria:
+      - "Compact crossover body"
+      - "Automatic transmission"
+      - "Hybrid powertrain (explicit)"
+    examples:
+      - "Kia XCeed Hybrid"
+      - "Toyota Yaris Cross Hybrid"
+      - "Hyundai Kona Hybrid"
+
+  # ──────────────────────────────────────────────────────────────
+  # COMPACT MPV — Compact people-carrier
+  # ──────────────────────────────────────────────────────────────
+
+  - code: CMMR
+    display_name: Monovolumen Compacto Manual
+    description: >
+      Compact MPV (people-carrier), manual transmission, combustion engine.
+      Tall roof, family-oriented, prioritizes interior space over off-road
+      styling. Distinct from CGMR (crossover): MPV body, more squared,
+      maximal cabin.
+    criteria:
+      - "MPV/people-carrier body (NOT SUV, NOT crossover)"
+      - "Tall roof, prioritizes interior space"
+      - "5 seats with optional 5+2 configuration"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "Peugeot Rifter"
+      - "Citroën Berlingo Passenger"
+      - "Renault Kangoo Passenger"
+      - "VW Caddy Passenger"
+
+  # ──────────────────────────────────────────────────────────────
+  # INTERMEDIATE — Mid-size cars (4.3-4.6m)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: IDMR
+    display_name: Intermedio Manual
+    description: >
+      Mid-size passenger car, manual transmission, combustion engine.
+      Length 4.3-4.6m, mainstream brand.
+    criteria:
+      - "Mid-size body (length 4.3-4.6m)"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "Audi A1 (note: smaller end of intermediate)"
+      - "Ford Focus"
+      - "Opel Astra"
+      - "Peugeot 308"
+      - "Hyundai i30"
+
+  - code: IDAR
+    display_name: Intermedio Automático
+    description: >
+      Mid-size passenger car, automatic transmission, combustion engine.
+      Length 4.3-4.6m, mainstream brand.
+    criteria:
+      - "Mid-size body (length 4.3-4.6m)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "Opel Astra Auto"
+      - "Ford Focus Auto"
+      - "Peugeot 308 Auto"
+
+  - code: IGAR
+    display_name: SUV Intermedio Crossover Automático
+    description: >
+      Mid-size crossover. Larger than CGAR but still crossover (soft body),
+      automatic transmission. Mainstream brand.
+    criteria:
+      - "Mid-size crossover (length 4.3-4.6m)"
+      - "Automatic transmission"
+      - "Crossover body (not full SUV)"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "Peugeot 2008"
+      - "Opel Astra Cross"
+      - "Hyundai Bayon"
+
+  - code: IFAR
+    display_name: SUV Intermedio Automático
+    description: >
+      Mid-size SUV, automatic transmission, combustion engine. Length
+      4.4-4.7m. The most common rental SUV category. Mainstream brand.
+    criteria:
+      - "Mid-size SUV (length 4.4-4.7m)"
+      - "Automatic transmission"
+      - "5 fixed seats (sometimes 5+2 configuration)"
+      - "Combustion engine"
+      - "Mainstream brand (VW, Hyundai, Ford, Mazda, etc.)"
+    examples:
+      - "VW Tiguan"
+      - "Hyundai Tucson"
+      - "Ford Kuga"
+      - "Opel Grandland"
+      - "Mazda CX-5"
+      - "DFSK 580"
+
+  - code: IWAR
+    display_name: Intermedio Wagon/Estate Automático
+    description: >
+      Mid-size estate/wagon, automatic transmission, combustion engine.
+      Mainstream brand. Distinct from IDAR (sedan) and IFAR (SUV).
+    criteria:
+      - "Wagon/estate body (5-door, with raised rear roofline)"
+      - "Mid-size length (4.4-4.7m)"
+      - "Automatic transmission"
+      - "Mainstream brand"
+    examples:
+      - "Kia Ceed SW"
+      - "VW Golf Variant"
+      - "Skoda Octavia Combi"
+
+  # ──────────────────────────────────────────────────────────────
+  # COMPACT ELITE — Premium-brand compact (used as PREMIUM_COMPACT)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: DFAR
+    display_name: SUV Compacto Premium
+    description: >
+      Compact premium-brand SUV, automatic transmission, combustion engine.
+      Length 4.3-4.6m. Premium brand (Mercedes, BMW, Audi, Volvo). Smaller
+      than RFAR. The 5+2 configuration variants of this body are included
+      (e.g. GLB).
+    criteria:
+      - "Compact-to-mid premium SUV (length 4.3-4.6m)"
+      - "Premium brand (Mercedes, BMW, Audi, Volvo, Lexus)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Premium-brand size 'Elite' equivalent of compact"
+    examples:
+      - "Mercedes GLA"
+      - "Mercedes GLB"
+      - "BMW X1"
+      - "Audi Q3"
+      - "Volvo XC40"
+
+  # ──────────────────────────────────────────────────────────────
+  # STANDARD ELITE — Larger premium-brand sedans/SUVs
+  # ──────────────────────────────────────────────────────────────
+
+  - code: RFAR
+    display_name: SUV Premium Mediano
+    description: >
+      Mid-to-large premium SUV, automatic transmission, combustion engine.
+      Length 4.6-5m. Larger than DFAR (compact premium SUV) and below
+      LFAR (luxury). Premium brand at executive level.
+    criteria:
+      - "Mid-to-large premium SUV (length 4.6-5m)"
+      - "Premium brand (Mercedes, BMW, Audi, Volvo, Lexus)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Above DFAR in size"
+    examples:
+      - "Mercedes GLC"
+      - "Mercedes GLC Coupé"
+      - "BMW X3"
+      - "Audi Q5"
+      - "Volvo XC60"
+      - "Lexus NX"
+
+  # ──────────────────────────────────────────────────────────────
+  # PREMIUM — Premium sedans (BMW 3, A4, C-Class size)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: PDAR
+    display_name: Premium Automático
+    description: >
+      Premium-brand sedan/sportback, automatic transmission, combustion
+      engine. Entry to mid-range premium models. Compact to mid-size
+      premium executive cars.
+    criteria:
+      - "Premium brand (BMW, Audi, Mercedes, Lexus, Volvo)"
+      - "Sedan or sportback body"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Length 4.5-4.9m"
+    examples:
+      - "BMW Serie 3"
+      - "Audi A4"
+      - "Mercedes Clase C"
+      - "Lexus IS"
+      - "Volvo S60"
+
+  # ──────────────────────────────────────────────────────────────
+  # STANDARD — Large mainstream sedans
+  # ──────────────────────────────────────────────────────────────
+
+  - code: SDAR
+    display_name: Estándar Automático
+    description: >
+      Full-size standard sedan/wagon, automatic transmission, combustion
+      engine. Mainstream brand top of lineup; below premium tier.
+    criteria:
+      - "Full-size sedan or wagon (4.6m+)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream brand (not premium)"
+    examples:
+      - "VW Passat"
+      - "Skoda Octavia"
+      - "Ford Mondeo"
+      - "Toyota Camry"
+
+  # ──────────────────────────────────────────────────────────────
+  # PASSENGER VAN — Standard 7-9 seat passenger vans (NOT cargo)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: SVAR
+    display_name: Furgoneta Pasajero 7 Plazas Automático
+    description: >
+      Passenger van with 7+ fixed seats, automatic transmission, combustion
+      engine. Distinct from cargo vans (commercial). Family-focused or
+      shuttle use.
+    criteria:
+      - "Van body (NOT commercial cargo)"
+      - "7+ fixed seats"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Passenger-focused interior"
+    examples:
+      - "Ford Tourneo Connect 7 PAX"
+      - "Citroën Spacetourer 7"
+      - "Renault Trafic Combi 7"
+
+  - code: PVAR
+    display_name: Furgoneta Pasajero 8 Plazas Automático
+    description: >
+      Passenger van with 8 fixed seats, automatic transmission, combustion
+      engine.
+    criteria:
+      - "Van body (NOT commercial)"
+      - "8 fixed seats"
+      - "Automatic transmission"
+    examples:
+      - "Renault Trafic Passenger 8 (variants)"
+      - "Mercedes Vito 8 (variants)"
+
+  - code: LVAR
+    display_name: Furgoneta Pasajero 9 Plazas Automático
+    description: >
+      Passenger van with 9+ fixed seats, automatic transmission,
+      combustion engine.
+    criteria:
+      - "Van body (NOT commercial)"
+      - "9+ fixed seats"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+    examples:
+      - "Renault Trafic Passenger 9 (auto)"
+      - "Mercedes Vito 9 plazas (mainstream auto)"
+      - "Ford Tourneo Custom 9 (auto)"
+
+  - code: LVMR
+    display_name: Furgoneta Pasajero 9 Plazas Manual
+    description: >
+      Passenger van with 9+ fixed seats, manual transmission, combustion
+      engine.
+    criteria:
+      - "Van body (NOT commercial)"
+      - "9+ fixed seats"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Renault Trafic Passenger 9 (manual)"
+      - "Opel Vivaro 9 seats (manual)"
+      - "Ford Transit Custom Combi 9 (manual)"
+
+  # ──────────────────────────────────────────────────────────────
+  # ELITE PASSENGER VAN — Premium-brand 7-9 seat vans
+  # ──────────────────────────────────────────────────────────────
+
+  - code: RVAR
+    display_name: Furgoneta Pasajero Premium 7 Plazas Auto
+    description: >
+      Premium-brand passenger van with 7+ fixed seats, automatic
+      transmission. Premium brand (Mercedes, BMW). Often used for VIP
+      shuttle or chauffeur service.
+    criteria:
+      - "Premium-brand van"
+      - "7+ fixed seats (passenger-focused)"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Mercedes V 7 seats"
+      - "Mercedes V-Class 7 plazas"
+
+  - code: WVAR
+    display_name: Furgoneta Pasajero Premium 9+ Plazas Auto
+    description: >
+      Premium-brand passenger van with 9+ fixed seats, automatic. Premium
+      brand. Used for upscale group transport.
+    criteria:
+      - "Premium-brand van"
+      - "9+ fixed seats"
+      - "Automatic transmission"
+    examples:
+      - "Mercedes Vito 9 plazas (premium-brand auto)"
+      - "Mercedes Clase V 9 plazas"
+
+  # ──────────────────────────────────────────────────────────────
+  # MPV/MONOSPACE — People-carriers (different from passenger vans)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: JMAR
+    display_name: Monovolumen Premium 5+2 Plazas Auto
+    description: >
+      Premium-brand MPV (people-carrier) with 5+2 seating, automatic.
+      Distinct from passenger van (lower body, more car-like).
+    criteria:
+      - "MPV/people-carrier body (NOT van, NOT SUV)"
+      - "Premium brand"
+      - "5+2 seating typical"
+      - "Automatic transmission"
+    examples:
+      - "BMW Serie 2 Gran Tourer"
+      - "Mercedes Clase B"
+
+  # ──────────────────────────────────────────────────────────────
+  # 2-WHEELERS (Motorcycles / Scooters)
+  # ──────────────────────────────────────────────────────────────
+
+  - code: EYNR
+    display_name: Scooter 125cc
+    description: >
+      Small-displacement scooter (typically 125cc), combustion engine.
+      Common rental for urban mobility. Step-through design.
+    criteria:
+      - "Scooter body (step-through)"
+      - "Engine displacement 125cc typically"
+      - "Single-rider or two-rider"
+    examples:
+      - "Yamaha Ray ZR 125"
+      - "Vespa Primavera 125"
+      - "Honda PCX 125"
+      - "Yamaha NMAX 125"

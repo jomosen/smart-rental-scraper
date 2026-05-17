@@ -6,22 +6,20 @@ from src.saas.application.classification.service import ClassificationService
 
 
 class StubClassificationService(ClassificationService):
-    """Deterministic batch classification: maps external_code → canonical_type_code.
+    """Deterministic batch classification: maps external_code → ACRISS 4-char code.
 
-    Useful for tests that don't want to mock per-call. Any external_code not
-    in code_map returns pending_review=True with confidence=0.0.
+    code_map values must be valid 4-char ACRISS codes (e.g. 'EDMR').
+    Any external_code not in code_map returns pending_review=True with confidence=0.0.
 
     call_count tracks total individual vehicle classifications across all batch calls.
     """
 
     def __init__(
         self,
-        code_map: dict[str, str],
-        taxonomy_version: int = 1,
+        code_map: dict[str, str],  # external_code → 4-char ACRISS code
         default_confidence: float = 0.95,
     ) -> None:
         self._code_map = code_map
-        self._taxonomy_version = taxonomy_version
         self._default_confidence = default_confidence
         self.call_count = 0
 
@@ -34,18 +32,22 @@ class StubClassificationService(ClassificationService):
         for vehicle in vehicles:
             self.call_count += 1
             code = self._code_map.get(vehicle.external_code)
-            if code is None:
+            if code is None or len(code) != 4:
                 results.append(ClassificationResult(
-                    canonical_type_code=None,
+                    acriss_category=None,
+                    acriss_body_type=None,
+                    acriss_transmission=None,
+                    acriss_fuel=None,
                     confidence=0.0,
-                    taxonomy_version=self._taxonomy_version,
                     pending_review=True,
                 ))
             else:
                 results.append(ClassificationResult(
-                    canonical_type_code=code,
+                    acriss_category=code[0],
+                    acriss_body_type=code[1],
+                    acriss_transmission=code[2],
+                    acriss_fuel=code[3],
                     confidence=self._default_confidence,
-                    taxonomy_version=self._taxonomy_version,
                     pending_review=False,
                 ))
         return results

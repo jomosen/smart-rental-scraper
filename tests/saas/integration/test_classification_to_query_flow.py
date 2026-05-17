@@ -1,7 +1,7 @@
 """End-to-end integration test for intra-provider aggregation.
 
 Scenario: A single provider has two vehicle groups (EA and GA) that the
-classifier maps to the *same* canonical type.  Before the revert this
+classifier maps to the *same* ACRISS code.  Before the revert this
 scenario triggered a UniqueConstraint violation on uq_provider_vehicle_
 categories_canonical; now it must produce two distinct PVC rows, and
 PriceQueryService must aggregate them at query time (MIN policy).
@@ -19,7 +19,6 @@ from sqlalchemy import delete
 from src.saas.application.classification.dtos import ClassificationResult
 from src.saas.application.price_query.service import PriceQueryService
 from src.saas.infrastructure.persistence.models.catalog import (
-    CanonicalVehicleType,
     HomogeneousZone,
     PriceObservation,
     PriceObservationHeartbeat,
@@ -40,8 +39,10 @@ from src.saas.infrastructure.persistence.repositories import (
     ProviderVehicleCategoryRepository,
 )
 
+_AC_IDAR = "IDAR"  # Intermediate Automatic
 
-def _cleanup(session, provider_ids, tenant_ids=None, canonical_type_ids=None):
+
+def _cleanup(session, provider_ids, tenant_ids=None):
     session.rollback()
     if tenant_ids:
         for tid in tenant_ids:
@@ -81,25 +82,19 @@ def _cleanup(session, provider_ids, tenant_ids=None, canonical_type_ids=None):
             delete(ProviderLocation).where(ProviderLocation.provider_id == pid)
         )
         session.execute(delete(Provider).where(Provider.id == pid))
-    if canonical_type_ids:
-        for ctid in canonical_type_ids:
-            session.execute(
-                delete(CanonicalVehicleType).where(CanonicalVehicleType.id == ctid)
-            )
     session.commit()
 
 
-def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session):
-    """Full pipeline: upsert_seen twice → same canonical → PriceQueryService returns min.
+def test_two_pvcs_same_acriss_code_coexist_and_query_returns_min(super_db_session):
+    """Full pipeline: upsert_seen twice → same ACRISS code → PriceQueryService returns min.
 
     This is the exact scenario that motivated the intra-provider aggregation
     revert: a provider has two price tiers (EA cheaper, GA more expensive) that
-    both classify as the same canonical type.  The old constraint would raise
-    UniqueConstraint on the second upsert_seen call; the new design allows both
-    rows and aggregates at query time.
+    both classify as IDAR.  The old constraint would raise UniqueConstraint on
+    the second upsert_seen call; the new design allows both rows and aggregates
+    at query time.
     """
     p_id: int | None = None
-    ct_id: int | None = None
     t_id: uuid.UUID | None = None
 
     try:
@@ -133,22 +128,13 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
         super_db_session.add(rate)
         super_db_session.flush()
 
-        ct = CanonicalVehicleType(
-            code="integ_intermediate_auto",
-            name="Intermediate Automatic",
-            description="Mid-size automatic",
-            taxonomy_version=1,
-            active=True,
-        )
-        super_db_session.add(ct)
-        super_db_session.flush()
-        ct_id = ct.id
-
-        # ── Classify and upsert two PVCs that share the same canonical type ─
+        # ── Classify and upsert two PVCs that share the same ACRISS code ───
         classification = ClassificationResult(
-            canonical_type_code="integ_intermediate_auto",
+            acriss_category="I",
+            acriss_body_type="D",
+            acriss_transmission="A",
+            acriss_fuel="R",
             confidence=0.95,
-            taxonomy_version=1,
             pending_review=False,
         )
         repo = ProviderVehicleCategoryRepository(super_db_session)
@@ -162,8 +148,6 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
             example_models="VW Golf, Toyota Corolla",
             seats=5,
             luggage=2,
-            transmission="automatic",
-            fuel_type="petrol",
             classification=classification,
         )
 
@@ -176,16 +160,15 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
             example_models="BMW 1 Series, Audi A3",
             seats=5,
             luggage=2,
-            transmission="automatic",
-            fuel_type="petrol",
             classification=classification,
         )
 
-        # Both rows must exist; both point to the same canonical type
+        # Both rows must exist; both map to the same ACRISS code
         assert pvc_ea.id != pvc_ga.id, "Two distinct PVC rows must have been created"
-        assert pvc_ea.canonical_type_id == ct.id
-        assert pvc_ga.canonical_type_id == ct.id
-        assert pvc_ea.canonical_type_id == pvc_ga.canonical_type_id
+        super_db_session.refresh(pvc_ea)
+        super_db_session.refresh(pvc_ga)
+        assert pvc_ea.acriss_code == _AC_IDAR
+        assert pvc_ga.acriss_code == _AC_IDAR
 
         # ── Zones and observations ─────────────────────────────────────────
         run = ScrapeRun(
@@ -258,7 +241,7 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
         super_db_session.add(TenantVehicleGroupMapping(
             tenant_id=tenant.id,
             tenant_vehicle_group_id=cvg.id,
-            canonical_type_id=ct.id,
+            acriss_code=_AC_IDAR,
         ))
         super_db_session.flush()
 
@@ -277,7 +260,7 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
         # One row (one zone for the client group), price = min(57, 69) = 57
         assert len(result.rows) == 1, (
             f"Expected 1 row but got {len(result.rows)} — "
-            "aggregation across same-canonical PVCs should produce 1 logical group"
+            "aggregation across same-ACRISS PVCs should produce 1 logical group"
         )
         row = result.rows[0]
         assert row.prices_by_duration[7] == Decimal("57.00"), (
@@ -290,5 +273,4 @@ def test_two_pvcs_same_canonical_coexist_and_query_returns_min(super_db_session)
             super_db_session,
             provider_ids=[p_id] if p_id is not None else [],
             tenant_ids=[t_id] if t_id is not None else [],
-            canonical_type_ids=[ct_id] if ct_id is not None else [],
         )

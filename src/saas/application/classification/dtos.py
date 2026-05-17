@@ -8,8 +8,12 @@ from dataclasses import dataclass
 class VehicleClassificationInput:
     """Input for batch provider classification.
 
-    Carries the same observed attributes as VehicleAttributes plus price context
-    that helps the LLM distinguish within-provider price tiers.
+    Carries observed attributes plus price context that helps the LLM
+    distinguish within-provider price tiers.
+
+    `transmission` and `fuel_type` are optional hints scraped from the
+    provider page — the authoritative values are returned by the LLM as
+    ACRISS attribute codes (positions 3 and 4 of the ACRISS code).
     """
     external_code: str | None
     external_name: str | None
@@ -24,34 +28,29 @@ class VehicleClassificationInput:
 
 @dataclass(frozen=True)
 class VehicleAttributes:
-    """Observed attributes of a vehicle group extracted by a scraper.
-
-    Used as input to ClassificationService.classify().
-    """
+    """Observed attributes of a vehicle group extracted by a scraper."""
     example_models: str
     seats: int | None
     luggage: int | None
     transmission: str | None   # 'manual' | 'automatic' | None
     fuel_type: str | None      # 'gasoline' | 'diesel' | 'hybrid' | 'electric' | None
-    external_code: str | None  # Provider's group code if exposed, else None
-    external_name: str | None  # Provider's display name if exposed, else None
+    external_code: str | None
+    external_name: str | None
 
 
 @dataclass(frozen=True)
 class ClassificationResult:
-    """Outcome of a classification attempt.
+    """Outcome of an ACRISS classification attempt.
 
-    `canonical_type_code` is None when the LLM (after fallback) could
-    not confidently classify. In that case, `pending_review` is True
-    and `confidence` is the highest confidence achieved (still below
-    threshold).
-
-    `taxonomy_version` is the version used at classification time —
-    persisted alongside the result so future taxonomy changes can
-    selectively invalidate stale classifications.
+    All four `acriss_*` attributes are None when `pending_review` is True,
+    meaning the LLM could not confidently assign a code.  `confidence` is
+    the highest confidence achieved (still below threshold) so operators
+    can prioritise manual review.
     """
-    canonical_type_code: str | None
+    acriss_category: str | None      # ACRISS position 1: vehicle category (E, C, I, …)
+    acriss_body_type: str | None     # ACRISS position 2: body type (D, G, M, V, …)
+    acriss_transmission: str | None  # ACRISS position 3: transmission (M, A)
+    acriss_fuel: str | None          # ACRISS position 4: fuel/drive (R, H, E, …)
     confidence: float
-    taxonomy_version: int
     pending_review: bool
     rationale: str | None = None

@@ -414,49 +414,47 @@ class PriceQueryService:
         """Return {tenant_vehicle_group_id: [pvc_id, ...]} for the tuple.
 
         Three-layer traversal:
-          tenant_vehicle_group → canonical_type (via mapping)
-          canonical_type       → pvc (via PVC.canonical_type_id within the tuple)
+          tenant_vehicle_group → acriss_code (via TVGM)
+          acriss_code          → pvc (via PVC.acriss_code within the tuple)
 
-        Only classified, active PVCs (canonical_type_id IS NOT NULL) are
+        Only classified, active PVCs (acriss_code IS NOT NULL) are
         visible to tenant queries — unclassified PVCs are pending_review.
         """
         if not cvg_ids:
             return {}
 
-        # Step 1: PVCs for this tuple → canonical_type → pvc_id lookup
+        # Step 1: PVCs for this tuple → acriss_code → pvc_id lookup
         pvcs = self._s.scalars(
             select(ProviderVehicleCategory).where(
                 ProviderVehicleCategory.provider_id == provider_id,
                 ProviderVehicleCategory.provider_location_id == location_id,
                 ProviderVehicleCategory.provider_rate_id == rate_id,
                 ProviderVehicleCategory.active == True,
-                ProviderVehicleCategory.canonical_type_id.is_not(None),
+                ProviderVehicleCategory.acriss_code.is_not(None),
             )
         ).all()
-        # Multiple PVCs may share the same canonical_type_id (within-provider
+        # Multiple PVCs may share the same acriss_code (within-provider
         # price tiers).  Aggregation to min() happens at query time in the
-        # caller — do NOT collapse to one PVC per canonical here.
-        canonical_to_pvcs: dict[int, list[int]] = {}
+        # caller — do NOT collapse to one PVC per code here.
+        code_to_pvcs: dict[str, list[int]] = {}
         for pvc in pvcs:
-            canonical_to_pvcs.setdefault(pvc.canonical_type_id, []).append(pvc.id)
-        if not canonical_to_pvcs:
+            code_to_pvcs.setdefault(pvc.acriss_code, []).append(pvc.id)
+        if not code_to_pvcs:
             return {}
 
-        # Step 2: tenant mappings restricted to canonical types present in this tuple
+        # Step 2: tenant mappings restricted to ACRISS codes present in this tuple
         mappings = self._s.scalars(
             select(TenantVehicleGroupMapping).where(
                 TenantVehicleGroupMapping.tenant_id == tenant_id,
                 TenantVehicleGroupMapping.tenant_vehicle_group_id.in_(cvg_ids),
-                TenantVehicleGroupMapping.canonical_type_id.in_(
-                    list(canonical_to_pvcs.keys())
-                ),
+                TenantVehicleGroupMapping.acriss_code.in_(list(code_to_pvcs.keys())),
             )
         ).all()
 
         # Step 3: assemble {tvg_id: [pvc_id, ...]}
         result: dict[uuid.UUID, list[int]] = {}
         for m in mappings:
-            for pvc_id in canonical_to_pvcs.get(m.canonical_type_id, []):
+            for pvc_id in code_to_pvcs.get(m.acriss_code, []):
                 result.setdefault(m.tenant_vehicle_group_id, []).append(pvc_id)
         return result
 

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Boolean,
     CHAR,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     Float,
@@ -34,8 +35,37 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
 
+class AcrissCode(Base):
+    """Materialized subset of the ACRISS standard used by this platform.
+
+    Only codes observed in the market are persisted.  Source of truth: acriss_codes.yaml.
+    """
+    __tablename__ = "acriss_codes"
+
+    code: Mapped[str] = mapped_column(String(4), primary_key=True)
+    acriss_category: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    acriss_body_type: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    acriss_transmission: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    acriss_fuel: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    criteria: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
+    examples: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    last_updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+
+
 class CanonicalVehicleType(Base):
-    """Operator-curated taxonomy.  Source of truth: taxonomy.yaml."""
+    """Operator-curated taxonomy.  Source of truth: taxonomy.yaml.
+
+    Kept for historical reference and pricing rules; classification has
+    migrated to the ACRISS standard (see AcrissCode).
+    """
     __tablename__ = "canonical_vehicle_types"
     __table_args__ = (
         UniqueConstraint("code", name="uq_canonical_vehicle_types_code"),
@@ -53,10 +83,6 @@ class CanonicalVehicleType(Base):
     )
     deprecated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
-    )
-
-    categories: Mapped[list[ProviderVehicleCategory]] = relationship(
-        back_populates="canonical_type"
     )
 
 
@@ -131,12 +157,11 @@ class ProviderRate(Base):
 
 
 class ProviderVehicleCategory(Base):
-    """One row per (provider, canonical_type) tuple.
+    """One row per (provider, location, rate, external_code/attributes_hash) tuple.
 
     external_code / external_name are kept as documentary metadata when the
-    provider exposes internal identifiers, but they are NOT part of the row's
-    identity.  Classification into a canonical type is performed by
-    ClassificationService (implemented in prompt 3).
+    provider exposes internal identifiers.  Classification into an ACRISS code
+    is performed by ClassificationService.
     """
     __tablename__ = "provider_vehicle_categories"
 
@@ -150,17 +175,22 @@ class ProviderVehicleCategory(Base):
     provider_rate_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("provider_rates.id", name="fk_provider_vehicle_groups_rate", ondelete="RESTRICT"), nullable=False
     )
-    # Classification
-    canonical_type_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("canonical_vehicle_types.id", name="fk_provider_vehicle_categories_canonical_type", ondelete="RESTRICT"),
+    # ACRISS classification (4 orthogonal attributes + generated code)
+    acriss_category: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    acriss_body_type: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    acriss_transmission: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    acriss_fuel: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    acriss_code: Mapped[Optional[str]] = mapped_column(
+        String(4),
+        Computed(
+            "acriss_category || acriss_body_type || acriss_transmission || acriss_fuel",
+            persisted=True,
+        ),
+        ForeignKey("acriss_codes.code", name="fk_pvc_acriss_code"),
         nullable=True,
     )
     classification_confidence: Mapped[Optional[float]] = mapped_column(
         Float(precision=53), nullable=True
-    )
-    classification_taxonomy_version: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True
     )
     pending_review: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
@@ -169,8 +199,6 @@ class ProviderVehicleCategory(Base):
     example_models: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     seats: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     luggage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    transmission: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    fuel_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     # Documentary metadata (nullable — not all providers expose codes)
     external_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     external_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -186,9 +214,6 @@ class ProviderVehicleCategory(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
     provider: Mapped[Provider] = relationship(back_populates="vehicle_categories")
-    canonical_type: Mapped[Optional[CanonicalVehicleType]] = relationship(
-        back_populates="categories"
-    )
 
 
 class ScrapeRun(Base):

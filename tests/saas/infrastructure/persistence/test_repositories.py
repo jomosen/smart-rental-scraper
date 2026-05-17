@@ -18,7 +18,6 @@ import pytest
 from sqlalchemy import delete, select, text
 
 from src.saas.infrastructure.persistence.models.catalog import (
-    CanonicalVehicleType,
     HomogeneousZone,
     Provider,
     ProviderLocation,
@@ -38,25 +37,40 @@ from src.saas.infrastructure.persistence.repositories import (
     ScrapeRunRepository,
 )
 
+# ACRISS codes used in tests — all present in the seeded acriss_codes table.
+_ACRISS_EDMR = "EDMR"  # Economy Manual
+_ACRISS_CDAR = "CDAR"  # Compact Automatic
+_ACRISS_IDAR = "IDAR"  # Intermediate Automatic
+
 
 def _classification_result(
-    code: str | None = None,
+    acriss_code: str | None = None,
     confidence: float = 0.95,
-    taxonomy_version: int = 1,
     pending_review: bool | None = None,
 ) -> ClassificationResult:
     if pending_review is None:
-        pending_review = code is None
+        pending_review = acriss_code is None
+    if acriss_code and len(acriss_code) == 4 and not pending_review:
+        return ClassificationResult(
+            acriss_category=acriss_code[0],
+            acriss_body_type=acriss_code[1],
+            acriss_transmission=acriss_code[2],
+            acriss_fuel=acriss_code[3],
+            confidence=confidence,
+            pending_review=False,
+        )
     return ClassificationResult(
-        canonical_type_code=code,
+        acriss_category=None,
+        acriss_body_type=None,
+        acriss_transmission=None,
+        acriss_fuel=None,
         confidence=confidence,
-        taxonomy_version=taxonomy_version,
-        pending_review=pending_review,
+        pending_review=True,
     )
 
 
 # ---------------------------------------------------------------------------
-# Fixture helpers — column names match migration 616af4ee21c5
+# Fixture helpers
 # ---------------------------------------------------------------------------
 
 def _provider(session, code: str = "test_provider_a") -> Provider:
@@ -215,7 +229,7 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="SUV", external_name="SUV New Name",
             example_models="Toyota RAV4, Honda CR-V",
-            seats=None, luggage=None, transmission=None, fuel_type=None,
+            seats=None, luggage=None,
             classification=_classification_result(pending_review=True),
         )
         assert result.id == existing.id
@@ -231,7 +245,7 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="FCAR", external_name="Full Size",
             example_models="VW Passat", seats=5, luggage=3,
-            transmission="manual", active=True,
+            active=True,
         )
         super_db_session.add(existing)
         super_db_session.flush()
@@ -241,13 +255,12 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="FCAR", external_name="Full Size",
             example_models="VW Passat, Skoda Octavia",
-            seats=5, luggage=4, transmission="automatic", fuel_type=None,
+            seats=5, luggage=4,
             classification=_classification_result(pending_review=True),
         )
         assert result.id == existing.id
         assert result.example_models == "VW Passat, Skoda Octavia"
         assert result.luggage == 4
-        assert result.transmission == "automatic"
 
     # ------------------------------------------------------------------
     # Classification-aware upsert_seen tests
@@ -257,81 +270,61 @@ class TestProviderVehicleCategoryRepository:
         p = _provider(super_db_session, code="pvc_cls_new")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        ct = CanonicalVehicleType(
-            code="UTEST_ECO_MAN", name="Economy Manual (test)",
-            description="Small manual car", taxonomy_version=1, active=True,
-        )
-        super_db_session.add(ct)
-        super_db_session.flush()
 
         repo = ProviderVehicleCategoryRepository(super_db_session)
         pvc = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="ECMR", external_name="Economy",
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type=None,
-            classification=_classification_result("UTEST_ECO_MAN", confidence=0.95, taxonomy_version=1),
+            classification=_classification_result(_ACRISS_EDMR, confidence=0.95),
         )
 
-        assert pvc.canonical_type_id == ct.id
+        super_db_session.refresh(pvc)
+        assert pvc.acriss_category == "E"
+        assert pvc.acriss_body_type == "D"
+        assert pvc.acriss_transmission == "M"
+        assert pvc.acriss_fuel == "R"
+        assert pvc.acriss_code == _ACRISS_EDMR
         assert pvc.classification_confidence == pytest.approx(0.95)
-        assert pvc.classification_taxonomy_version == 1
         assert pvc.pending_review is False
 
     def test_upsert_seen_updates_existing_pvc_when_called_twice(self, super_db_session):
         p = _provider(super_db_session, code="pvc_cls_cache")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        ct = CanonicalVehicleType(
-            code="UTEST_CMPCT_AUT", name="Compact Auto (test)",
-            description="Compact automatic car", taxonomy_version=3, active=True,
-        )
-        super_db_session.add(ct)
-        super_db_session.flush()
 
         repo = ProviderVehicleCategoryRepository(super_db_session)
-        classification = _classification_result("UTEST_CMPCT_AUT", confidence=0.91, taxonomy_version=3)
+        classification = _classification_result(_ACRISS_CDAR, confidence=0.91)
 
         pvc1 = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="CCAR", external_name="Compact",
             example_models="Ford Focus", seats=5, luggage=3,
-            transmission="automatic", fuel_type=None,
             classification=classification,
         )
-        assert pvc1.canonical_type_id == ct.id
+        super_db_session.refresh(pvc1)
+        assert pvc1.acriss_code == _ACRISS_CDAR
 
         pvc2 = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="CCAR", external_name="Compact",
             example_models="Ford Focus, VW Golf", seats=5, luggage=3,
-            transmission="automatic", fuel_type=None,
             classification=classification,
         )
         assert pvc2.id == pvc1.id, "Second call must return the same PVC"
         assert pvc2.example_models == "Ford Focus, VW Golf"
 
-    def test_upsert_seen_reclassifies_when_taxonomy_version_changes(self, super_db_session):
+    def test_upsert_seen_reclassifies_when_new_classification_differs(self, super_db_session):
         p = _provider(super_db_session, code="pvc_cls_reclassify")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        old_ct = CanonicalVehicleType(
-            code="OLD_CATEGORY", name="Old Category",
-            description="Old", taxonomy_version=3, active=False,
-        )
-        new_ct = CanonicalVehicleType(
-            code="NEW_CATEGORY", name="New Category",
-            description="New", taxonomy_version=4, active=True,
-        )
-        super_db_session.add_all([old_ct, new_ct])
-        super_db_session.flush()
 
         existing = ProviderVehicleCategory(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="CCAR", external_name="Compact",
             example_models="Ford Focus", active=True,
-            canonical_type_id=old_ct.id,
-            classification_taxonomy_version=3,
+            acriss_category="E", acriss_body_type="D",
+            acriss_transmission="M", acriss_fuel="R",
             pending_review=False,
         )
         super_db_session.add(existing)
@@ -342,12 +335,12 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="CCAR", external_name="Compact",
             example_models="Ford Focus, VW Golf", seats=5, luggage=3,
-            transmission="automatic", fuel_type=None,
-            classification=_classification_result("NEW_CATEGORY", confidence=0.92, taxonomy_version=4),
+            classification=_classification_result(_ACRISS_CDAR, confidence=0.92),
         )
 
-        assert result.canonical_type_id == new_ct.id
-        assert result.classification_taxonomy_version == 4
+        super_db_session.refresh(result)
+        assert result.acriss_code == _ACRISS_CDAR
+        assert result.acriss_category == "C"
         assert result.pending_review is False
 
     def test_upsert_seen_keeps_cached_classification_on_pending_review_for_existing_pvc(
@@ -356,45 +349,38 @@ class TestProviderVehicleCategoryRepository:
         p = _provider(super_db_session, code="pvc_cls_cached_fallback")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        ct = CanonicalVehicleType(
-            code="UTEST_ECO_FALL", name="Economy Fallback (test)",
-            description="Small manual car", taxonomy_version=3, active=True,
-        )
-        super_db_session.add(ct)
-        super_db_session.flush()
 
         existing = ProviderVehicleCategory(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="ECMR", external_name="Economy",
             example_models="Fiat Panda", active=True,
-            canonical_type_id=ct.id,
+            acriss_category="E", acriss_body_type="D",
+            acriss_transmission="M", acriss_fuel="R",
             classification_confidence=0.91,
-            classification_taxonomy_version=3,
             pending_review=False,
         )
         super_db_session.add(existing)
         super_db_session.flush()
-        original_canonical_id = ct.id
 
         repo = ProviderVehicleCategoryRepository(super_db_session)
         result = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="ECMR", external_name="Economy",
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type=None,
             classification=ClassificationResult(
-                canonical_type_code=None,
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
                 confidence=0.0,
-                taxonomy_version=4,
                 pending_review=True,
             ),
         )
 
-        assert result.canonical_type_id == original_canonical_id, \
-            "Previous canonical_type_id must be preserved on pending_review"
+        assert result.acriss_category == "E", \
+            "Previous ACRISS category must be preserved on pending_review"
         assert result.pending_review is True
         assert result.classification_confidence == pytest.approx(0.0)
-        assert result.classification_taxonomy_version == 3  # not updated on cached fallback
 
     def test_upsert_seen_marks_pending_review_for_new_pvc_when_llm_uncertain(
         self, super_db_session
@@ -408,41 +394,18 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="XCAR", external_name="Unknown Group",
             example_models="Mystery Car", seats=None, luggage=None,
-            transmission=None, fuel_type=None,
             classification=ClassificationResult(
-                canonical_type_code=None,
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
                 confidence=0.0,
-                taxonomy_version=1,
                 pending_review=True,
             ),
         )
 
-        assert pvc.canonical_type_id is None
-        assert pvc.pending_review is True
-        assert pvc.classification_taxonomy_version == 1
-
-    def test_upsert_seen_marks_pending_review_when_canonical_not_found_in_db(
-        self, super_db_session
-    ):
-        p = _provider(super_db_session, code="pvc_cls_ghost")
-        loc = _location(super_db_session, p.id)
-        rate = _rate(super_db_session, p.id)
-
-        repo = ProviderVehicleCategoryRepository(super_db_session)
-        pvc = repo.upsert_seen(
-            provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
-            external_code="ECMR", external_name="Economy",
-            example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type=None,
-            classification=ClassificationResult(
-                canonical_type_code="GHOST_CATEGORY",  # not in DB
-                confidence=0.95,
-                taxonomy_version=1,
-                pending_review=False,
-            ),
-        )
-
-        assert pvc.canonical_type_id is None
+        super_db_session.refresh(pvc)
+        assert pvc.acriss_code is None
         assert pvc.pending_review is True
 
     def test_upsert_seen_uses_attribute_hash_when_no_external_code(self, super_db_session):
@@ -452,7 +415,9 @@ class TestProviderVehicleCategoryRepository:
 
         repo = ProviderVehicleCategoryRepository(super_db_session)
         classification = ClassificationResult(
-            canonical_type_code=None, confidence=0.0, taxonomy_version=1, pending_review=True
+            acriss_category=None, acriss_body_type=None,
+            acriss_transmission=None, acriss_fuel=None,
+            confidence=0.0, pending_review=True,
         )
 
         # First call: creates new PVC (no external_code)
@@ -460,7 +425,6 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code=None, external_name=None,
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type="gasoline",
             classification=classification,
         )
         assert pvc1.id is not None
@@ -470,7 +434,6 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code=None, external_name=None,
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type="gasoline",
             classification=classification,
         )
         assert pvc2.id == pvc1.id, "Second call must return the same PVC, not create a new row"
@@ -480,63 +443,47 @@ class TestProviderVehicleCategoryRepository:
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
 
-        canonical = CanonicalVehicleType(
-            code="UTEST_NULL_NAME", name="Test Null Name",
-            description="Test type for null external_name", taxonomy_version=1, active=True,
-        )
-        super_db_session.add(canonical)
-        super_db_session.flush()
-
         repo = ProviderVehicleCategoryRepository(super_db_session)
         pvc = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="EXT_NULL", external_name=None,
             example_models="Ford Ka", seats=5, luggage=1,
-            transmission="manual", fuel_type="gasoline",
-            classification=_classification_result("UTEST_NULL_NAME", confidence=0.95, taxonomy_version=1),
+            classification=_classification_result(pending_review=True),
         )
 
         super_db_session.refresh(pvc)
         assert pvc.external_name is None, "external_name=None must persist as SQL NULL, not empty string"
 
-    def test_upsert_seen_creates_multiple_pvcs_for_same_canonical_within_provider(
+    def test_upsert_seen_creates_multiple_pvcs_for_same_acriss_code_within_provider(
         self, super_db_session
     ):
-        """Two different provider groups classified as same canonical get separate PVC rows."""
-        p = _provider(super_db_session, code="pvc_multi_canonical")
+        """Two different provider groups classified as the same ACRISS code get separate PVC rows."""
+        p = _provider(super_db_session, code="pvc_multi_acriss")
         loc = _location(super_db_session, p.id)
         rate = _rate(super_db_session, p.id)
-        ct = CanonicalVehicleType(
-            code="UTEST_INTERMEDIATE_AUT", name="Intermediate Auto (test)",
-            description="Mid-size automatic car", taxonomy_version=1, active=True,
-        )
-        super_db_session.add(ct)
-        super_db_session.flush()
 
         repo = ProviderVehicleCategoryRepository(super_db_session)
-        classification = _classification_result(
-            "UTEST_INTERMEDIATE_AUT", confidence=0.92, taxonomy_version=1
-        )
+        classification = _classification_result(_ACRISS_IDAR, confidence=0.92)
 
         pvc_ea = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="EA", external_name="Intermediate Economy",
             example_models="VW Golf", seats=5, luggage=3,
-            transmission="automatic", fuel_type=None,
             classification=classification,
         )
         pvc_ga = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="GA", external_name="Intermediate Premium",
             example_models="Ford Focus", seats=5, luggage=3,
-            transmission="automatic", fuel_type=None,
             classification=classification,
         )
 
         assert pvc_ea.id != pvc_ga.id, "Each provider group must have its own PVC row"
-        assert pvc_ea.canonical_type_id == ct.id
-        assert pvc_ga.canonical_type_id == ct.id
-        assert pvc_ea.canonical_type_id == pvc_ga.canonical_type_id
+        super_db_session.refresh(pvc_ea)
+        super_db_session.refresh(pvc_ga)
+        assert pvc_ea.acriss_code == _ACRISS_IDAR
+        assert pvc_ga.acriss_code == _ACRISS_IDAR
+        assert pvc_ea.acriss_code == pvc_ga.acriss_code
 
     def test_upsert_seen_persists_attributes_hash_only_when_external_code_is_null(
         self, super_db_session
@@ -546,14 +493,15 @@ class TestProviderVehicleCategoryRepository:
         rate = _rate(super_db_session, p.id)
         repo = ProviderVehicleCategoryRepository(super_db_session)
         classification = ClassificationResult(
-            canonical_type_code=None, confidence=0.0, taxonomy_version=1, pending_review=True
+            acriss_category=None, acriss_body_type=None,
+            acriss_transmission=None, acriss_fuel=None,
+            confidence=0.0, pending_review=True,
         )
 
         pvc_with_code = repo.upsert_seen(
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code="ECMR", external_name="Economy",
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type="gasoline",
             classification=classification,
         )
         super_db_session.refresh(pvc_with_code)
@@ -563,7 +511,6 @@ class TestProviderVehicleCategoryRepository:
             provider_id=p.id, provider_location_id=loc.id, provider_rate_id=rate.id,
             external_code=None, external_name=None,
             example_models="Fiat Panda", seats=5, luggage=2,
-            transmission="manual", fuel_type="gasoline",
             classification=classification,
         )
         super_db_session.refresh(pvc_no_code)

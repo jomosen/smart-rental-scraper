@@ -15,7 +15,7 @@ from typing import Callable
 
 from pathlib import Path
 
-from src.saas.application.classification.taxonomy_loader import load_taxonomy_specs
+from src.saas.application.classification.acriss_loader import load_acriss_specs
 from src.saas.infrastructure.classification.gemini_service import GeminiClassificationService
 from src.scraper.application.factories.scraper_factory import ScraperFactory
 from src.scraper.application.filters.rate_filter import RateFilter
@@ -29,7 +29,7 @@ from src.scraper.infrastructure.playwright.playwright_driver import PlaywrightDr
 from src.scraper.presentation.cli.container import SCRAPER_REGISTRY
 from src.shared.domain.models.search import Location
 
-_TAXONOMY_YAML = Path(__file__).resolve().parents[3] / "taxonomy.yaml"
+_ACRISS_YAML = Path(__file__).resolve().parents[3] / "acriss_codes.yaml"
 
 
 def build_scraper_factory(providers_json: list[dict]) -> ScraperFactory:
@@ -83,10 +83,9 @@ def run_discovery_for_tuple(
     threshold = float(os.environ.get("SEASON_PRICE_THRESHOLD", "0.05"))
     entry = providers_json_entry
 
-    canonical_specs, taxonomy_version = load_taxonomy_specs(_TAXONOMY_YAML)
+    acriss_specs = load_acriss_specs(_ACRISS_YAML)
     classification_service = GeminiClassificationService(
-        canonical_types=canonical_specs,
-        taxonomy_version=taxonomy_version,
+        acriss_types=acriss_specs,
     )
 
     orch = SmartScraperOrchestrator(

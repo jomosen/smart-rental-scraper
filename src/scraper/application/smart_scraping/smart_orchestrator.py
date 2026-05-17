@@ -66,7 +66,7 @@ class SmartScraperOrchestrator:
         price observations via PriceObservationRepository.insert_if_changed().
 
     Aggregation policy: multiple provider groups may share the same
-    canonical_type_id. Aggregation (MIN) happens at query time in
+    ACRISS code. Aggregation (MIN) happens at query time in
     PriceQueryService, not during persistence.
     """
 
@@ -284,9 +284,11 @@ class SmartScraperOrchestrator:
             return
 
         _pending_fallback = ClassificationResult(
-            canonical_type_code=None,
+            acriss_category=None,
+            acriss_body_type=None,
+            acriss_transmission=None,
+            acriss_fuel=None,
             confidence=0.0,
-            taxonomy_version=0,
             pending_review=True,
         )
 
@@ -303,8 +305,6 @@ class SmartScraperOrchestrator:
                     example_models=car.example_models,
                     seats=car.seats,
                     luggage=car.luggage,
-                    transmission=car.transmission,
-                    fuel_type=None,
                     classification=classification,
                 )
 
@@ -376,9 +376,11 @@ class SmartScraperOrchestrator:
         observed_at = datetime.now(timezone.utc)
 
         _pending_fallback = ClassificationResult(
-            canonical_type_code=None,
+            acriss_category=None,
+            acriss_body_type=None,
+            acriss_transmission=None,
+            acriss_fuel=None,
             confidence=0.0,
-            taxonomy_version=0,
             pending_review=True,
         )
 
@@ -404,8 +406,6 @@ class SmartScraperOrchestrator:
                         example_models=car.example_models,
                         seats=car.seats,
                         luggage=car.luggage,
-                        transmission=car.transmission,
-                        fuel_type=None,
                         classification=classification,
                     )
                     for rate in car.rates:

@@ -28,7 +28,7 @@ from ...infrastructure.playwright.playwright_driver import PlaywrightDriver
 from ...infrastructure.scrapers.provider_a_scraper import ProviderAScraper
 from ...infrastructure.scrapers.provider_b_scraper import ProviderBScraper
 from ...infrastructure.scrapers.provider_c_scraper import ProviderCScraper
-from ....saas.application.classification.taxonomy_loader import load_taxonomy_specs
+from ....saas.application.classification.acriss_loader import load_acriss_specs
 from ....saas.infrastructure.classification.gemini_service import GeminiClassificationService
 
 # Maps the "scraper" key in providers.json to its concrete class.
@@ -78,11 +78,10 @@ def build_container(
     import os
     threshold = float(os.environ.get("SEASON_PRICE_THRESHOLD", "0.05"))
 
-    yaml_path = Path(__file__).resolve().parents[4] / "taxonomy.yaml"
-    canonical_specs, taxonomy_version = load_taxonomy_specs(yaml_path)
+    yaml_path = Path(__file__).resolve().parents[4] / "acriss_codes.yaml"
+    acriss_specs = load_acriss_specs(yaml_path)
     classification_service = GeminiClassificationService(
-        canonical_types=canonical_specs,
-        taxonomy_version=taxonomy_version,
+        acriss_types=acriss_specs,
     )
 
     entries = load_providers_raw()

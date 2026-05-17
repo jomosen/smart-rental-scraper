@@ -31,29 +31,42 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class CanonicalTypeSpec:
-    """A canonical type as the LLM sees it: code, description, criteria,
-    examples. Built from the YAML and from the DB rows."""
-    code: str
-    name: str
+class AcrissCodeSpec:
+    """An ACRISS code as the LLM sees it: 4-char code, description, criteria, examples."""
+    code: str           # 4-char ACRISS code, e.g. "EDMR"
+    display_name: str
     description: str
     criteria: list[str]
     examples: list[str]
+
+    @property
+    def category(self) -> str:
+        return self.code[0]
+
+    @property
+    def body_type(self) -> str:
+        return self.code[1]
+
+    @property
+    def transmission(self) -> str:
+        return self.code[2]
+
+    @property
+    def fuel(self) -> str:
+        return self.code[3]
 
 
 class GeminiClassificationService(ClassificationService):
 
     def __init__(
         self,
-        canonical_types: list[CanonicalTypeSpec],
-        taxonomy_version: int,
+        acriss_types: list[AcrissCodeSpec],
         api_key: str | None = None,
     ) -> None:
-        if not canonical_types:
-            raise ValueError("canonical_types cannot be empty")
-        self._canonical_types = canonical_types
-        self._known_codes = {ct.code for ct in canonical_types}
-        self._taxonomy_version = taxonomy_version
+        if not acriss_types:
+            raise ValueError("acriss_types cannot be empty")
+        self._acriss_types = acriss_types
+        self._known_codes = {spec.code for spec in acriss_types}
         self._api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self._api_key:
             raise ValueError(
@@ -103,9 +116,11 @@ class GeminiClassificationService(ClassificationService):
                 r
                 if r.pending_review or r.confidence >= _CONFIDENCE_THRESHOLD
                 else ClassificationResult(
-                    canonical_type_code=None,
+                    acriss_category=None,
+                    acriss_body_type=None,
+                    acriss_transmission=None,
+                    acriss_fuel=None,
                     confidence=r.confidence,
-                    taxonomy_version=self._taxonomy_version,
                     pending_review=True,
                     rationale=(
                         f"Flash confidence {r.confidence:.2f} below threshold; "
@@ -120,7 +135,6 @@ class GeminiClassificationService(ClassificationService):
         final: list[ClassificationResult] = []
         for flash_r, pro_r in zip(flash_results, pro_results):
             if flash_r.pending_review:
-                # Flash gave up (unknown code): Pro result irrelevant
                 final.append(flash_r)
             elif pro_r.pending_review:
                 final.append(pro_r)
@@ -128,9 +142,11 @@ class GeminiClassificationService(ClassificationService):
                 final.append(pro_r)
             else:
                 final.append(ClassificationResult(
-                    canonical_type_code=None,
+                    acriss_category=None,
+                    acriss_body_type=None,
+                    acriss_transmission=None,
+                    acriss_fuel=None,
                     confidence=max(flash_r.confidence, pro_r.confidence),
-                    taxonomy_version=self._taxonomy_version,
                     pending_review=True,
                     rationale=(
                         f"Both Flash ({flash_r.confidence:.2f}) and Pro "
@@ -168,46 +184,47 @@ class GeminiClassificationService(ClassificationService):
         raw: list = json.loads(response.text)
         results: list[ClassificationResult] = []
         for item in raw:
-            code = item.get("canonical_type_code") or None
+            cat = item.get("acriss_category") or None
+            body = item.get("acriss_body_type") or None
+            trans = item.get("acriss_transmission") or None
+            fuel = item.get("acriss_fuel") or None
             confidence = float(item.get("confidence", 0.0))
             rationale = item.get("rationale")
-            if code is None:
-                results.append(ClassificationResult(
-                    canonical_type_code=None,
-                    confidence=confidence,
-                    taxonomy_version=self._taxonomy_version,
-                    pending_review=True,
-                    rationale=rationale,
-                ))
-            else:
-                results.append(ClassificationResult(
-                    canonical_type_code=code,
-                    confidence=confidence,
-                    taxonomy_version=self._taxonomy_version,
-                    pending_review=False,
-                    rationale=rationale,
-                ))
+
+            all_set = all(x is not None for x in (cat, body, trans, fuel))
+            results.append(ClassificationResult(
+                acriss_category=cat if all_set else None,
+                acriss_body_type=body if all_set else None,
+                acriss_transmission=trans if all_set else None,
+                acriss_fuel=fuel if all_set else None,
+                confidence=confidence,
+                pending_review=not all_set,
+                rationale=rationale,
+            ))
         return results
 
     def _validate_code(self, result: ClassificationResult) -> ClassificationResult:
-        """If the LLM returned a code not in our taxonomy, treat as pending_review."""
-        if (
-            result.canonical_type_code is not None
-            and result.canonical_type_code not in self._known_codes
-        ):
+        """If the LLM returned a code not in our known ACRISS set, treat as pending_review."""
+        if result.pending_review:
+            return result
+        code = (
+            (result.acriss_category or "")
+            + (result.acriss_body_type or "")
+            + (result.acriss_transmission or "")
+            + (result.acriss_fuel or "")
+        )
+        if code not in self._known_codes:
             logger.warning(
-                "LLM returned unknown canonical code '%s' — treating as pending_review",
-                result.canonical_type_code,
+                "LLM returned unknown ACRISS code '%s' — treating as pending_review", code
             )
             return ClassificationResult(
-                canonical_type_code=None,
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
                 confidence=0.0,
-                taxonomy_version=self._taxonomy_version,
                 pending_review=True,
-                rationale=(
-                    f"LLM returned unknown canonical code "
-                    f"'{result.canonical_type_code}'"
-                ),
+                rationale=f"LLM returned unknown ACRISS code '{code}'",
             )
         return result
 
@@ -215,9 +232,11 @@ class GeminiClassificationService(ClassificationService):
         self, rationale: str | None = None
     ) -> ClassificationResult:
         return ClassificationResult(
-            canonical_type_code=None,
+            acriss_category=None,
+            acriss_body_type=None,
+            acriss_transmission=None,
+            acriss_fuel=None,
             confidence=0.0,
-            taxonomy_version=self._taxonomy_version,
             pending_review=True,
             rationale=rationale,
         )
@@ -225,8 +244,8 @@ class GeminiClassificationService(ClassificationService):
     def _build_batch_prompt(
         self, provider_code: str, vehicles: list[VehicleClassificationInput]
     ) -> str:
-        canonical_block = "\n\n".join(
-            self._render_canonical(ct) for ct in self._canonical_types
+        acriss_block = "\n\n".join(
+            self._render_acriss(spec) for spec in self._acriss_types
         )
         vehicles_block = "\n\n".join(
             f"### Vehicle {i + 1}\n{self._render_batch_vehicle(v)}"
@@ -235,25 +254,38 @@ class GeminiClassificationService(ClassificationService):
         return (
             "You are a vehicle rental classification specialist.\n\n"
             f"Provider code: {provider_code}\n\n"
-            "Classify each vehicle below into ONE of the canonical categories.\n"
-            "Use the price information to help distinguish within-provider price tiers —\n"
-            "the same provider may have multiple groups mapping to the same category.\n"
-            "If no category fits well, respond with confidence < 0.85 and "
-            "canonical_type_code = null.\n\n"
-            f"## CANONICAL CATEGORIES\n\n{canonical_block}\n\n"
+            "Classify each vehicle below into ONE of the ACRISS codes listed.\n"
+            "Each ACRISS code encodes 4 orthogonal attributes:\n"
+            "  Position 1: vehicle category (E=Economy, C=Compact, I=Intermediate, etc.)\n"
+            "  Position 2: body type (D=2/4-door, G=SUV, M=Minivan, V=Van, etc.)\n"
+            "  Position 3: transmission (M=Manual, A=Automatic)\n"
+            "  Position 4: fuel/drive (R=Unspecified, H=Hybrid, E=Electric, etc.)\n\n"
+            "Use the price information to help distinguish within-provider price tiers.\n"
+            "If no ACRISS code fits well, respond with confidence < 0.85 and null for "
+            "all four attributes.\n\n"
+            f"## ACRISS CODES\n\n{acriss_block}\n\n"
             f"## VEHICLES TO CLASSIFY\n\n{vehicles_block}\n\n"
             "## OUTPUT\n\n"
             "Respond in JSON as an array with one object per vehicle, in the same order:\n"
-            "  [{\"canonical_type_code\": ..., \"confidence\": ..., \"rationale\": ...}, ...]\n\n"
+            "  [{\n"
+            "    \"acriss_category\": \"E\",\n"
+            "    \"acriss_body_type\": \"D\",\n"
+            "    \"acriss_transmission\": \"M\",\n"
+            "    \"acriss_fuel\": \"R\",\n"
+            "    \"confidence\": 0.95,\n"
+            "    \"rationale\": \"...\"\n"
+            "  }, ...]\n\n"
             "JSON only. No prose."
         )
 
-    def _render_canonical(self, ct: CanonicalTypeSpec) -> str:
-        criteria_block = "\n".join(f"  - {c}" for c in ct.criteria)
-        examples_block = ", ".join(ct.examples)
+    def _render_acriss(self, spec: AcrissCodeSpec) -> str:
+        criteria_block = "\n".join(f"  - {c}" for c in spec.criteria)
+        examples_block = ", ".join(spec.examples)
         return (
-            f"### {ct.code} ({ct.name})\n"
-            f"{ct.description}\n"
+            f"### {spec.code} — {spec.display_name}\n"
+            f"Category={spec.category}, Body={spec.body_type}, "
+            f"Transmission={spec.transmission}, Fuel={spec.fuel}\n"
+            f"{spec.description}\n"
             f"Criteria:\n{criteria_block}\n"
             f"Examples: {examples_block}"
         )
@@ -265,9 +297,9 @@ class GeminiClassificationService(ClassificationService):
         if v.luggage is not None:
             lines.append(f"Luggage capacity: {v.luggage}")
         if v.transmission:
-            lines.append(f"Transmission: {v.transmission}")
+            lines.append(f"Transmission hint: {v.transmission}")
         if v.fuel_type:
-            lines.append(f"Fuel type: {v.fuel_type}")
+            lines.append(f"Fuel hint: {v.fuel_type}")
         if v.external_code:
             lines.append(f"Provider's internal code: {v.external_code}")
         if v.external_name:

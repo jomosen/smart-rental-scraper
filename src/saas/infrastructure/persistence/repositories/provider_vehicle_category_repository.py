@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models.catalog import CanonicalVehicleType, ProviderVehicleCategory
+from ..models.catalog import ProviderVehicleCategory
 from ....application.classification.dtos import ClassificationResult
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,6 @@ class ProviderVehicleCategoryRepository:
         provider_location_id: int,
         provider_rate_id: int,
     ) -> List[ProviderVehicleCategory]:
-        """Return all active provider_vehicle_categories for this tuple."""
         return list(self._s.scalars(
             select(ProviderVehicleCategory).where(
                 ProviderVehicleCategory.provider_id == provider_id,
@@ -60,19 +59,15 @@ class ProviderVehicleCategoryRepository:
         example_models: str,
         seats: Optional[int],
         luggage: Optional[int],
-        transmission: Optional[str],
-        fuel_type: Optional[str],
         classification: ClassificationResult,
     ) -> ProviderVehicleCategory:
-        """Find or create a PVC, apply the given classification, and update attributes.
+        """Find or create a PVC, apply the given ACRISS classification, and update attributes.
 
         Identity:
           - external_code is not None → unique by (provider, location, rate, external_code)
           - external_code is None     → unique by (provider, location, rate, attributes_hash)
 
-        Classification is always applied — the caller is responsible for
-        deciding when to call the LLM (during the probe phase via
-        SmartScraperOrchestrator._classify_probe_catalog).
+        Classification is always applied.
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -82,7 +77,7 @@ class ProviderVehicleCategoryRepository:
             )
             row_hash: Optional[str] = None
         else:
-            row_hash = self._compute_hash(example_models, seats, luggage, transmission, fuel_type)
+            row_hash = self._compute_hash(example_models, seats, luggage)
             pvc = self._get_by_attributes_hash(
                 provider_id, provider_location_id, provider_rate_id, row_hash
             )
@@ -99,8 +94,6 @@ class ProviderVehicleCategoryRepository:
                 example_models=example_models,
                 seats=seats,
                 luggage=luggage,
-                transmission=transmission,
-                fuel_type=fuel_type,
                 attributes_hash=row_hash,
                 active=True,
                 first_seen_at=now,
@@ -112,8 +105,6 @@ class ProviderVehicleCategoryRepository:
             pvc.example_models = example_models
             pvc.seats = seats
             pvc.luggage = luggage
-            pvc.transmission = transmission
-            pvc.fuel_type = fuel_type
             if external_name is not None:
                 pvc.external_name = external_name
 
@@ -128,16 +119,12 @@ class ProviderVehicleCategoryRepository:
         example_models: str,
         seats: Optional[int],
         luggage: Optional[int],
-        transmission: Optional[str],
-        fuel_type: Optional[str],
     ) -> str:
-        """SHA256 truncated to 16 hex chars over stable vehicle attributes."""
+        """SHA256 truncated to 16 hex chars over stable vehicle identity attributes."""
         key = "|".join([
             example_models or "",
             str(seats) if seats is not None else "",
             str(luggage) if luggage is not None else "",
-            transmission or "",
-            fuel_type or "",
         ])
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
@@ -164,44 +151,32 @@ class ProviderVehicleCategoryRepository:
         result: ClassificationResult,
         is_new: bool,
     ) -> None:
-        """Write classification result onto the PVC row.
+        """Write ACRISS classification result onto the PVC row.
 
         Pending-review policy:
-          - Existing PVC with a previous canonical_type_id: keep the cached
+          - Existing PVC with a previous ACRISS classification: keep the cached
             classification, mark pending_review=True so the operator knows
             confidence dropped.
-          - New PVC or PVC with no previous classification: store NULL
-            canonical_type_id and pending_review=True.
+          - New PVC or PVC with no previous classification: NULL ACRISS attrs,
+            pending_review=True.
         """
-        if result.pending_review and not is_new and pvc.canonical_type_id is not None:
+        if result.pending_review:
+            if not is_new and pvc.acriss_category is not None:
+                pvc.classification_confidence = result.confidence
+                pvc.pending_review = True
+                return
+
+            pvc.acriss_category = None
+            pvc.acriss_body_type = None
+            pvc.acriss_transmission = None
+            pvc.acriss_fuel = None
             pvc.classification_confidence = result.confidence
             pvc.pending_review = True
             return
 
-        if result.canonical_type_code is None:
-            pvc.canonical_type_id = None
-            pvc.classification_confidence = result.confidence
-            pvc.classification_taxonomy_version = result.taxonomy_version
-            pvc.pending_review = True
-            return
-
-        canonical = self._s.scalar(
-            select(CanonicalVehicleType).where(
-                CanonicalVehicleType.code == result.canonical_type_code
-            )
-        )
-        if canonical is None:
-            logger.warning(
-                "LLM returned canonical code '%s' which is not in the DB — "
-                "marking pending_review",
-                result.canonical_type_code,
-            )
-            pvc.canonical_type_id = None
-            pvc.classification_confidence = result.confidence
-            pvc.classification_taxonomy_version = result.taxonomy_version
-            pvc.pending_review = True
-        else:
-            pvc.canonical_type_id = canonical.id
-            pvc.classification_confidence = result.confidence
-            pvc.classification_taxonomy_version = result.taxonomy_version
-            pvc.pending_review = False
+        pvc.acriss_category = result.acriss_category
+        pvc.acriss_body_type = result.acriss_body_type
+        pvc.acriss_transmission = result.acriss_transmission
+        pvc.acriss_fuel = result.acriss_fuel
+        pvc.classification_confidence = result.confidence
+        pvc.pending_review = False

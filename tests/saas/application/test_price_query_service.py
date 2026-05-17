@@ -18,7 +18,6 @@ from src.saas.application.price_query.dtos import FormatARow, FormatATable, Zone
 from src.saas.application.price_query.rejilla import compute_intersected_grid
 from src.saas.application.price_query.service import PriceQueryService
 from src.saas.infrastructure.persistence.models.catalog import (
-    CanonicalVehicleType,
     HomogeneousZone,
     PriceObservation,
     PriceObservationHeartbeat,
@@ -37,6 +36,14 @@ from src.saas.infrastructure.persistence.models.tenant import (
 )
 
 from datetime import date
+
+# ACRISS codes used in tests (all seeded in acriss_codes table).
+_AC_EDMR = "EDMR"  # Economy Manual
+_AC_CDAR = "CDAR"  # Compact Automatic
+_AC_IDAR = "IDAR"  # Intermediate Automatic
+_AC_IFAR = "IFAR"  # Intermediate SUV Automatic
+_AC_DFAR = "DFAR"  # Compact Premium SUV
+
 
 # ---------------------------------------------------------------------------
 # Seed helpers
@@ -79,27 +86,15 @@ def _seed_rate(session, provider_id: int, code: str = "test_rate") -> ProviderRa
     return r
 
 
-def _seed_canonical_type(session, code: str) -> CanonicalVehicleType:
-    ct = CanonicalVehicleType(
-        code=code,
-        name=code,
-        description=code,
-        taxonomy_version=1,
-        active=True,
-    )
-    session.add(ct)
-    session.flush()
-    return ct
-
-
 def _seed_pvg(
     session,
     pid: int,
     lid: int,
     rid: int,
     code: str = "ECMR",
-    canonical_type_id: int = None,
+    acriss_code: str | None = None,
 ) -> ProviderVehicleCategory:
+    """Seed a ProviderVehicleCategory. acriss_code must be a seeded 4-char code or None."""
     pvg = ProviderVehicleCategory(
         provider_id=pid,
         provider_location_id=lid,
@@ -108,7 +103,10 @@ def _seed_pvg(
         external_name=code,
         example_models="",
         active=True,
-        canonical_type_id=canonical_type_id,
+        acriss_category=acriss_code[0] if acriss_code else None,
+        acriss_body_type=acriss_code[1] if acriss_code else None,
+        acriss_transmission=acriss_code[2] if acriss_code else None,
+        acriss_fuel=acriss_code[3] if acriss_code else None,
     )
     session.add(pvg)
     session.flush()
@@ -230,12 +228,13 @@ def _seed_mapping(
     session,
     tenant_id: uuid.UUID,
     cvg_id: uuid.UUID,
-    canonical_type_id: int,
+    acriss_code: str,
 ) -> TenantVehicleGroupMapping:
+    """Create a TenantVehicleGroupMapping linking a client group to an ACRISS code."""
     m = TenantVehicleGroupMapping(
         tenant_id=tenant_id,
         tenant_vehicle_group_id=cvg_id,
-        canonical_type_id=canonical_type_id,
+        acriss_code=acriss_code,
     )
     session.add(m)
     session.flush()
@@ -246,7 +245,6 @@ def _cleanup(
     session,
     provider_ids: list[int],
     tenant_ids: list[uuid.UUID] | None = None,
-    canonical_type_ids: list[int] | None = None,
 ) -> None:
     """Delete test data in FK-safe order and commit."""
     session.rollback()
@@ -284,11 +282,6 @@ def _cleanup(
             delete(ProviderLocation).where(ProviderLocation.provider_id == pid)
         )
         session.execute(delete(Provider).where(Provider.id == pid))
-    if canonical_type_ids:
-        for ctid in canonical_type_ids:
-            session.execute(
-                delete(CanonicalVehicleType).where(CanonicalVehicleType.id == ctid)
-            )
     session.commit()
 
 
@@ -369,9 +362,7 @@ def test_get_provider_tariff_returns_one_row_per_zone_per_group(super_db_session
     p = _seed_provider(super_db_session, "pq_t06")
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
-    ct = _seed_canonical_type(super_db_session, "pq_t06_ecmr")
-    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR",
-                    canonical_type_id=ct.id)
+    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR", acriss_code=_AC_EDMR)
     run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
     _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg.id,
                date(2026, 6, 1), date(2026, 7, 14), date(2026, 6, 15))
@@ -385,7 +376,7 @@ def test_get_provider_tariff_returns_one_row_per_zone_per_group(super_db_session
     t = _seed_tenant(super_db_session)
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_provider_tariff(
@@ -410,9 +401,7 @@ def test_get_provider_tariff_returns_empty_when_no_active_subscription(super_db_
     p = _seed_provider(super_db_session, "pq_t07")
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
-    ct = _seed_canonical_type(super_db_session, "pq_t07_ecmr")
-    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR",
-                    canonical_type_id=ct.id)
+    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR", acriss_code=_AC_EDMR)
     _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg.id,
                date(2026, 6, 1), date(2026, 8, 31), date(2026, 6, 15))
 
@@ -421,7 +410,7 @@ def test_get_provider_tariff_returns_empty_when_no_active_subscription(super_db_
     # subscription is pending_mapping, not active
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id,
                        status="pending_mapping")
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_provider_tariff(
@@ -439,12 +428,10 @@ def test_get_provider_tariff_applies_min_policy_for_n_to_m_mappings(super_db_ses
     p = _seed_provider(super_db_session, "pq_t08")
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
-    ct_ecmr = _seed_canonical_type(super_db_session, "pq_t08_ecmr")
-    ct_ccar = _seed_canonical_type(super_db_session, "pq_t08_ccar")
     pvg_ecmr = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR",
-                          canonical_type_id=ct_ecmr.id)
+                          acriss_code=_AC_EDMR)
     pvg_ccar = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "CCAR",
-                          canonical_type_id=ct_ccar.id)
+                          acriss_code=_AC_CDAR)
     run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
     rep = date(2026, 6, 15)
     _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg_ecmr.id,
@@ -459,9 +446,9 @@ def test_get_provider_tariff_applies_min_policy_for_n_to_m_mappings(super_db_ses
     t = _seed_tenant(super_db_session)
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
-    # Both canonical types map to the same client group (N:M via three-layer model)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct_ecmr.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct_ccar.id)
+    # Both ACRISS codes map to the same client group (N:M via three-layer model)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_CDAR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_provider_tariff(
@@ -480,9 +467,7 @@ def test_get_provider_tariff_returns_null_when_no_observation_for_duration(super
     p = _seed_provider(super_db_session, "pq_t09")
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
-    ct = _seed_canonical_type(super_db_session, "pq_t09_ecmr")
-    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR",
-                    canonical_type_id=ct.id)
+    pvg = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR", acriss_code=_AC_EDMR)
     run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
     rep = date(2026, 6, 15)
     _seed_zone(super_db_session, p.id, loc.id, rate.id, pvg.id,
@@ -494,7 +479,7 @@ def test_get_provider_tariff_returns_null_when_no_observation_for_duration(super
     t = _seed_tenant(super_db_session)
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_provider_tariff(
@@ -511,14 +496,12 @@ def test_get_provider_tariff_returns_null_when_no_observation_for_duration(super
 
 
 def test_get_market_average_uses_intersected_grid_across_providers(super_db_session):
-    ct = _seed_canonical_type(super_db_session, "pq_t10_ecmr")
-
     # Provider A: one zone covering the full period
     p_a = _seed_provider(super_db_session, "pq_t10a")
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     rep_a = date(2026, 6, 15)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
@@ -531,7 +514,7 @@ def test_get_market_average_uses_intersected_grid_across_providers(super_db_sess
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     rep_b1 = date(2026, 6, 15)
     rep_b2 = date(2026, 7, 31)
@@ -548,8 +531,8 @@ def test_get_market_average_uses_intersected_grid_across_providers(super_db_sess
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
-    # One mapping covers both providers via the shared canonical type
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    # One mapping covers both providers via the shared ACRISS code
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_average_tariff(
@@ -577,13 +560,12 @@ def test_get_market_average_uses_intersected_grid_across_providers(super_db_sess
 
 
 def test_get_market_average_reports_coverage_per_cell(super_db_session):
-    ct = _seed_canonical_type(super_db_session, "pq_t11_ecmr")
     # Provider A: has price for dur 7 only
     p_a = _seed_provider(super_db_session, "pq_t11a")
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     rep = date(2026, 6, 15)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
@@ -597,7 +579,7 @@ def test_get_market_average_reports_coverage_per_cell(super_db_session):
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -610,7 +592,7 @@ def test_get_market_average_reports_coverage_per_cell(super_db_session):
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_average_tariff(
@@ -633,7 +615,6 @@ def test_get_market_average_reports_coverage_per_cell(super_db_session):
 
 
 def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
-    ct = _seed_canonical_type(super_db_session, "pq_t12_ecmr")
     rep = date(2026, 6, 15)
 
     # Provider A: active subscription
@@ -641,7 +622,7 @@ def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -653,7 +634,7 @@ def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -664,7 +645,7 @@ def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id, status="active")
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id, status="paused")
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_average_tariff(
@@ -681,14 +662,13 @@ def test_get_market_average_excludes_inactive_subscriptions(super_db_session):
 
 
 def test_get_market_minimum_returns_min_across_providers(super_db_session):
-    ct = _seed_canonical_type(super_db_session, "pq_t13_ecmr")
     rep = date(2026, 6, 15)
 
     p_a = _seed_provider(super_db_session, "pq_t13a")
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -699,7 +679,7 @@ def test_get_market_minimum_returns_min_across_providers(super_db_session):
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -710,7 +690,7 @@ def test_get_market_minimum_returns_min_across_providers(super_db_session):
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_minimum_tariff(
@@ -727,13 +707,12 @@ def test_get_market_minimum_returns_min_across_providers(super_db_session):
 
 
 def test_get_market_minimum_handles_partial_coverage(super_db_session):
-    ct = _seed_canonical_type(super_db_session, "pq_t14_ecmr")
     # Provider A: zone only covers tramo 1 (Jun 1 - Jul 14)
     p_a = _seed_provider(super_db_session, "pq_t14a")
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     rep_a = date(2026, 6, 15)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
@@ -746,7 +725,7 @@ def test_get_market_minimum_handles_partial_coverage(super_db_session):
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     rep_b1 = date(2026, 6, 15)
     rep_b2 = date(2026, 7, 31)
@@ -763,7 +742,7 @@ def test_get_market_minimum_handles_partial_coverage(super_db_session):
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_minimum_tariff(
@@ -794,18 +773,14 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
     t2_id: uuid.UUID | None = None
     p_a_id: int | None = None
     p_b_id: int | None = None
-    ct_id: int | None = None
     rep = date(2026, 6, 15)
     try:
-        ct = _seed_canonical_type(super_db_session, "pq_iso_ecmr")
-        ct_id = ct.id
-
         # Provider A → for Tenant 1
         p_a = _seed_provider(super_db_session, "pq_iso_a")
         loc_a = _seed_location(super_db_session, p_a.id, "ISO1")
         rate_a = _seed_rate(super_db_session, p_a.id)
         pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                          canonical_type_id=ct.id)
+                          acriss_code=_AC_EDMR)
         run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
         _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
                    date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -818,7 +793,7 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
         loc_b = _seed_location(super_db_session, p_b.id, "ISO2")
         rate_b = _seed_rate(super_db_session, p_b.id)
         pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                          canonical_type_id=ct.id)
+                          acriss_code=_AC_EDMR)
         run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
         _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
                    date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -830,14 +805,14 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
         t1 = _seed_tenant(super_db_session, "ISO Tenant 1")
         cvg1 = _seed_client_group(super_db_session, t1.id)
         _seed_subscription(super_db_session, t1.id, p_a.id, loc_a.id, rate_a.id)
-        _seed_mapping(super_db_session, t1.id, cvg1.id, ct.id)
+        _seed_mapping(super_db_session, t1.id, cvg1.id, _AC_EDMR)
         t1_id = t1.id
 
         # Tenant 2 → subscribed to Provider B only
         t2 = _seed_tenant(super_db_session, "ISO Tenant 2")
         cvg2 = _seed_client_group(super_db_session, t2.id)
         _seed_subscription(super_db_session, t2.id, p_b.id, loc_b.id, rate_b.id)
-        _seed_mapping(super_db_session, t2.id, cvg2.id, ct.id)
+        _seed_mapping(super_db_session, t2.id, cvg2.id, _AC_EDMR)
         t2_id = t2.id
 
         # Commit so db_session (separate connection) can see the data
@@ -870,13 +845,11 @@ def test_tenant_isolation_other_tenant_data_invisible(super_db_session, db_sessi
             super_db_session,
             provider_ids=[pid for pid in (p_a_id, p_b_id) if pid is not None],
             tenant_ids=[tid for tid in (t1_id, t2_id) if tid is not None],
-            canonical_type_ids=[ct_id] if ct_id is not None else [],
         )
 
 
 def test_coverage_differs_across_durations_within_same_row(super_db_session):
     """coverage_by_duration tracks per-cell coverage, not per-row."""
-    ct = _seed_canonical_type(super_db_session, "pq_t15_ecmr")
     rep = date(2026, 6, 15)
 
     # Provider A: observations for dur 7 AND 14
@@ -884,7 +857,7 @@ def test_coverage_differs_across_durations_within_same_row(super_db_session):
     loc_a = _seed_location(super_db_session, p_a.id)
     rate_a = _seed_rate(super_db_session, p_a.id)
     pvg_a = _seed_pvg(super_db_session, p_a.id, loc_a.id, rate_a.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_a = _seed_scrape_run(super_db_session, p_a.id, loc_a.id, rate_a.id)
     _seed_zone(super_db_session, p_a.id, loc_a.id, rate_a.id, pvg_a.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -898,7 +871,7 @@ def test_coverage_differs_across_durations_within_same_row(super_db_session):
     loc_b = _seed_location(super_db_session, p_b.id)
     rate_b = _seed_rate(super_db_session, p_b.id)
     pvg_b = _seed_pvg(super_db_session, p_b.id, loc_b.id, rate_b.id, "ECMR",
-                      canonical_type_id=ct.id)
+                      acriss_code=_AC_EDMR)
     run_b = _seed_scrape_run(super_db_session, p_b.id, loc_b.id, rate_b.id)
     _seed_zone(super_db_session, p_b.id, loc_b.id, rate_b.id, pvg_b.id,
                date(2026, 6, 1), date(2026, 8, 31), rep)
@@ -910,7 +883,7 @@ def test_coverage_differs_across_durations_within_same_row(super_db_session):
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p_a.id, loc_a.id, rate_a.id)
     _seed_subscription(super_db_session, t.id, p_b.id, loc_b.id, rate_b.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     service = PriceQueryService(super_db_session)
     result = service.get_market_average_tariff(
@@ -935,15 +908,12 @@ def test_unmapped_provider_groups_do_not_appear_in_tenant_queries(super_db_sessi
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
 
-    ct_ecmr = _seed_canonical_type(super_db_session, "pq_t17_ecmr")
-    ct_ccar = _seed_canonical_type(super_db_session, "pq_t17_ccar")
-    ct_fcar = _seed_canonical_type(super_db_session, "pq_t17_fcar")
     pvg_ecmr = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "ECMR",
-                          canonical_type_id=ct_ecmr.id)
+                          acriss_code=_AC_EDMR)
     pvg_ccar = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "CCAR",
-                          canonical_type_id=ct_ccar.id)
+                          acriss_code=_AC_CDAR)
     pvg_fcar = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "FCAR",
-                          canonical_type_id=ct_fcar.id)
+                          acriss_code=_AC_DFAR)
 
     run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
     rep = date(2026, 6, 15)
@@ -962,8 +932,8 @@ def test_unmapped_provider_groups_do_not_appear_in_tenant_queries(super_db_sessi
     t = _seed_tenant(super_db_session)
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
-    # Only ECMR is mapped; CCAR and FCAR are out of this tenant's scope
-    _seed_mapping(super_db_session, t.id, cvg.id, ct_ecmr.id)
+    # Only EDMR is mapped; CDAR and DFAR are out of this tenant's scope
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_EDMR)
 
     try:
         service = PriceQueryService(super_db_session)
@@ -984,20 +954,19 @@ def test_unmapped_provider_groups_do_not_appear_in_tenant_queries(super_db_sessi
         _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id])
 
 
-def test_get_provider_tariff_aggregates_multiple_pvcs_with_same_canonical_using_min(
+def test_get_provider_tariff_aggregates_multiple_pvcs_with_same_acriss_code_using_min(
     super_db_session,
 ):
-    """Two PVCs with the same canonical_type_id → get_provider_tariff returns min price."""
+    """Two PVCs with the same ACRISS code → get_provider_tariff returns min price."""
     p = _seed_provider(super_db_session, "pq_agg_t01")
     loc = _seed_location(super_db_session, p.id)
     rate = _seed_rate(super_db_session, p.id)
-    ct = _seed_canonical_type(super_db_session, "pq_agg_t01_intermediate")
 
-    # Two distinct provider groups, both classified as the same canonical type
+    # Two distinct provider groups, both classified as the same ACRISS code
     pvg_ea = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "EA",
-                       canonical_type_id=ct.id)
+                       acriss_code=_AC_IDAR)
     pvg_ga = _seed_pvg(super_db_session, p.id, loc.id, rate.id, "GA",
-                       canonical_type_id=ct.id)
+                       acriss_code=_AC_IDAR)
 
     run = _seed_scrape_run(super_db_session, p.id, loc.id, rate.id)
     rep = date(2026, 6, 15)
@@ -1016,7 +985,7 @@ def test_get_provider_tariff_aggregates_multiple_pvcs_with_same_canonical_using_
     t = _seed_tenant(super_db_session)
     cvg = _seed_client_group(super_db_session, t.id)
     _seed_subscription(super_db_session, t.id, p.id, loc.id, rate.id)
-    _seed_mapping(super_db_session, t.id, cvg.id, ct.id)
+    _seed_mapping(super_db_session, t.id, cvg.id, _AC_IDAR)
 
     try:
         service = PriceQueryService(super_db_session)
@@ -1032,8 +1001,7 @@ def test_get_provider_tariff_aggregates_multiple_pvcs_with_same_canonical_using_
         assert row.prices_by_duration[7] == Decimal("57.00"), \
             "Must return min(57, 69) = 57 — aggregation at query time"
     finally:
-        _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id],
-                 canonical_type_ids=[ct.id])
+        _cleanup(super_db_session, provider_ids=[p.id], tenant_ids=[t.id])
 
 
 def test_raises_when_session_tenant_mismatches_requested_tenant(super_db_session, db_session):

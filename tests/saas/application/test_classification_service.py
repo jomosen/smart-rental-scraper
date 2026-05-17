@@ -12,34 +12,42 @@ from src.saas.application.classification.service import ClassificationService
 class TestClassificationResultDTO:
     def test_holds_all_fields(self):
         result = ClassificationResult(
-            canonical_type_code="ECONOMY_MANUAL",
+            acriss_category="E",
+            acriss_body_type="D",
+            acriss_transmission="M",
+            acriss_fuel="R",
             confidence=0.95,
-            taxonomy_version=1,
             pending_review=False,
             rationale="Clearly an economy manual car",
         )
-        assert result.canonical_type_code == "ECONOMY_MANUAL"
+        assert result.acriss_category == "E"
+        assert result.acriss_body_type == "D"
+        assert result.acriss_transmission == "M"
+        assert result.acriss_fuel == "R"
         assert result.confidence == 0.95
-        assert result.taxonomy_version == 1
         assert result.pending_review is False
         assert result.rationale == "Clearly an economy manual car"
 
     def test_rationale_defaults_to_none(self):
         result = ClassificationResult(
-            canonical_type_code=None,
+            acriss_category=None,
+            acriss_body_type=None,
+            acriss_transmission=None,
+            acriss_fuel=None,
             confidence=0.0,
-            taxonomy_version=2,
             pending_review=True,
         )
         assert result.rationale is None
-        assert result.canonical_type_code is None
+        assert result.acriss_category is None
         assert result.pending_review is True
 
     def test_is_frozen(self):
         result = ClassificationResult(
-            canonical_type_code="ECONOMY_MANUAL",
+            acriss_category="E",
+            acriss_body_type="D",
+            acriss_transmission="M",
+            acriss_fuel="R",
             confidence=0.9,
-            taxonomy_version=1,
             pending_review=False,
         )
         try:

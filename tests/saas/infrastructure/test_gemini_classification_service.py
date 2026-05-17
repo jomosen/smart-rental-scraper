@@ -12,7 +12,7 @@ import pytest
 
 from src.saas.application.classification.dtos import ClassificationResult, VehicleClassificationInput
 from src.saas.infrastructure.classification.gemini_service import (
-    CanonicalTypeSpec,
+    AcrissCodeSpec,
     GeminiClassificationService,
 )
 
@@ -23,24 +23,24 @@ from src.saas.infrastructure.classification.gemini_service import (
 _FAKE_API_KEY = "fake-api-key-for-tests"
 _PROVIDER_CODE = "provider_a"
 
-_CANONICAL_TYPES = [
-    CanonicalTypeSpec(
-        code="ECONOMY_MANUAL",
-        name="Económico manual",
-        description="Small urban cars with manual transmission.",
+_ACRISS_TYPES = [
+    AcrissCodeSpec(
+        code="EDMR",
+        display_name="Económico Manual",
+        description="Sub-compact city car, manual transmission, combustion engine.",
         criteria=["5 seats", "manual transmission"],
         examples=["Fiat Panda", "Kia Picanto"],
     ),
-    CanonicalTypeSpec(
-        code="COMPACT_AUTO",
-        name="Compacto automático",
-        description="Medium cars with automatic transmission.",
-        criteria=["5 seats", "automatic transmission"],
+    AcrissCodeSpec(
+        code="CGAR",
+        display_name="SUV Urbano Automático",
+        description="Compact crossover, automatic transmission.",
+        criteria=["5 seats", "automatic transmission", "crossover body"],
         examples=["Ford Puma", "Renault Captur"],
     ),
-    CanonicalTypeSpec(
-        code="VAN_9_AUTO",
-        name="Furgoneta 9 plazas automática",
+    AcrissCodeSpec(
+        code="LVAR",
+        display_name="Furgoneta Pasajero 9 Plazas Automático",
         description="9-seat passenger vans, automatic.",
         criteria=["9 seats", "automatic"],
         examples=["Mercedes Vito 9p"],
@@ -49,13 +49,11 @@ _CANONICAL_TYPES = [
 
 
 def _make_service(
-    canonical_types=None,
-    taxonomy_version: int = 1,
+    acriss_types=None,
     api_key: str = _FAKE_API_KEY,
 ) -> GeminiClassificationService:
     return GeminiClassificationService(
-        canonical_types=canonical_types if canonical_types is not None else _CANONICAL_TYPES,
-        taxonomy_version=taxonomy_version,
+        acriss_types=acriss_types if acriss_types is not None else _ACRISS_TYPES,
         api_key=api_key,
     )
 
@@ -77,16 +75,27 @@ def _vehicle(**overrides) -> VehicleClassificationInput:
 
 
 def _result(
-    code: str | None,
+    acriss_code: str | None,
     confidence: float,
-    taxonomy_version: int = 1,
     pending_review: bool = False,
     rationale: str | None = None,
 ) -> ClassificationResult:
+    if acriss_code and len(acriss_code) == 4:
+        return ClassificationResult(
+            acriss_category=acriss_code[0],
+            acriss_body_type=acriss_code[1],
+            acriss_transmission=acriss_code[2],
+            acriss_fuel=acriss_code[3],
+            confidence=confidence,
+            pending_review=pending_review,
+            rationale=rationale,
+        )
     return ClassificationResult(
-        canonical_type_code=code,
+        acriss_category=None,
+        acriss_body_type=None,
+        acriss_transmission=None,
+        acriss_fuel=None,
         confidence=confidence,
-        taxonomy_version=taxonomy_version,
         pending_review=pending_review,
         rationale=rationale,
     )
@@ -100,14 +109,17 @@ class TestFlashConfident:
     def test_returns_flash_result_and_skips_pro(self):
         svc = _make_service()
         vehicles = [_vehicle()]
-        flash_return = [_result("ECONOMY_MANUAL", 0.95)]
+        flash_return = [_result("EDMR", 0.95)]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_return) as mock_flash, \
              patch.object(svc, "_call_pro_batch") as mock_pro:
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
         assert len(results) == 1
-        assert results[0].canonical_type_code == "ECONOMY_MANUAL"
+        assert results[0].acriss_category == "E"
+        assert results[0].acriss_body_type == "D"
+        assert results[0].acriss_transmission == "M"
+        assert results[0].acriss_fuel == "R"
         assert results[0].confidence == 0.95
         assert results[0].pending_review is False
         mock_flash.assert_called_once_with(_PROVIDER_CODE, vehicles)
@@ -122,14 +134,15 @@ class TestEscalatesToPro:
     def test_escalates_when_flash_below_threshold(self):
         svc = _make_service()
         vehicles = [_vehicle()]
-        flash_return = [_result("ECONOMY_MANUAL", 0.70)]
-        pro_return = [_result("COMPACT_AUTO", 0.92)]
+        flash_return = [_result("EDMR", 0.70)]
+        pro_return = [_result("CGAR", 0.92)]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
              patch.object(svc, "_call_pro_batch", return_value=pro_return) as mock_pro:
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].canonical_type_code == "COMPACT_AUTO"
+        assert results[0].acriss_category == "C"
+        assert results[0].acriss_body_type == "G"
         assert results[0].confidence == 0.92
         assert results[0].pending_review is False
         mock_pro.assert_called_once_with(_PROVIDER_CODE, vehicles)
@@ -143,14 +156,14 @@ class TestBothBelowThreshold:
     def test_pending_review_with_max_confidence(self):
         svc = _make_service()
         vehicles = [_vehicle()]
-        flash_return = [_result("ECONOMY_MANUAL", 0.60)]
-        pro_return = [_result("COMPACT_AUTO", 0.70)]
+        flash_return = [_result("EDMR", 0.60)]
+        pro_return = [_result("CGAR", 0.70)]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
              patch.object(svc, "_call_pro_batch", return_value=pro_return):
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].canonical_type_code is None
+        assert results[0].acriss_category is None
         assert results[0].pending_review is True
         assert results[0].confidence == pytest.approx(0.70)
 
@@ -169,7 +182,7 @@ class TestFlashFails:
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
         assert len(results) == 1
-        assert results[0].canonical_type_code is None
+        assert results[0].acriss_category is None
         assert results[0].pending_review is True
         assert results[0].confidence == 0.0
         mock_pro.assert_not_called()
@@ -183,56 +196,43 @@ class TestProFallbackFails:
     def test_pending_review_with_flash_confidence_when_pro_raises(self):
         svc = _make_service()
         vehicles = [_vehicle()]
-        flash_return = [_result("ECONOMY_MANUAL", 0.70)]
+        flash_return = [_result("EDMR", 0.70)]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
              patch.object(svc, "_call_pro_batch", side_effect=RuntimeError("rate limit")):
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].canonical_type_code is None
+        assert results[0].acriss_category is None
         assert results[0].pending_review is True
         assert results[0].confidence == pytest.approx(0.70)
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — Flash returns unknown canonical code → pending_review, Pro not called
+# Test 8 — Flash returns unknown ACRISS code → pending_review, Pro not called
 # ---------------------------------------------------------------------------
 
-class TestUnknownCanonicalCode:
+class TestUnknownAcrissCode:
     def test_rejects_unknown_code_from_llm(self):
         svc = _make_service()
         vehicles = [_vehicle()]
-        flash_return = [_result("UNKNOWN_CODE_XYZ", 0.95)]
+        # "ZZZZ" is not in _ACRISS_TYPES — _validate_code will reject it
+        flash_return = [ClassificationResult(
+            acriss_category="Z",
+            acriss_body_type="Z",
+            acriss_transmission="Z",
+            acriss_fuel="Z",
+            confidence=0.95,
+            pending_review=False,
+        )]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_return), \
              patch.object(svc, "_call_pro_batch") as mock_pro:
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].canonical_type_code is None
+        assert results[0].acriss_category is None
         assert results[0].pending_review is True
         assert results[0].confidence == 0.0
         mock_pro.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Test 9 — taxonomy_version propagated from service to result
-# ---------------------------------------------------------------------------
-
-class TestTaxonomyVersionPropagates:
-    def test_result_carries_service_taxonomy_version(self):
-        svc = _make_service(taxonomy_version=5)
-        vehicles = [_vehicle()]
-        flash_return = [ClassificationResult(
-            canonical_type_code="ECONOMY_MANUAL",
-            confidence=0.97,
-            taxonomy_version=5,
-            pending_review=False,
-        )]
-
-        with patch.object(svc, "_call_flash_batch", return_value=flash_return):
-            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
-
-        assert results[0].taxonomy_version == 5
 
 
 # ---------------------------------------------------------------------------
@@ -244,31 +244,29 @@ class TestRequiresApiKey:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         with pytest.raises(ValueError, match="GEMINI_API_KEY"):
             GeminiClassificationService(
-                canonical_types=_CANONICAL_TYPES,
-                taxonomy_version=1,
+                acriss_types=_ACRISS_TYPES,
             )
 
 
 # ---------------------------------------------------------------------------
-# Test 11 — empty canonical_types raises ValueError
+# Test 11 — empty acriss_types raises ValueError
 # ---------------------------------------------------------------------------
 
-class TestRequiresCanonicalTypes:
-    def test_raises_when_canonical_types_empty(self):
-        with pytest.raises(ValueError, match="canonical_types cannot be empty"):
+class TestRequiresAcrissTypes:
+    def test_raises_when_acriss_types_empty(self):
+        with pytest.raises(ValueError, match="acriss_types cannot be empty"):
             GeminiClassificationService(
-                canonical_types=[],
-                taxonomy_version=1,
+                acriss_types=[],
                 api_key=_FAKE_API_KEY,
             )
 
 
 # ---------------------------------------------------------------------------
-# Test 12 — _build_batch_prompt includes all canonicals and vehicle attributes
+# Test 12 — _build_batch_prompt includes all ACRISS codes and vehicle attributes
 # ---------------------------------------------------------------------------
 
 class TestBuildBatchPrompt:
-    def test_prompt_includes_all_canonicals_and_vehicle_attributes(self):
+    def test_prompt_includes_all_acriss_codes_and_vehicle_attributes(self):
         svc = _make_service()
         vehicles = [VehicleClassificationInput(
             example_models="Fiat Panda",
@@ -283,11 +281,11 @@ class TestBuildBatchPrompt:
         )]
         prompt = svc._build_batch_prompt(_PROVIDER_CODE, vehicles)
 
-        for ct in _CANONICAL_TYPES:
-            assert ct.code in prompt
-            for criterion in ct.criteria:
+        for spec in _ACRISS_TYPES:
+            assert spec.code in prompt
+            for criterion in spec.criteria:
                 assert criterion in prompt
-            for example in ct.examples:
+            for example in spec.examples:
                 assert example in prompt
 
         assert "Fiat Panda" in prompt
@@ -302,22 +300,22 @@ class TestBuildBatchPrompt:
 
 
 # ---------------------------------------------------------------------------
-# Test 13 — taxonomy_loader parses the real taxonomy.yaml
+# Test 13 — acriss_loader parses the real acriss_codes.yaml
 # ---------------------------------------------------------------------------
 
-class TestTaxonomyLoader:
-    def test_parses_real_taxonomy_yaml(self):
+class TestAcrissLoader:
+    def test_parses_real_acriss_codes_yaml(self):
         from pathlib import Path
-        from src.saas.application.classification.taxonomy_loader import load_taxonomy_specs
+        from src.saas.application.classification.acriss_loader import load_acriss_specs
 
-        yaml_path = Path(__file__).resolve().parents[3] / "taxonomy.yaml"
-        specs, version = load_taxonomy_specs(yaml_path)
+        yaml_path = Path(__file__).resolve().parents[3] / "acriss_codes.yaml"
+        specs = load_acriss_specs(yaml_path)
 
-        assert version == 2
-        assert len(specs) == 79
+        assert len(specs) == 26
         codes = {s.code for s in specs}
-        assert "ECONOMY_MANUAL" in codes
-        eco = next(s for s in specs if s.code == "ECONOMY_MANUAL")
+        assert "EDMR" in codes
+        assert "CGAR" in codes
+        eco = next(s for s in specs if s.code == "EDMR")
         assert eco.description
         assert len(eco.examples) > 0
 
@@ -334,12 +332,12 @@ class TestMixedConfidenceBatch:
             _vehicle(external_code="GA", representative_price_7d=69.0),
         ]
         flash_results = [
-            _result("ECONOMY_MANUAL", 0.95),
-            _result("COMPACT_AUTO", 0.70),
+            _result("EDMR", 0.95),
+            _result("CGAR", 0.70),
         ]
         pro_results = [
-            _result("ECONOMY_MANUAL", 0.88),
-            _result("COMPACT_AUTO", 0.91),
+            _result("EDMR", 0.88),
+            _result("CGAR", 0.91),
         ]
 
         with patch.object(svc, "_call_flash_batch", return_value=flash_results) as mock_flash, \
@@ -349,10 +347,10 @@ class TestMixedConfidenceBatch:
         mock_flash.assert_called_once()
         mock_pro.assert_called_once()
 
-        assert results[0].canonical_type_code == "ECONOMY_MANUAL"
+        assert results[0].acriss_category == "E"
         assert results[0].confidence == pytest.approx(0.88)
         assert results[0].pending_review is False
 
-        assert results[1].canonical_type_code == "COMPACT_AUTO"
+        assert results[1].acriss_category == "C"
         assert results[1].confidence == pytest.approx(0.91)
         assert results[1].pending_review is False

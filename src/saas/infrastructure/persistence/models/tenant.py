@@ -101,15 +101,15 @@ class TenantVehicleGroup(Base):
 
 
 class TenantVehicleGroupMapping(Base):
-    """Maps a tenant's vehicle group label onto one or more canonical types.
+    """Maps a tenant's vehicle group label onto one or more ACRISS codes.
 
-    N:M: a tenant group may cover multiple canonical types, and the same
-    canonical type may appear in multiple tenant groups (rare but valid).
+    N:M: a tenant group may cover multiple ACRISS codes, and the same
+    ACRISS code may appear in multiple tenant groups (rare but valid).
     """
     __tablename__ = "tenant_vehicle_group_mappings"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "tenant_vehicle_group_id", "canonical_type_id",
+            "tenant_id", "tenant_vehicle_group_id", "acriss_code",
             name="uq_tenant_vehicle_group_mappings_tuple",
         ),
     )
@@ -121,9 +121,9 @@ class TenantVehicleGroupMapping(Base):
     tenant_vehicle_group_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenant_vehicle_groups.id", name="fk_vehicle_group_mappings_client_group", ondelete="RESTRICT"), nullable=False
     )
-    canonical_type_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("canonical_vehicle_types.id", name="fk_tenant_vehicle_group_mappings_canonical_type", ondelete="RESTRICT"),
+    acriss_code: Mapped[str] = mapped_column(
+        String(4),
+        ForeignKey("acriss_codes.code", name="fk_tvgm_acriss_code", ondelete="RESTRICT"),
         nullable=False,
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

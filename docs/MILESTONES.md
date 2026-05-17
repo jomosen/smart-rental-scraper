@@ -942,3 +942,75 @@ diferenciado por transmisión manual/automática).
 
 **Closure.** 150 tests verdes (146 anteriores + 4 nuevos). Migration
 `f8a9b0c1d2e3` en cabeza de Alembic.
+
+---
+
+## Hito C — ACRISS como estándar de clasificación
+
+**Motivation.** La taxonomía interna (`canonical_vehicle_types`, 79 categorías v2,
+campo `family`) resolvía el problema de homogeneización pero introducía un
+vocabulario propio que diverge del estándar de la industria. El estándar ACRISS
+(4 caracteres: categoría + carrocería + transmisión + combustible) es el código
+que los GDS, brokers y operadoras ya utilizan. Adoptar ACRISS elimina la capa
+de traducción y facilita integraciones futuras.
+
+**Key decisions.**
+
+- **Subconjunto materializado de 26 códigos.** No se implementa la tabla completa
+  de ACRISS (>2000 combinaciones posibles). Se declara explícitamente en
+  `acriss_codes.yaml` cuáles aplican a nuestro mercado, con `display_name`,
+  `description`, `criteria` y `examples` para el LLM.
+- **Columna generada `acriss_code`.** En `provider_vehicle_categories` los 4
+  atributos (`acriss_category`, `acriss_body_type`, `acriss_transmission`,
+  `acriss_fuel`) se almacenan individualmente. La columna
+  `acriss_code VARCHAR(4) GENERATED ALWAYS AS (...) STORED` los concatena;
+  la FK `acriss_code → acriss_codes.code` garantiza integridad referencial
+  sin duplicar datos.
+- **`TenantVehicleGroupMapping.canonical_type_id` → `acriss_code VARCHAR(4)`.**
+  El join de precio (`PriceQueryService._resolve_mappings`) ahora cruza
+  `pvc.acriss_code == tvgm.acriss_code` en lugar de `pvc.canonical_type_id == tvgm.canonical_type_id`.
+- **`upsert_seen` simplificado.** Se eliminan los parámetros `transmission` y
+  `fuel_type` del repositorio. El hash de identidad usa solo
+  `(example_models, seats, luggage)`.
+- **`GeminiClassificationService` recibe `acriss_types: list[AcrissCodeSpec]`.**
+  Ya no existe `taxonomy_version`. `ClassificationResult` tiene cuatro campos
+  `acriss_*` en lugar de `canonical_type_code`.
+- **`seed_taxonomy.py` supersedido.** El workflow de seed es ahora
+  `scripts/seed_acriss_codes.py` + `acriss_codes.yaml`. La tabla
+  `canonical_vehicle_types` se conserva para referencias históricas de FK
+  pero no se usa en el pipeline de clasificación.
+
+**What was built.**
+
+- Alembic migration (Hito C): crea tabla `acriss_codes` con 26 filas seeded;
+  drop de `canonical_type_id`, `classification_taxonomy_version`, `transmission`,
+  `fuel_type` de `provider_vehicle_categories`; drop de `canonical_type_id` de
+  `tenant_vehicle_group_mappings`; añade `acriss_code` FK en ambas tablas;
+  columna generada `acriss_code STORED` en `pvc`.
+- `AcrissCode` ORM + `AcrissCodeRepository` (`get_by_code`, `list_active`,
+  `upsert`, `deactivate_missing`).
+- `acriss_codes.yaml` con 26 códigos documentados para el LLM.
+- `scripts/seed_acriss_codes.py` — seed idempotente con `--dry-run` y validación.
+- `src/saas/application/classification/acriss_loader.py` — carga `AcrissCodeSpec`
+  desde YAML para pasarlos a `GeminiClassificationService`.
+- `src/scraper/presentation/cli/container.py` actualizado para usar
+  `load_acriss_specs` + `acriss_types=` en lugar de `load_taxonomy_specs`.
+- Tests actualizados: `test_classification_service.py`, `_fakes.py`,
+  `test_gemini_classification_service.py`, `test_repositories.py`,
+  `test_price_query_service.py`, `test_onboarding.py`,
+  `test_classification_to_query_flow.py`.
+- Tests nuevos: `test_acriss_code_repository.py` (14 tests),
+  `test_seed_acriss_codes.py` (13 tests).
+- `test_seed_taxonomy.py` eliminado (script obsoleto).
+
+**Deferred.**
+
+- **Re-clasificación de PVCs existentes.** Los PVCs clasificados con
+  `canonical_type_id` en producción necesitan un scrape con el nuevo
+  `ClassificationService` para obtener códigos ACRISS.
+- **Onboarding CLI.** El comando de onboarding necesita actualizar su flujo de
+  `step_create_mappings` para PVCs ya clasificados en producción.
+
+**Closure.** 161 tests verdes (150 anteriores + 14 nuevos en
+`test_acriss_code_repository.py` + 13 nuevos en `test_seed_acriss_codes.py`,
+neto de 16 eliminados de `test_seed_taxonomy.py`). Hito C cerrado.

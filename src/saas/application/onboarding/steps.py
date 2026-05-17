@@ -24,7 +24,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...infrastructure.persistence.models.catalog import (
-    CanonicalVehicleType,
     Provider,
     ProviderLocation,
     ProviderRate,
@@ -273,11 +272,11 @@ def step_create_mappings(
                         f"external_code='{ext_code}'. "
                         "Has discovery (step 3) completed for this provider?"
                     )
-                if pvc.canonical_type_id is None:
+                if pvc.acriss_code is None:
                     raise OnboardingError(
                         f"provider_vehicle_category '{ext_code}' for "
                         f"({sub.provider_code}, {sub.location_code}, {sub.rate_code}) "
-                        "exists but is not yet classified into a canonical vehicle type. "
+                        "exists but has not yet been assigned an ACRISS code. "
                         "Onboarding requires that all referenced provider vehicle "
                         "categories have been classified. Run a scrape with the "
                         "ClassificationService enabled before onboarding tenants, "
@@ -286,7 +285,7 @@ def step_create_mappings(
                 vm = TenantVehicleGroupMapping(
                     tenant_id=tenant_id,
                     tenant_vehicle_group_id=tvg_id,
-                    canonical_type_id=pvc.canonical_type_id,
+                    acriss_code=pvc.acriss_code,
                 )
                 session.add(vm)
                 count += 1
@@ -349,10 +348,10 @@ def step_activate_subscriptions(
 
     Returns {(provider_code, location_code, rate_code): 'active' | 'pending_mapping'}.
     """
-    # One query: all canonical_type_ids already mapped for this tenant
-    mapped_canonical_ids: set[int] = set(
+    # One query: all acriss_codes already mapped for this tenant
+    mapped_acriss_codes: set[str] = set(
         session.scalars(
-            select(TenantVehicleGroupMapping.canonical_type_id).where(
+            select(TenantVehicleGroupMapping.acriss_code).where(
                 TenantVehicleGroupMapping.tenant_id == tenant_id,
             )
         ).all()
@@ -364,22 +363,22 @@ def step_activate_subscriptions(
         pcode, lcode, rcode = key
         pid, lid, rid = catalog_ids[key]
 
-        active_canonical_ids: set[int] = set(
+        active_acriss_codes: set[str] = set(
             session.scalars(
-                select(ProviderVehicleCategory.canonical_type_id).where(
+                select(ProviderVehicleCategory.acriss_code).where(
                     ProviderVehicleCategory.provider_id == pid,
                     ProviderVehicleCategory.provider_location_id == lid,
                     ProviderVehicleCategory.provider_rate_id == rid,
                     ProviderVehicleCategory.active == True,
-                    ProviderVehicleCategory.canonical_type_id.is_not(None),
+                    ProviderVehicleCategory.acriss_code.is_not(None),
                 )
             ).all()
         )
 
-        unmapped = active_canonical_ids - mapped_canonical_ids
-        sub_mapped_canonical_ids = mapped_canonical_ids & active_canonical_ids
+        unmapped = active_acriss_codes - mapped_acriss_codes
+        sub_mapped_codes = mapped_acriss_codes & active_acriss_codes
 
-        if not sub_mapped_canonical_ids:
+        if not sub_mapped_codes:
             print(
                 f"[warning] Subscription ({pcode}, {lcode}, {rcode}) has no "
                 "mappings for this tuple — leaving in 'pending_mapping'. "
@@ -389,16 +388,11 @@ def step_activate_subscriptions(
             statuses[key] = "pending_mapping"
         else:
             if unmapped:
-                unmapped_codes = session.scalars(
-                    select(CanonicalVehicleType.code).where(
-                        CanonicalVehicleType.id.in_(unmapped)
-                    )
-                ).all()
                 print(
                     f"[info] Subscription ({pcode}, {lcode}, {rcode}) has "
-                    f"{len(unmapped)} unmapped active canonical type(s): "
-                    f"{', '.join(sorted(unmapped_codes))}. "
-                    "These types are not in this tenant's scope and won't "
+                    f"{len(unmapped)} unmapped active ACRISS code(s): "
+                    f"{', '.join(sorted(unmapped))}. "
+                    "These codes are not in this tenant's scope and won't "
                     "appear in its queries. If that's intentional, ignore this notice.",
                     file=sys.stderr,
                 )
