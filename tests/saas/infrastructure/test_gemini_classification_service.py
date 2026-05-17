@@ -321,6 +321,154 @@ class TestAcrissLoader:
 
 
 # ---------------------------------------------------------------------------
+# Test — ACRISS reference documentation is loaded on service init
+# ---------------------------------------------------------------------------
+
+class TestReferenceLoaded:
+    def test_loads_acriss_reference_on_init(self):
+        svc = _make_service()
+        assert svc._acriss_reference, "Reference text must be non-empty"
+        assert "ACRISS" in svc._acriss_reference
+        assert "Position 1" in svc._acriss_reference
+
+    def test_reference_contains_key_sections(self):
+        svc = _make_service()
+        ref = svc._acriss_reference
+        assert "CATEGORY" in ref
+        assert "BODY TYPE" in ref
+        assert "TRANSMISSION" in ref
+        assert "FUEL" in ref
+
+
+# ---------------------------------------------------------------------------
+# Test — _build_batch_prompt has all four sections
+# ---------------------------------------------------------------------------
+
+class TestBuildBatchPromptSections:
+    def test_prompt_has_four_sections(self):
+        svc = _make_service()
+        vehicles = [_vehicle()]
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, vehicles)
+
+        assert "ACRISS Code Reference" in prompt       # section 1: reference doc header
+        assert "MATERIALIZED CODES" in prompt          # section 2: available codes
+        assert "VEHICLES TO CLASSIFY" in prompt        # section 3: vehicle data
+        assert "OUTPUT FORMAT" in prompt               # section 4: output instructions
+
+    def test_prompt_output_section_includes_new_fields(self):
+        svc = _make_service()
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, [_vehicle()])
+
+        assert "acriss_code" in prompt      # new top-level code field
+        assert "pending_review" in prompt   # explicit flag in output
+        assert "reasoning" in prompt        # rationale field name
+
+
+# ---------------------------------------------------------------------------
+# Test — _parse_llm_item post-LLM validation
+# ---------------------------------------------------------------------------
+
+class TestParseLlmItem:
+    def test_valid_code_produces_correct_result(self):
+        svc = _make_service()
+        item = {
+            "acriss_code": "EDMR",
+            "acriss_category": "E",
+            "acriss_body_type": "D",
+            "acriss_transmission": "M",
+            "acriss_fuel": "R",
+            "confidence": 0.95,
+            "reasoning": "Clear economy manual",
+            "pending_review": False,
+        }
+        result = svc._parse_llm_item(item)
+        assert result.acriss_category == "E"
+        assert result.acriss_body_type == "D"
+        assert result.acriss_transmission == "M"
+        assert result.acriss_fuel == "R"
+        assert result.confidence == pytest.approx(0.95)
+        assert result.pending_review is False
+        assert result.rationale == "Clear economy manual"
+
+    def test_hallucinated_code_produces_pending_review(self):
+        svc = _make_service()
+        item = {
+            "acriss_code": "ZZZZ",
+            "confidence": 0.92,
+            "reasoning": "Hallucinated code",
+            "pending_review": False,
+        }
+        result = svc._parse_llm_item(item)
+        assert result.acriss_category is None
+        assert result.pending_review is True
+        assert result.confidence == pytest.approx(0.0)  # confidence zeroed on hallucination
+
+    def test_inconsistent_attrs_corrected_from_code(self):
+        svc = _make_service()
+        # LLM returns the correct code but wrong individual attrs
+        item = {
+            "acriss_code": "EDMR",
+            "acriss_category": "C",   # wrong — should be E
+            "acriss_body_type": "G",  # wrong — should be D
+            "acriss_transmission": "A",  # wrong — should be M
+            "acriss_fuel": "H",       # wrong — should be R
+            "confidence": 0.90,
+            "reasoning": "Inconsistent attrs test",
+            "pending_review": False,
+        }
+        result = svc._parse_llm_item(item)
+        # Code takes precedence — attrs derived from EDMR chars
+        assert result.acriss_category == "E"
+        assert result.acriss_body_type == "D"
+        assert result.acriss_transmission == "M"
+        assert result.acriss_fuel == "R"
+        assert result.pending_review is False
+
+    def test_low_confidence_produces_pending_review(self):
+        svc = _make_service()
+        item = {
+            "acriss_code": "EDMR",
+            "confidence": 0.65,
+            "reasoning": "Very uncertain",
+            "pending_review": False,
+        }
+        result = svc._parse_llm_item(item)
+        assert result.acriss_category is None
+        assert result.pending_review is True
+        assert result.confidence == pytest.approx(0.65)
+
+    def test_null_code_produces_pending_review(self):
+        svc = _make_service()
+        item = {
+            "acriss_code": None,
+            "confidence": 0.60,
+            "reasoning": "No good match found",
+            "pending_review": True,
+        }
+        result = svc._parse_llm_item(item)
+        assert result.acriss_category is None
+        assert result.pending_review is True
+        assert result.confidence == pytest.approx(0.60)
+
+    def test_missing_code_key_produces_pending_review(self):
+        svc = _make_service()
+        item = {"confidence": 0.50, "reasoning": "No code key at all"}
+        result = svc._parse_llm_item(item)
+        assert result.acriss_category is None
+        assert result.pending_review is True
+
+    def test_reasoning_field_mapped_to_rationale(self):
+        svc = _make_service()
+        item = {
+            "acriss_code": "EDMR",
+            "confidence": 0.90,
+            "reasoning": "This is the reasoning text",
+        }
+        result = svc._parse_llm_item(item)
+        assert result.rationale == "This is the reasoning text"
+
+
+# ---------------------------------------------------------------------------
 # Test — mixed confidence batch: Pro called, Pro results used for all vehicles
 # ---------------------------------------------------------------------------
 

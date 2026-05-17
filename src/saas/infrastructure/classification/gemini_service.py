@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -24,8 +25,10 @@ from src.saas.application.classification.dtos import (
 from src.saas.application.classification.service import ClassificationService
 
 _CONFIDENCE_THRESHOLD = 0.85
+_LOW_CONFIDENCE_THRESHOLD = 0.70  # below this → immediate pending_review, no Pro escalation
 _FLASH_MODEL = "gemini-2.5-flash"
 _PRO_MODEL = "gemini-2.5-pro"
+_REFERENCE_PATH = Path(__file__).parents[4] / "docs" / "acriss_reference.md"
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ class GeminiClassificationService(ClassificationService):
         self,
         acriss_types: list[AcrissCodeSpec],
         api_key: str | None = None,
+        reference_path: Path | None = None,
     ) -> None:
         if not acriss_types:
             raise ValueError("acriss_types cannot be empty")
@@ -73,6 +77,8 @@ class GeminiClassificationService(ClassificationService):
                 "GEMINI_API_KEY not set. Configure it in .env or pass "
                 "explicitly to the service constructor."
             )
+        ref = reference_path or _REFERENCE_PATH
+        self._acriss_reference = ref.read_text(encoding="utf-8")
         self._init_clients()
 
     def _init_clients(self) -> None:
@@ -182,29 +188,76 @@ class GeminiClassificationService(ClassificationService):
             ),
         )
         raw: list = json.loads(response.text)
-        results: list[ClassificationResult] = []
-        for item in raw:
-            cat = item.get("acriss_category") or None
-            body = item.get("acriss_body_type") or None
-            trans = item.get("acriss_transmission") or None
-            fuel = item.get("acriss_fuel") or None
-            confidence = float(item.get("confidence", 0.0))
-            rationale = item.get("rationale")
+        return [self._parse_llm_item(item) for item in raw]
 
-            all_set = all(x is not None for x in (cat, body, trans, fuel))
-            results.append(ClassificationResult(
-                acriss_category=cat if all_set else None,
-                acriss_body_type=body if all_set else None,
-                acriss_transmission=trans if all_set else None,
-                acriss_fuel=fuel if all_set else None,
+    def _parse_llm_item(self, item: dict) -> ClassificationResult:
+        """Parse one LLM JSON response item into a ClassificationResult.
+
+        Post-LLM validation rules:
+        - acriss_code absent or null → pending_review
+        - acriss_code not in catalog → pending_review (hallucination), confidence zeroed
+        - acriss_code valid, confidence < 0.70 → pending_review (poor fit)
+        - acriss_code valid, confidence ≥ 0.70 → derive 4 attrs from code chars,
+          correcting any inconsistency the LLM may have introduced
+        """
+        confidence = float(item.get("confidence", 0.0))
+        rationale = item.get("reasoning") or item.get("rationale")
+        acriss_code = item.get("acriss_code")
+
+        if not acriss_code:
+            return ClassificationResult(
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
                 confidence=confidence,
-                pending_review=not all_set,
+                pending_review=True,
                 rationale=rationale,
-            ))
-        return results
+            )
+
+        if acriss_code not in self._known_codes:
+            logger.warning(
+                "LLM returned unknown ACRISS code '%s' — treating as pending_review",
+                acriss_code,
+            )
+            return ClassificationResult(
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
+                confidence=0.0,
+                pending_review=True,
+                rationale=rationale,
+            )
+
+        if confidence < _LOW_CONFIDENCE_THRESHOLD:
+            return ClassificationResult(
+                acriss_category=None,
+                acriss_body_type=None,
+                acriss_transmission=None,
+                acriss_fuel=None,
+                confidence=confidence,
+                pending_review=True,
+                rationale=rationale,
+            )
+
+        # Derive attrs from the validated code — corrects any inconsistency in LLM attrs
+        return ClassificationResult(
+            acriss_category=acriss_code[0],
+            acriss_body_type=acriss_code[1],
+            acriss_transmission=acriss_code[2],
+            acriss_fuel=acriss_code[3],
+            confidence=confidence,
+            pending_review=False,
+            rationale=rationale,
+        )
 
     def _validate_code(self, result: ClassificationResult) -> ClassificationResult:
-        """If the LLM returned a code not in our known ACRISS set, treat as pending_review."""
+        """Safety net: if the result carries a code not in our catalog, treat as pending_review.
+
+        Primarily relevant when _call_flash_batch/_call_pro_batch are mocked in tests
+        or when results are constructed externally.
+        """
         if result.pending_review:
             return result
         code = (
@@ -244,66 +297,64 @@ class GeminiClassificationService(ClassificationService):
     def _build_batch_prompt(
         self, provider_code: str, vehicles: list[VehicleClassificationInput]
     ) -> str:
-        acriss_block = "\n\n".join(
-            self._render_acriss(spec) for spec in self._acriss_types
+        section_materialized = self._build_materialized_codes_section()
+        section_vehicles = self._build_vehicles_section(provider_code, vehicles)
+        section_output = self._build_output_format_section(len(vehicles))
+
+        return (
+            "You are an expert vehicle classifier for the car rental industry.\n\n"
+            f"{self._acriss_reference}\n\n"
+            "---\n\n"
+            "### MATERIALIZED CODES\n\n"
+            "(The ONLY valid codes for this classification. "
+            "Do not use any code not listed here.)\n\n"
+            f"{section_materialized}\n\n"
+            "---\n\n"
+            "### VEHICLES TO CLASSIFY\n\n"
+            f"{section_vehicles}\n\n"
+            "---\n\n"
+            "### OUTPUT FORMAT\n\n"
+            f"{section_output}"
         )
-        vehicles_block = "\n\n".join(
-            f"### Vehicle {i + 1}\n{self._render_batch_vehicle(v)}"
+
+    def _build_materialized_codes_section(self) -> str:
+        return "\n\n".join(
+            self._render_acriss_spec(spec) for spec in self._acriss_types
+        )
+
+    def _render_acriss_spec(self, spec: AcrissCodeSpec) -> str:
+        criteria_block = "\n".join(f"    - {c}" for c in spec.criteria)
+        examples_str = ", ".join(spec.examples)
+        return (
+            f"- **{spec.code}** — {spec.display_name}\n"
+            f"  {spec.description}\n"
+            f"  Criteria:\n{criteria_block}\n"
+            f"  Examples: {examples_str}"
+        )
+
+    def _build_vehicles_section(
+        self, provider_code: str, vehicles: list[VehicleClassificationInput]
+    ) -> str:
+        return "\n\n".join(
+            f"#### Vehicle {i + 1} (provider: {provider_code})\n"
+            + self._render_vehicle(v)
             for i, v in enumerate(vehicles)
         )
-        return (
-            "You are a vehicle rental classification specialist.\n\n"
-            f"Provider code: {provider_code}\n\n"
-            "Classify each vehicle below into ONE of the ACRISS codes listed.\n"
-            "Each ACRISS code encodes 4 orthogonal attributes:\n"
-            "  Position 1: vehicle category (E=Economy, C=Compact, I=Intermediate, etc.)\n"
-            "  Position 2: body type (D=2/4-door, G=SUV, M=Minivan, V=Van, etc.)\n"
-            "  Position 3: transmission (M=Manual, A=Automatic)\n"
-            "  Position 4: fuel/drive (R=Unspecified, H=Hybrid, E=Electric, etc.)\n\n"
-            "Use the price information to help distinguish within-provider price tiers.\n"
-            "If no ACRISS code fits well, respond with confidence < 0.85 and null for "
-            "all four attributes.\n\n"
-            f"## ACRISS CODES\n\n{acriss_block}\n\n"
-            f"## VEHICLES TO CLASSIFY\n\n{vehicles_block}\n\n"
-            "## OUTPUT\n\n"
-            "Respond in JSON as an array with one object per vehicle, in the same order:\n"
-            "  [{\n"
-            "    \"acriss_category\": \"E\",\n"
-            "    \"acriss_body_type\": \"D\",\n"
-            "    \"acriss_transmission\": \"M\",\n"
-            "    \"acriss_fuel\": \"R\",\n"
-            "    \"confidence\": 0.95,\n"
-            "    \"rationale\": \"...\"\n"
-            "  }, ...]\n\n"
-            "JSON only. No prose."
-        )
 
-    def _render_acriss(self, spec: AcrissCodeSpec) -> str:
-        criteria_block = "\n".join(f"  - {c}" for c in spec.criteria)
-        examples_block = ", ".join(spec.examples)
-        return (
-            f"### {spec.code} — {spec.display_name}\n"
-            f"Category={spec.category}, Body={spec.body_type}, "
-            f"Transmission={spec.transmission}, Fuel={spec.fuel}\n"
-            f"{spec.description}\n"
-            f"Criteria:\n{criteria_block}\n"
-            f"Examples: {examples_block}"
-        )
-
-    def _render_batch_vehicle(self, v: VehicleClassificationInput) -> str:
+    def _render_vehicle(self, v: VehicleClassificationInput) -> str:
         lines = [f"Models: {v.example_models}"]
         if v.seats is not None:
             lines.append(f"Seats: {v.seats}")
         if v.luggage is not None:
             lines.append(f"Luggage capacity: {v.luggage}")
         if v.transmission:
-            lines.append(f"Transmission hint: {v.transmission}")
+            lines.append(f"Transmission: {v.transmission}")
         if v.fuel_type:
-            lines.append(f"Fuel hint: {v.fuel_type}")
+            lines.append(f"Fuel: {v.fuel_type}")
         if v.external_code:
-            lines.append(f"Provider's internal code: {v.external_code}")
+            lines.append(f"Provider code: {v.external_code}")
         if v.external_name:
-            lines.append(f"Provider's display name: {v.external_name}")
+            lines.append(f"Provider name: {v.external_name}")
         if v.representative_price_7d is not None:
             currency = v.representative_currency or ""
             price_line = f"Representative 7-day price: {v.representative_price_7d:.2f}"
@@ -311,3 +362,28 @@ class GeminiClassificationService(ClassificationService):
                 price_line += f" {currency}"
             lines.append(price_line)
         return "\n".join(lines)
+
+    def _build_output_format_section(self, n_vehicles: int) -> str:
+        example = (
+            '  {\n'
+            '    "acriss_code": "CFAR",       // 4-char code, or null if pending_review\n'
+            '    "acriss_category": "C",       // Position 1 of the code\n'
+            '    "acriss_body_type": "F",      // Position 2\n'
+            '    "acriss_transmission": "A",   // Position 3\n'
+            '    "acriss_fuel": "R",           // Position 4\n'
+            '    "confidence": 0.95,           // 0.0 to 1.0\n'
+            '    "reasoning": "...",           // 1-3 sentences explaining the choice\n'
+            '    "pending_review": false       // true if no materialized code fits well\n'
+            '  }'
+        )
+        return (
+            f"Return ONLY a JSON array with exactly {n_vehicles} object(s) "
+            "(one per vehicle, in the same order). No markdown wrapper, no commentary:\n\n"
+            f"[{example}, ...]\n\n"
+            "Rules:\n"
+            "- acriss_code MUST be one of the materialized codes listed above. "
+            "Do not invent codes not in the list.\n"
+            "- If no materialized code fits well, set acriss_code=null and pending_review=true.\n"
+            "- The 4 attributes must match exactly the 4 characters of acriss_code.\n"
+            "- Set pending_review=true if confidence < 0.70.\n"
+        )
