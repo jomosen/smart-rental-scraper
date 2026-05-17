@@ -181,14 +181,56 @@ KEY RULE for our market:
 3. The 4 attributes you return MUST be the 4 characters of the chosen
    `acriss_code`, in order. Internal consistency is required.
 
-4. When the provider groups multiple distinct models in one PVC, classify
-   based on the dominant/representative model. If there is no clear
-   dominant model and the models span multiple ACRISS categories, return
-   pending_review.
+4. **MIXED GROUPS — classify to the highest-tier model present.**
 
-5. Confidence calibration:
+   When the provider's PVC groups multiple distinct vehicle models that
+   would map to DIFFERENT ACRISS codes (e.g. "VW Tiguan, VW T-Roc" where
+   Tiguan = IFAR but T-Roc = CGAR), classify the PVC into the code of
+   the model with the HIGHEST tier — the model representing the upper
+   bound of what the customer pays for in that group.
+
+   How to determine "highest tier":
+   - First, by `acriss_category` (position 1). Standard order from
+     lowest to highest in our market:
+       M < E < C < I < S < F < P < L
+     With Elite versions ranking just above their mainstream counterpart
+     of the same size:
+       N (Mini Elite) > M ; H > E ; D > C ; J > I ; R > S ;
+       G > F ; U > P ; W > L
+   - If multiple models tie on category but differ in body type, prefer
+     in this order: F (SUV) > G (Crossover) > M (MPV) > V (Van) > D (sedan)
+     > W (wagon) > E (coupe) > T (convertible). When in doubt, pick the
+     body type with greater price prominence in the market.
+   - If models tie on category and body but differ in transmission, prefer
+     A (Auto) > M (Manual) — automatic is usually the more expensive
+     variant.
+   - If models tie on the first 3 attributes but differ in fuel, prefer
+     R (standard combustion) — hybrid/electric are usually features, not
+     tier indicators.
+
+   ALWAYS in mixed-group cases:
+   - Set `acriss_code` to the highest-tier code (not null).
+   - Set the 4 attributes accordingly.
+   - Set `pending_review = true` to signal operator review needed.
+   - Set `confidence` to ~0.65 (low confidence due to model mixing).
+   - In `reasoning`, explicitly state which models were present, why
+     they map to different codes, and which one determined the choice.
+
+   The intent of this rule: when a PVC groups heterogeneous models, we
+   DO want to assign it a code (to keep it visible in pricing analytics),
+   but we want to be honest about the ambiguity (via pending_review).
+   The highest-tier choice is conservative: it reflects what the
+   customer pays for at the top, never underestimating market pricing.
+
+5. If the LLM cannot find ANY materialized code that fits — including
+   the highest-tier model in a mixed group — set `acriss_code = null`
+   and `pending_review = true`. This is rare; rule 4 should usually
+   resolve mixed groups.
+
+6. Confidence calibration:
    - 0.95+: clear match, all attributes unambiguous
    - 0.85-0.95: clear match, one attribute slightly uncertain (e.g. fuel
      not specified but defaulted to R)
    - 0.70-0.85: ambiguous on 1-2 attributes
-   - <0.70: poor fit; consider pending_review
+   - ~0.65: mixed group resolved via rule 4 (highest-tier choice)
+   - <0.60: poor fit; consider pending_review without a code

@@ -39,6 +39,13 @@ _ACRISS_TYPES = [
         examples=["Ford Puma", "Renault Captur"],
     ),
     AcrissCodeSpec(
+        code="IFAR",
+        display_name="Intermediate SUV Automático",
+        description="Intermediate SUV body, automatic transmission.",
+        criteria=["5 seats", "automatic transmission", "SUV body"],
+        examples=["VW Tiguan", "Hyundai Tucson"],
+    ),
+    AcrissCodeSpec(
         code="LVAR",
         display_name="Furgoneta Pasajero 9 Plazas Automático",
         description="9-seat passenger vans, automatic.",
@@ -363,6 +370,13 @@ class TestBuildBatchPromptSections:
         assert "pending_review" in prompt   # explicit flag in output
         assert "reasoning" in prompt        # rationale field name
 
+    def test_prompt_includes_mixed_groups_reminder(self):
+        svc = _make_service()
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, [_vehicle()])
+
+        assert "CRITICAL RULE FOR MIXED GROUPS" in prompt
+        assert "highest-tier" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Test — _parse_llm_item post-LLM validation
@@ -502,3 +516,67 @@ class TestMixedConfidenceBatch:
         assert results[1].acriss_category == "C"
         assert results[1].confidence == pytest.approx(0.91)
         assert results[1].pending_review is False
+
+
+# ---------------------------------------------------------------------------
+# Test — mixed groups: LLM sets pending_review=true + valid code → code preserved
+# ---------------------------------------------------------------------------
+
+class TestMixedGroup:
+    """Scenario: a PVC groups models that map to different ACRISS codes.
+
+    The LLM applies MIXED_GROUPS_REMINDER: picks the highest-tier model and
+    returns pending_review=true with confidence≈0.65.  The service must
+    preserve the code rather than nulling it.
+    """
+
+    def test_parse_llm_item_preserves_code_for_mixed_group(self):
+        """_parse_llm_item: LLM pending_review=true + valid code → code kept."""
+        svc = _make_service()
+        item = {
+            "acriss_code": "IFAR",
+            "acriss_category": "I",
+            "acriss_body_type": "F",
+            "acriss_transmission": "A",
+            "acriss_fuel": "R",
+            "confidence": 0.65,
+            "reasoning": (
+                "VW Tiguan (IFAR, Intermediate SUV) and VW T-Roc (CGAR, Compact "
+                "Crossover) are present. Tiguan is the highest-tier model; "
+                "classifying to IFAR and flagging for review."
+            ),
+            "pending_review": True,
+        }
+        result = svc._parse_llm_item(item)
+
+        assert result.acriss_category == "I"
+        assert result.acriss_body_type == "F"
+        assert result.acriss_transmission == "A"
+        assert result.acriss_fuel == "R"
+        assert result.confidence == pytest.approx(0.65)
+        assert result.pending_review is True
+
+    def test_classify_provider_batch_passes_through_mixed_group_result(self):
+        """Full batch flow: Flash returns mixed-group result; preserved, Pro not called."""
+        svc = _make_service()
+        vehicles = [_vehicle(example_models="VW Tiguan, VW T-Roc")]
+        flash_return = [ClassificationResult(
+            acriss_category="I",
+            acriss_body_type="F",
+            acriss_transmission="A",
+            acriss_fuel="R",
+            confidence=0.65,
+            pending_review=True,
+            rationale="Mixed group: Tiguan (IFAR) vs T-Roc (CGAR); highest tier chosen.",
+        )]
+
+        with patch.object(svc, "_call_flash_batch", return_value=flash_return) as mock_flash, \
+             patch.object(svc, "_call_pro_batch") as mock_pro:
+            results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
+
+        assert results[0].acriss_category == "I"
+        assert results[0].acriss_body_type == "F"
+        assert results[0].confidence == pytest.approx(0.65)
+        assert results[0].pending_review is True
+        mock_flash.assert_called_once()
+        mock_pro.assert_not_called()  # pending_review=True skips Pro escalation

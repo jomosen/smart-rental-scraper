@@ -30,6 +30,33 @@ _FLASH_MODEL = "gemini-2.5-flash"
 _PRO_MODEL = "gemini-2.5-pro"
 _REFERENCE_PATH = Path(__file__).parents[4] / "docs" / "acriss_reference.md"
 
+_MIXED_GROUPS_REMINDER = """\
+CRITICAL RULE FOR MIXED GROUPS:
+If the vehicle group contains multiple distinct models that map to
+different ACRISS codes (e.g. "VW Tiguan, VW T-Roc" → IFAR vs CGAR),
+classify to the HIGHEST tier present. Tier order:
+
+  M < E < C < I < S < F < P < L
+  Elite versions rank above their mainstream counterpart of the same size:
+  D > C, J > I, R > S, G > F, U > P, W > L, H > E, N > M.
+
+If categories tie, prefer body types in order: F (SUV) > G (Crossover)
+> M (MPV) > V (Van) > D (sedan) > W (wagon) > E (coupe) > T (convertible).
+If body types tie, prefer A (auto) > M (manual). If transmissions tie,
+prefer R (combustion) over hybrid/electric.
+
+In mixed-group cases:
+  - acriss_code = highest-tier code (NOT null)
+  - pending_review = true
+  - confidence = ~0.65
+  - reasoning = explicit explanation of which models were present, why
+    they map to different codes, and which one determined the choice.
+
+NEVER set acriss_code = null for a mixed group if any one of the models
+in the group matches a materialized code. Always assign the highest-tier
+one and mark pending_review = true.\
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -194,15 +221,18 @@ class GeminiClassificationService(ClassificationService):
         """Parse one LLM JSON response item into a ClassificationResult.
 
         Post-LLM validation rules:
-        - acriss_code absent or null → pending_review
+        - acriss_code absent or null → pending_review, null attrs
         - acriss_code not in catalog → pending_review (hallucination), confidence zeroed
-        - acriss_code valid, confidence < 0.70 → pending_review (poor fit)
+        - acriss_code valid, LLM set pending_review=true → preserve code, pending_review=true
+          (mixed-group case: highest-tier code chosen, operator review needed)
+        - acriss_code valid, confidence < 0.70 → pending_review, null attrs (poor fit)
         - acriss_code valid, confidence ≥ 0.70 → derive 4 attrs from code chars,
           correcting any inconsistency the LLM may have introduced
         """
         confidence = float(item.get("confidence", 0.0))
         rationale = item.get("reasoning") or item.get("rationale")
         acriss_code = item.get("acriss_code")
+        llm_pending_review = bool(item.get("pending_review", False))
 
         if not acriss_code:
             return ClassificationResult(
@@ -226,6 +256,19 @@ class GeminiClassificationService(ClassificationService):
                 acriss_transmission=None,
                 acriss_fuel=None,
                 confidence=0.0,
+                pending_review=True,
+                rationale=rationale,
+            )
+
+        # LLM explicitly set pending_review (e.g. mixed group per MIXED_GROUPS_REMINDER).
+        # Preserve the code as the highest-tier best guess; flag for operator review.
+        if llm_pending_review:
+            return ClassificationResult(
+                acriss_category=acriss_code[0],
+                acriss_body_type=acriss_code[1],
+                acriss_transmission=acriss_code[2],
+                acriss_fuel=acriss_code[3],
+                confidence=confidence,
                 pending_review=True,
                 rationale=rationale,
             )
@@ -304,6 +347,8 @@ class GeminiClassificationService(ClassificationService):
         return (
             "You are an expert vehicle classifier for the car rental industry.\n\n"
             f"{self._acriss_reference}\n\n"
+            "---\n\n"
+            f"{_MIXED_GROUPS_REMINDER}\n\n"
             "---\n\n"
             "### MATERIALIZED CODES\n\n"
             "(The ONLY valid codes for this classification. "
