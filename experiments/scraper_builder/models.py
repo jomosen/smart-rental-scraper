@@ -13,6 +13,7 @@ class CloseResult:
     cost_estimate_eur: float = 0.0
     duration_seconds: float = 0.0
     error: str | None = None
+    log_dir: str | None = None
 
 
 @dataclass

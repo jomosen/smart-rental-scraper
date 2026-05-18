@@ -38,6 +38,7 @@ seasons/
 
 # Logs
 *.log
+experiments/scraper_builder/logs/
 
 # Pytest / coverage
 .pytest_cache/

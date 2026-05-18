@@ -11,7 +11,6 @@ import asyncio
 import os
 import sys
 from argparse import ArgumentParser
-from dataclasses import asdict
 
 from dotenv import load_dotenv
 
@@ -51,7 +50,9 @@ async def run(headless: bool) -> None:
         print(f"Site: {name}  ({url})")
         print("="*60)
         async with BrowserSession(headless=headless) as session:
-            result = await close_cookies(session, url)
+            result = await close_cookies(session, url, site_name=name)
+        if result.log_dir:
+            print(f"  Logs: {result.log_dir}")
         print(_fmt(result))
 
 
