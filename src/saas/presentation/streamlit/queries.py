@@ -77,16 +77,23 @@ def get_active_provider_codes() -> list[str]:
 
 def get_acriss_codes_with_data() -> list[str]:
     """Return ACRISS codes that have at least one classified, active PVC."""
+    return [code for code, _ in get_acriss_codes_with_display_names()]
+
+
+@st.cache_data(ttl=60)
+def get_acriss_codes_with_display_names() -> list[tuple[str, str]]:
+    """Return (code, display_name) pairs for active codes that have PVC data, ordered by code."""
     sql = text("""
-        SELECT DISTINCT pvc.acriss_code
-        FROM provider_vehicle_categories pvc
-        WHERE pvc.acriss_code IS NOT NULL
+        SELECT DISTINCT ac.code, ac.display_name
+        FROM acriss_codes ac
+        JOIN provider_vehicle_categories pvc ON pvc.acriss_code = ac.code
+        WHERE ac.active = TRUE
           AND pvc.active = TRUE
-        ORDER BY pvc.acriss_code
+        ORDER BY ac.code
     """)
     with _get_engine().connect() as conn:
         rows = conn.execute(sql).fetchall()
-    return [r[0] for r in rows]
+    return [(r[0], r[1]) for r in rows]
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ..filters import Filters
-from ..queries import fetch_market_overview, fetch_pvc_details
+from ..queries import fetch_market_overview, fetch_pvc_details, get_acriss_codes_with_display_names
 
 
 def render_overview(filters: Filters) -> None:
@@ -98,10 +98,15 @@ def render_overview(filters: Filters) -> None:
     st.subheader("Detalle por modelo")
 
     available_codes = sorted(df["acriss_code"].unique().tolist())
+    code_to_label = {
+        code: f"{code} — {name}"
+        for code, name in get_acriss_codes_with_display_names()
+    }
     selected_code = st.selectbox(
         "Categoría a inspeccionar",
         options=available_codes,
         index=0,
+        format_func=lambda code: code_to_label.get(code, code),
     )
 
     if selected_code:

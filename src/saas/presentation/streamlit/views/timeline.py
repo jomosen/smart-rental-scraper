@@ -4,7 +4,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ..filters import Filters
-from ..queries import fetch_timeline, get_acriss_codes_with_data
+from ..queries import fetch_timeline, get_acriss_codes_with_display_names
 
 try:
     import plotly.express as px
@@ -14,15 +14,18 @@ except ImportError:
 
 
 def render_timeline(filters: Filters) -> None:
-    available_codes = get_acriss_codes_with_data()
-    if not available_codes:
+    codes_with_names = get_acriss_codes_with_display_names()
+    if not codes_with_names:
         st.info("No hay categorías ACRISS con datos en la base de datos.")
         return
 
+    code_to_label = {code: f"{code} — {name}" for code, name in codes_with_names}
+    available_codes = [code for code, _ in codes_with_names]
     selected_code = st.selectbox(
         "Categoría ACRISS a visualizar",
         options=available_codes,
         index=0,
+        format_func=lambda code: code_to_label.get(code, code),
         key="timeline_code_selector",
     )
 
