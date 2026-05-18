@@ -41,8 +41,15 @@ class BrowserSession:
 
     async def navigate(self, url: str) -> None:
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        # Brief settle for JS-rendered banners
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
+
+    async def wait_for_selector(self, selector: str, timeout_ms: int = 8_000) -> bool:
+        """Wait for any element matching *selector* to appear. Returns True if found."""
+        try:
+            await self.page.wait_for_selector(selector, timeout=timeout_ms)
+            return True
+        except Exception:
+            return False
 
     async def get_html(self) -> str:
         return await self.page.content()

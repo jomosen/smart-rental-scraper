@@ -8,6 +8,7 @@ Cookie-banner closer — two entry points:
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -18,6 +19,20 @@ from models import CloseResult
 from session_logger import SessionLogger
 
 _MAX_ATTEMPTS = 3
+
+# CSS selector covering the most common CMP patterns.
+# Used to wait for JS-rendered banners before attempting detection.
+_BANNER_HINTS = ", ".join([
+    "dialog[role='dialog']",
+    "[data-cookiefirst-action]",
+    "#onetrust-consent-sdk",
+    "#cookiebanner",
+    "[id*='cookiebot']",
+    "[class*='cookie-banner']",
+    "[class*='cookie-consent']",
+    "[aria-label*='cookie' i]",
+    "[aria-label*='cookies' i]",
+])
 
 
 def _result_fields(r: CloseResult) -> dict:
@@ -38,6 +53,16 @@ async def close_cookies_in_session(
     logger = SessionLogger(log_dir)   # reuses existing dir; counters reset to 0
     t0 = time.monotonic()
     total_cost = 0.0
+
+    # Wait for JS-rendered CMPs (e.g. CookieFirst ES module) to inject the banner.
+    # domcontentloaded fires before async modules finish — without this wait the
+    # snapshot may not contain the banner element at all.
+    appeared = await session.wait_for_selector(_BANNER_HINTS, timeout_ms=8_000)
+    logger.log("banner_wait", appeared=appeared,
+               waited_ms=int((time.monotonic() - t0) * 1000))
+    if appeared:
+        # Brief pause for fade-in animations so the element is clickable
+        await asyncio.sleep(0.3)
 
     last_click_selector: str | None = None
     last_click_selector_type: str | None = None
