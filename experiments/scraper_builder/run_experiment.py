@@ -17,7 +17,6 @@ from dotenv import load_dotenv
 # Allow sibling imports without installing as a package
 sys.path.insert(0, os.path.dirname(__file__))
 
-from browser_session import BrowserSession
 from cookie_closer import close_cookies
 from models import CloseResult
 
@@ -49,8 +48,7 @@ async def run(headless: bool) -> None:
         print(f"\n{'='*60}")
         print(f"Site: {name}  ({url})")
         print("="*60)
-        async with BrowserSession(headless=headless) as session:
-            result = await close_cookies(session, url, site_name=name)
+        result = await close_cookies(url, site_name=name, headless=headless)
         if result.log_dir:
             print(f"  Logs: {result.log_dir}")
         print(_fmt(result))

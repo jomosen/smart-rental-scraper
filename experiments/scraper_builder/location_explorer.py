@@ -13,7 +13,7 @@ from anthropic import AsyncAnthropic
 from bs4 import BeautifulSoup
 
 from browser_session import BrowserSession
-from cookie_closer import close_cookies
+from cookie_closer import close_cookies_in_session
 from form_capture.form_capturer import capture_search_form
 from form_capture.html_cleaner import clean_html_for_llm
 from field_analysis.field_identifier import FormFields, identify_form_fields
@@ -87,11 +87,13 @@ async def explore_location_field(
 ) -> LocationExplorationReport:
     """
     Full flow:
-    1. Open browser → navigate → close cookie banner.
-    2. Capture + clean search form HTML.
-    3. LLM identifies all form fields.
-    4. Click pickup_location field.
-    5. LLM classifies the widget type.
+    1. Open browser + navigate to url.
+    2. Close cookie banner (mandatory; continues even if it fails).
+    3. Capture + clean search form HTML.
+    4. LLM identifies all form fields.
+    5. Click pickup_location field.
+    6. Capture post-click HTML.
+    7. LLM classifies the widget type.
     """
     t0 = time.monotonic()
     total_cost = 0.0
@@ -109,16 +111,22 @@ async def explore_location_field(
             log_dir=str(log_dir),
         )
 
-    _log(log_dir, "navigate", url=url)
-
     async with BrowserSession(headless=headless) as session:
-        # 1. Navigate + close cookies
-        cookie_result = await close_cookies(session, url, site_name)
-        total_cost += cookie_result.cost_estimate_eur
-        _log(log_dir, "cookie_banner_closed",
-             action=cookie_result.action, success=cookie_result.success)
+        # 1. Navigate
+        _log(log_dir, "navigate", url=url)
+        nav_t0 = time.monotonic()
+        await session.navigate(url)
+        _log(log_dir, "navigate_complete",
+             url=url, duration_ms=int((time.monotonic() - nav_t0) * 1000))
 
-        # 2. Capture form
+        # 2. Close cookies — mandatory before form capture; continue even if it fails
+        cookie_result = await close_cookies_in_session(session, log_dir)
+        total_cost += cookie_result.cost_estimate_eur
+        _log(log_dir, "cookie_closer_invoked",
+             action=cookie_result.action, success=cookie_result.success,
+             cost_eur=cookie_result.cost_estimate_eur)
+
+        # 3. Capture form
         form_result = await capture_search_form(session, log_dir)
         if form_result is None:
             return _fail("Form not found in page HTML")
@@ -130,7 +138,7 @@ async def explore_location_field(
              raw_bytes=raw_size, cleaned_bytes=clean_size,
              reduction_pct=round(100 * (1 - clean_size / raw_size), 1))
 
-        # 3. Identify fields
+        # 4. Identify fields
         try:
             fields, field_cost = await identify_form_fields(cleaned_form, log_dir, client)
         except Exception as exc:
@@ -158,21 +166,21 @@ async def explore_location_field(
                 log_dir=str(log_dir),
             )
 
-        # 4. Click pickup_location
+        # 5. Click pickup_location
         pickup = fields.pickup_location
         _log(log_dir, "click_location_field",
              selector=pickup.selector, selector_type=pickup.selector_type)
         await session.click_selector(pickup.selector, pickup.selector_type)
         await asyncio.sleep(1.5)
 
-        # 5. Capture post-click HTML
+        # 6. Capture post-click HTML
         html_after = await session.get_html()
         _snap(log_dir, "04_after_click.html", html_after)
         cleaned_after = clean_html_for_llm(html_after)
         _log(log_dir, "html_captured_after_click",
              size_bytes=len(html_after.encode("utf-8")))
 
-        # 6. Classify widget
+        # 7. Classify widget
         field_html_before = _extract_element_html(
             cleaned_form, pickup.selector, pickup.selector_type
         )

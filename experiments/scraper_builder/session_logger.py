@@ -9,12 +9,16 @@ _BASE_DIR = Path(__file__).parent / "logs"
 
 
 class SessionLogger:
-    def __init__(self, site_name: str, base_dir: Path = _BASE_DIR) -> None:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-        self.log_dir: Path = base_dir / f"{ts}_{site_name}"
+    def __init__(self, name_or_dir: "str | Path", base_dir: Path = _BASE_DIR) -> None:
+        if isinstance(name_or_dir, Path):
+            # Reuse an existing log directory created by the caller.
+            self.log_dir = name_or_dir
+        else:
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+            self.log_dir = base_dir / f"{ts}_{name_or_dir}"
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        (self.log_dir / "dom_snapshots").mkdir()
-        (self.log_dir / "llm_calls").mkdir()
+        (self.log_dir / "dom_snapshots").mkdir(exist_ok=True)
+        (self.log_dir / "llm_calls").mkdir(exist_ok=True)
         self._trace_path = self.log_dir / "trace.jsonl"
         self._snapshot_counter = 0
         self._call_counter = 0

@@ -1,7 +1,15 @@
-"""Orchestrates banner detection → LLM decision → click → verify."""
+"""
+Cookie-banner closer — two entry points:
+
+- close_cookies_in_session(session, log_dir): assumes page already loaded,
+  shares the caller's log directory.
+- close_cookies(url, site_name, headless): standalone; creates its own
+  browser session, navigates, then calls close_cookies_in_session.
+"""
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from banner_detector import extract_banner_candidates
 from browser_session import BrowserSession
@@ -16,19 +24,21 @@ def _result_fields(r: CloseResult) -> dict:
     return {"success": r.success, "action": r.action, "selector": r.selector, "attempts": r.attempts}
 
 
-async def close_cookies(session: BrowserSession, url: str, site_name: str) -> CloseResult:
+async def close_cookies_in_session(
+    session: BrowserSession,
+    log_dir: Path,
+) -> CloseResult:
     """
-    Navigate to url and attempt to close the cookie banner.
-    Persists an audit log under logs/<timestamp>_<site_name>/.
-    Returns a CloseResult describing the outcome.
+    Close the cookie banner on the currently loaded page.
+
+    Does not navigate — assumes the caller already loaded the page.
+    Appends events to log_dir/trace.jsonl and saves snapshots/llm_calls
+    into the same log_dir, making all logs inspectable in one place.
     """
-    logger = SessionLogger(site_name)
-    started_at = logger.now()
+    logger = SessionLogger(log_dir)   # reuses existing dir; counters reset to 0
     t0 = time.monotonic()
     total_cost = 0.0
 
-    # Track the last successful click so a false-positive re-detection in a
-    # subsequent verification cycle does not overwrite the real outcome.
     last_click_selector: str | None = None
     last_click_selector_type: str | None = None
     last_click_rationale: str | None = None
@@ -41,18 +51,12 @@ async def close_cookies(session: BrowserSession, url: str, site_name: str) -> Cl
             log_dir=str(logger.log_dir),
             **kwargs,
         )
-        logger.log("result", **_result_fields(r))
-        logger.write_summary(r, site_name, url, started_at)
+        logger.log("cookie_closer_result", **_result_fields(r))
         return r
-
-    logger.log("navigate", url=url)
-    nav_t0 = time.monotonic()
-    await session.navigate(url)
-    logger.log("navigate_complete", url=url, duration_ms=int((time.monotonic() - nav_t0) * 1000))
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         html = await session.get_html()
-        label = "initial" if attempt == 1 else f"attempt_{attempt}_start"
+        label = "cc_initial" if attempt == 1 else f"cc_attempt_{attempt}"
         snap = logger.save_snapshot(html, label)
         logger.log("html_captured", snapshot_file=snap, size_bytes=len(html.encode("utf-8")))
 
@@ -61,7 +65,6 @@ async def close_cookies(session: BrowserSession, url: str, site_name: str) -> Cl
         if not candidates:
             logger.log("banner_not_detected", attempt=attempt)
             if last_click_selector:
-                # A click was performed in a prior cycle and the banner is now gone.
                 return _make_result(
                     success=True,
                     action="clicked",
@@ -99,7 +102,6 @@ async def close_cookies(session: BrowserSession, url: str, site_name: str) -> Cl
 
         if decision.selector is None:
             if last_click_selector:
-                # LLM finds no button to click — banner must be gone.
                 logger.log("banner_gone_inferred", rationale=decision.rationale, attempt=attempt)
                 return _make_result(
                     success=True,
@@ -127,7 +129,7 @@ async def close_cookies(session: BrowserSession, url: str, site_name: str) -> Cl
             last_click_attempt = attempt
 
             html_after = await session.get_html()
-            snap_after = logger.save_snapshot(html_after, f"after_click_{attempt}")
+            snap_after = logger.save_snapshot(html_after, f"cc_after_click_{attempt}")
             logger.log("html_captured", snapshot_file=snap_after, size_bytes=len(html_after.encode("utf-8")))
 
             remaining = extract_banner_candidates(html_after)
@@ -155,3 +157,30 @@ async def close_cookies(session: BrowserSession, url: str, site_name: str) -> Cl
         attempts=_MAX_ATTEMPTS,
         error=f"Banner still present after {_MAX_ATTEMPTS} attempts",
     )
+
+
+async def close_cookies(
+    url: str,
+    site_name: str,
+    headless: bool = True,
+) -> CloseResult:
+    """
+    Standalone entry point: create a browser session, navigate to *url*,
+    then close the cookie banner.
+
+    Creates its own log directory under logs/<timestamp>_<site_name>/.
+    Returns a CloseResult including the log_dir path.
+    """
+    logger = SessionLogger(site_name)
+    started_at = logger.now()
+
+    logger.log("navigate", url=url)
+    nav_t0 = time.monotonic()
+    async with BrowserSession(headless=headless) as session:
+        await session.navigate(url)
+        logger.log("navigate_complete", url=url,
+                   duration_ms=int((time.monotonic() - nav_t0) * 1000))
+        result = await close_cookies_in_session(session, logger.log_dir)
+
+    logger.write_summary(result, site_name, url, started_at)
+    return result
