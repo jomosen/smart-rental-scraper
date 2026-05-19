@@ -17,7 +17,10 @@ Eres un agente que analiza formularios de búsqueda de sitios de alquiler de coc
 Te paso el HTML del formulario. Tu tarea es identificar cada campo del formulario
 y devolver sus selectores.
 
-Devuelve EXCLUSIVAMENTE un JSON con esta estructura:
+La primera línea de tu respuesta debe empezar con `{`. No uses markdown, no uses
+bloques de código, no uses comillas invertidas. Devuelve únicamente el JSON.
+
+Estructura requerida:
 
 {
   "pickup_location": {
@@ -41,7 +44,6 @@ REGLAS:
 - Prefiere selectores estables: id, name, data-attributes específicos.
 - Evita selectores estructurales frágiles (nth-child, position).
 - El selector debe ser único en el HTML provisto.
-- No añadas markdown, devuelve solo el JSON.
 """
 
 _FIELD_NAMES = [
@@ -67,6 +69,22 @@ class FormFields:
     return_date: IdentifiedField | None
     return_time: IdentifiedField | None
     submit_button: IdentifiedField | None
+
+
+def _parse_json_response(raw: str) -> dict:
+    """Extract a JSON object from *raw*, tolerating markdown code fences."""
+    text = raw.strip()
+    # Strip ```json ... ``` or ``` ... ``` fences
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    # Trim to the outermost { ... } in case of leading/trailing prose
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"No JSON object found in LLM response: {raw[:200]!r}")
+    return json.loads(text[start : end + 1])
 
 
 def _parse_field(data: dict | None) -> IdentifiedField | None:
@@ -99,6 +117,7 @@ async def identify_form_fields(
     response = await client.messages.create(
         model=_MODEL,
         max_tokens=1024,
+        temperature=0,
         system=_SYSTEM,
         messages=[{"role": "user", "content": f"HTML del formulario:\n\n{form_html}"}],
     )
@@ -115,6 +134,6 @@ async def identify_form_fields(
         encoding="utf-8",
     )
 
-    data = json.loads(raw)
+    data = _parse_json_response(raw)
     fields = FormFields(**{name: _parse_field(data.get(name)) for name in _FIELD_NAMES})
     return fields, cost_eur

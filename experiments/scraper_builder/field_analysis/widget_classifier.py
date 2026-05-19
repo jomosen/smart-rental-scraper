@@ -20,6 +20,9 @@ Te paso:
 
 Tu tarea es clasificar qué tipo de widget es este campo.
 
+La primera línea de tu respuesta debe empezar con `{`. No uses markdown, no uses
+bloques de código, no uses comillas invertidas. Devuelve únicamente el JSON.
+
 Tipos posibles:
 - "native_select": un <select> HTML estándar con <option> hijos.
 - "datalist": un <input list="..."> con <datalist>.
@@ -28,7 +31,7 @@ Tipos posibles:
 - "autocomplete": un input que requiere escribir para mostrar sugerencias.
 - "unknown": no se puede determinar.
 
-Devuelve JSON (sin markdown, solo el objeto):
+Estructura requerida:
 {
   "widget_type": "native_select|datalist|custom_dropdown|custom_modal|autocomplete|unknown",
   "options_container_selector": "selector_que_contiene_las_opciones_or_null",
@@ -43,6 +46,20 @@ REGLAS:
   selectores pueden ser null.
 - Prefiere selectores estables: id, data-*, class semántica.
 """
+
+
+def _parse_json_response(raw: str) -> dict:
+    """Extract a JSON object from *raw*, tolerating markdown code fences."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"No JSON object found in LLM response: {raw[:200]!r}")
+    return json.loads(text[start : end + 1])
 
 
 @dataclass
@@ -81,6 +98,7 @@ async def classify_widget(
     response = await client.messages.create(
         model=_MODEL,
         max_tokens=512,
+        temperature=0,
         system=_SYSTEM,
         messages=[{"role": "user", "content": user_content}],
     )
@@ -97,7 +115,7 @@ async def classify_widget(
         encoding="utf-8",
     )
 
-    data = json.loads(raw)
+    data = _parse_json_response(raw)
     widget = WidgetInfo(
         widget_type=data.get("widget_type", "unknown"),
         options_container_selector=data.get("options_container_selector"),

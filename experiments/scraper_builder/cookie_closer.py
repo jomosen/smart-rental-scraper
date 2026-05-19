@@ -153,13 +153,12 @@ async def close_cookies_in_session(
             last_click_rationale = decision.rationale
             last_click_attempt = attempt
 
-            html_after = await session.get_html()
-            snap_after = logger.save_snapshot(html_after, f"cc_after_click_{attempt}")
-            logger.log("html_captured", snapshot_file=snap_after, size_bytes=len(html_after.encode("utf-8")))
-
-            remaining = extract_banner_candidates(html_after)
-            if not remaining:
-                logger.log("banner_cleared", attempt=attempt)
+            # Check visibility of the clicked element rather than re-running the
+            # heuristic (which produces false positives from footer/layout nodes).
+            await asyncio.sleep(0.5)
+            still_visible = await session.is_visible(decision.selector, decision.selector_type)
+            if not still_visible:
+                logger.log("banner_cleared_visibility_check", attempt=attempt)
                 return _make_result(
                     success=True,
                     action="clicked",
@@ -168,11 +167,11 @@ async def close_cookies_in_session(
                     rationale=decision.rationale,
                     attempts=attempt,
                 )
-            logger.log(
-                "banner_still_present_after_click",
-                attempt=attempt,
-                remaining_candidates=len(remaining),
-            )
+
+            html_after = await session.get_html()
+            snap_after = logger.save_snapshot(html_after, f"cc_after_click_{attempt}")
+            logger.log("html_captured", snapshot_file=snap_after, size_bytes=len(html_after.encode("utf-8")))
+            logger.log("banner_still_visible_after_click", attempt=attempt)
         else:
             logger.log("click_failed", selector=decision.selector, attempt=attempt)
 

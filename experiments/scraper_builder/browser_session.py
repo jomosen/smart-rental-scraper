@@ -54,6 +54,61 @@ class BrowserSession:
     async def get_html(self) -> str:
         return await self.page.content()
 
+    async def is_visible(self, selector: str, selector_type: str) -> bool:
+        """Return True if the element matching *selector* is currently visible."""
+        try:
+            if selector_type == "css":
+                locator = self.page.locator(selector).first
+            else:
+                locator = self.page.locator(f"xpath={selector}").first
+            return await locator.is_visible()
+        except Exception:
+            return False
+
+    async def type_text(self, selector: str, text: str, selector_type: str = "css") -> None:
+        """Click, clear, then type *text* character-by-character (fires key events)."""
+        if selector_type == "css":
+            locator = self.page.locator(selector).first
+        else:
+            locator = self.page.locator(f"xpath={selector}").first
+        await locator.click()
+        await locator.fill("")
+        await locator.press_sequentially(text, delay=50)
+
+    async def get_inner_html(self, selector: str) -> str:
+        """Return the inner HTML of the first element matching *selector*."""
+        try:
+            return await self.page.locator(selector).first.inner_html(timeout=3_000)
+        except Exception:
+            return ""
+
+    async def get_all_texts(self, selector: str) -> list[str]:
+        """Return text contents of all elements matching *selector*."""
+        try:
+            return await self.page.locator(selector).all_text_contents()
+        except Exception:
+            return []
+
+    async def click_option_by_text(
+        self, container: str, item_selector: str, text: str
+    ) -> bool:
+        """Click the first item inside *container* whose text matches *text*."""
+        try:
+            loc = (
+                self.page.locator(container)
+                .locator(item_selector)
+                .filter(has_text=text)
+                .first
+            )
+            await loc.wait_for(state="visible", timeout=3_000)
+            await loc.click(timeout=3_000)
+            return True
+        except Exception:
+            return False
+
+    async def wait_ms(self, ms: int) -> None:
+        await asyncio.sleep(ms / 1000)
+
     async def click_selector(self, selector: str, selector_type: str) -> bool:
         """Click element by CSS or XPath selector. Returns True on success."""
         try:
