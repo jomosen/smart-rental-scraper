@@ -92,6 +92,43 @@ def save_snapshot(log_dir: Path, filename: str, snapshot) -> None:
     )
 
 
+async def _read_field_display_value(
+    session: BrowserSession,
+    field: IdentifiedField,
+) -> str | None:
+    """
+    Read the currently displayed value of a form field.
+
+    Tries input_value() first (works for native inputs and selects).
+    Falls back to reading the sibling display element inside the parent
+    container, which is the react-select pattern where the selected text
+    lives in a div rather than the hidden input's .value.
+    """
+    try:
+        sel = f"xpath={field.selector}" if field.selector_type == "xpath" else field.selector
+        loc = session.page.locator(sel).first
+
+        raw = await loc.input_value(timeout=1_500)
+        if raw and raw.strip():
+            return raw.strip()
+
+        # Fallback for react-select: the display text is in a sibling div
+        # inside the value container (el.parentElement).
+        text: str = await loc.evaluate("""
+        el => {
+            const parent = el.parentElement;
+            if (!parent) return '';
+            const display = parent.querySelector(
+                '[class*="singleValue"], [class*="SingleValue"], [class*="single-value"]'
+            );
+            return display ? display.textContent.trim() : '';
+        }
+        """)
+        return text.strip() if text and text.strip() else None
+    except Exception:
+        return None
+
+
 async def is_field_at_target_date(
     session: BrowserSession,
     field: IdentifiedField,
@@ -113,3 +150,27 @@ async def is_field_at_target_date(
         return False
     parsed = parse_date(raw_value, date_format)
     return parsed == target
+
+
+async def is_field_at_target_time(
+    session: BrowserSession,
+    field: IdentifiedField,
+    target_time: str,
+) -> bool:
+    """
+    Read the current displayed value of a time field and check whether it
+    represents *target_time*, normalizing both sides with normalize_time so
+    "10:00", "10:00 AM", and "10h" are all treated as the same time.
+
+    Returns False if the field cannot be read or the value cannot be parsed.
+    """
+    from filling.time_utils import normalize_time
+
+    raw_value = await _read_field_display_value(session, field)
+    if not raw_value:
+        return False
+    target_norm = normalize_time(target_time)
+    field_norm = normalize_time(raw_value)
+    if target_norm is None:
+        return False
+    return field_norm == target_norm

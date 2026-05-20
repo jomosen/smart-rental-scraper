@@ -76,10 +76,11 @@ async def classify_widget(
     page_html_after: str,
     log_dir: Path,
     client: AsyncAnthropic,
+    label: str = "002_widget_classification",
 ) -> tuple[WidgetInfo, float]:
     """
     Ask the LLM to classify the widget that appeared after clicking a field.
-    Saves call_002_widget_classification_input/output to log_dir/llm_calls/.
+    Saves call_{label}_input/output to log_dir/llm_calls/.
     Returns (WidgetInfo, cost_eur).
     """
     llm_calls = log_dir / "llm_calls"
@@ -91,7 +92,7 @@ async def classify_widget(
         "=== HTML DE LA PÁGINA DESPUÉS DEL CLICK ===\n\n"
         f"{page_html_after}"
     )
-    (llm_calls / "call_002_widget_classification_input.html").write_text(
+    (llm_calls / f"call_{label}_input.html").write_text(
         user_content, encoding="utf-8"
     )
 
@@ -108,7 +109,7 @@ async def classify_widget(
     tokens_out = response.usage.output_tokens
     cost_eur = tokens_in * _COST_IN + tokens_out * _COST_OUT
 
-    (llm_calls / "call_002_widget_classification_output.json").write_text(
+    (llm_calls / f"call_{label}_output.json").write_text(
         json.dumps({"raw_response": raw, "tokens_input": tokens_in,
                     "tokens_output": tokens_out, "cost_eur": cost_eur},
                    indent=2, ensure_ascii=False),

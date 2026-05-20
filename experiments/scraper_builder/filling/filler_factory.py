@@ -10,16 +10,24 @@ class UnsupportedWidgetError(Exception):
     pass
 
 
-def get_filler_for_widget(widget: WidgetInfo) -> LocationFiller:
+def get_filler_for_widget(
+    widget: WidgetInfo,
+    match_mode: str = "fuzzy",
+) -> LocationFiller:
     """
     Return the appropriate filler for *widget*.
+
+    *match_mode* is forwarded to AutocompleteFiller:
+      "fuzzy" (default) — rapidfuzz, for locations.
+      "exact"           — normalized exact match, for times and discrete values.
+
     Raises UnsupportedWidgetError when no implementation exists yet.
     """
     # Any searchable widget uses the autocomplete strategy regardless of whether
     # the LLM classified it as "autocomplete" or "custom_dropdown" — the behavioral
     # contract is the same: click to focus, type to filter, click option.
     if widget.is_searchable:
-        return AutocompleteFiller()
+        return AutocompleteFiller(match_mode=match_mode)
 
     # TODO: add more fillers as needed
     # non-searchable "custom_dropdown" → CustomDropdownFiller (click-only)
