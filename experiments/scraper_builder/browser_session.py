@@ -89,17 +89,24 @@ class BrowserSession:
         except Exception:
             return []
 
+    async def click_nth(self, selector: str, index: int) -> bool:
+        """Click the Nth element (0-based) matching *selector*."""
+        try:
+            loc = self.page.locator(selector).nth(index)
+            await loc.wait_for(state="visible", timeout=3_000)
+            await loc.click(timeout=3_000)
+            return True
+        except Exception:
+            return False
+
     async def click_option_by_text(
         self, container: str, item_selector: str, text: str
     ) -> bool:
-        """Click the first item inside *container* whose text matches *text*."""
+        """Click the first item matching *item_selector* whose text contains *text*.
+        Uses item_selector globally (not chained inside container) to avoid
+        CSS scoping issues with absolute selector paths."""
         try:
-            loc = (
-                self.page.locator(container)
-                .locator(item_selector)
-                .filter(has_text=text)
-                .first
-            )
+            loc = self.page.locator(item_selector).filter(has_text=text).first
             await loc.wait_for(state="visible", timeout=3_000)
             await loc.click(timeout=3_000)
             return True

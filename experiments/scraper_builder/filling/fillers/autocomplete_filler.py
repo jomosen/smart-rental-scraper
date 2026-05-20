@@ -105,14 +105,18 @@ class AutocompleteFiller(LocationFiller):
                 f"in {len(options_texts)} options. Sample: {sample}"
             )
 
-        matched_text, score, _ = best
+        matched_text, score, idx = best
         logger.log("filler_match", matched=matched_text, score=round(score, 1),
-                   candidate_count=len(options_texts))
+                   idx=idx, candidate_count=len(options_texts))
 
-        # Step 5: click the matched option
-        clicked_opt = await session.click_option_by_text(container, item_sel, matched_text)
+        # Step 5: click the matched option by index (same query as get_all_texts,
+        # so index is guaranteed to correspond to the right element).
+        clicked_opt = await session.click_nth(item_sel, idx)
         if not clicked_opt:
-            return _fail(f"Could not click option {matched_text!r}")
+            # Fallback: text-based click in case index drifted
+            clicked_opt = await session.click_option_by_text(container, item_sel, matched_text)
+        if not clicked_opt:
+            return _fail(f"Could not click option {matched_text!r} (idx={idx})")
         await session.wait_ms(1_000)
         logger.log("filler_clicked_option", text=matched_text)
 
