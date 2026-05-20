@@ -1,11 +1,13 @@
-"""Provider-agnostic form state capture and diff."""
+"""Provider-agnostic form state capture, diff, and field verification."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict
+from datetime import date as _date
 from pathlib import Path
 
 from browser_session import BrowserSession
+from field_analysis.field_identifier import IdentifiedField
 
 _JS_CAPTURE = """
 (formSelector) => {
@@ -88,3 +90,26 @@ def save_snapshot(log_dir: Path, filename: str, snapshot) -> None:
         json.dumps(asdict(snapshot), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+async def is_field_at_target_date(
+    session: BrowserSession,
+    field: IdentifiedField,
+    target: _date,
+    date_format: str | None,
+) -> bool:
+    """
+    Read the current value of *field* and check whether it represents *target*.
+
+    Normalises format before comparing date objects so DD/MM/YYYY and
+    YYYY-MM-DD are treated as the same date. Returns False if the field
+    cannot be read or its value cannot be parsed.
+    """
+    from filling.date_utils import parse_date
+    try:
+        sel = f"xpath={field.selector}" if field.selector_type == "xpath" else field.selector
+        raw_value = await session.page.locator(sel).first.input_value(timeout=2_000)
+    except Exception:
+        return False
+    parsed = parse_date(raw_value, date_format)
+    return parsed == target

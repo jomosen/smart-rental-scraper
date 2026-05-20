@@ -17,11 +17,11 @@ from date_analysis.date_widget_classifier import DateWidgetInfo, classify_date_w
 from field_analysis.field_identifier import FormFields, identify_form_fields
 from filling.base_filler import FillResult
 from filling.date_filler_factory import UnsupportedDateWidgetError, get_date_filler
-from filling.fillers.date_calendar_filler import DateCalendarFiller
 from filling.form_state import (
     FormStateDiff,
     capture_form_state,
     compare_states,
+    is_field_at_target_date,
     save_snapshot as save_state_snapshot,
 )
 from form_capture.form_capturer import capture_search_form
@@ -106,10 +106,11 @@ async def fill_dates_experiment(
     """
     Full flow:
     1. Navigate + close cookies + identify fields.
-    2. Click pickup_date → classify date widget → fill pickup → diff.
-    3. If is_range_calendar and calendar still open, reuse it for return;
-       otherwise click return_date → classify → fill return → diff.
-    4. success = both diffs have_changes.
+    2. Click pickup_date -> classify date widget -> fill pickup -> diff.
+    3. Check if return field already holds the target date (range calendar
+       auto-fill). If so, skip return fill and record strategy="range_calendar_autofill".
+       Otherwise click return_date -> classify -> fill return -> diff.
+    4. Verify final form state: both fields must parse to their target dates.
     """
     t0 = time.monotonic()
     total_cost = 0.0
@@ -240,27 +241,40 @@ async def fill_dates_experiment(
 
         # ── 5. RETURN DATE ────────────────────────────────────────────────────
         return_field = fields.return_date
-        return_date_widget = pickup_date_widget  # default: reuse if range calendar
 
-        # Check if the calendar from pickup is still open (range calendar)
-        reuse_range_calendar = False
-        if (pickup_date_widget.is_range_calendar
-                and pickup_date_widget.calendar_container_selector):
-            reuse_range_calendar = await session.is_visible(
-                pickup_date_widget.calendar_container_selector, "css"
+        # Check if the return field already holds the target date.
+        # A range calendar fills both dates when pickup is selected, so by the
+        # time we get here the return field may already be correct.
+        return_already_set = False
+        if return_field is not None:
+            return_already_set = await is_field_at_target_date(
+                session, return_field, return_target, pickup_date_widget.date_format
             )
+            _log(log_dir, "date_return_pre_check",
+                 already_set=return_already_set,
+                 target=return_target.isoformat())
 
-        if reuse_range_calendar:
-            _log(log_dir, "date_return_reused_range_calendar",
-                 container=pickup_date_widget.calendar_container_selector)
-            # Use same widget info; DateCalendarFiller will detect calendar is open
-            return_filler = DateCalendarFiller()
-            # Use return_field if identified, else fall back to pickup_field
-            effective_return_field = return_field or pickup_field
+        if return_already_set:
+            # Range calendar auto-filled the return date — no action needed.
+            _log(log_dir, "date_return_already_set_by_range_calendar",
+                 target=return_target.isoformat())
+            return_result = FillResult(
+                success=True,
+                strategy_used="range_calendar_autofill",
+                target_value=return_target.isoformat(),
+                matched_option=None,
+                state_changes=None,
+                duration_seconds=0.0,
+                error=None,
+            )
+            return_diff = None
+            effective_return_field = return_field
+            return_date_widget = pickup_date_widget  # same format for final check
+
         else:
             if return_field is None:
                 return _fail(
-                    "return_date field not identified and range calendar not available",
+                    "return_date field not identified and return date not auto-set",
                     pickup_result=pickup_result, pickup_diff=pickup_diff,
                 )
 
@@ -297,34 +311,54 @@ async def fill_dates_experiment(
                              pickup_diff=pickup_diff)
 
             effective_return_field = return_field
+            _log(log_dir, "return_filler_selected", strategy=return_filler.strategy_name)
 
-        _log(log_dir, "return_filler_selected", strategy=return_filler.strategy_name)
+            # Capture state BEFORE return fill
+            state_before_return = await capture_form_state(session, form_selector)
+            save_state_snapshot(log_dir, "date_return_state_before.json", state_before_return)
 
-        # Capture state BEFORE return fill
-        state_before_return = await capture_form_state(session, form_selector)
-        save_state_snapshot(log_dir, "date_return_state_before.json", state_before_return)
+            return_result = await return_filler.fill(
+                session, effective_return_field, return_date_widget, return_target, filler_logger
+            )
 
-        return_result = await return_filler.fill(
-            session, effective_return_field, return_date_widget, return_target, filler_logger
+            state_after_return = await capture_form_state(session, form_selector)
+            save_state_snapshot(log_dir, "date_return_state_after.json", state_after_return)
+            return_diff = compare_states(state_before_return, state_after_return)
+            save_state_snapshot(log_dir, "date_return_state_diff.json", return_diff)
+            _log(log_dir, "date_return_diff",
+                 has_changes=return_diff.has_changes,
+                 changed_count=len(return_diff.changed_inputs))
+
+        # ── 6. Verify final state ─────────────────────────────────────────────
+        # Check both fields actually hold their target dates, regardless of which
+        # intermediate diffs reported changes.
+        final_pickup_ok = await is_field_at_target_date(
+            session, pickup_field, pickup_target, pickup_date_widget.date_format
         )
-
-        state_after_return = await capture_form_state(session, form_selector)
-        save_state_snapshot(log_dir, "date_return_state_after.json", state_after_return)
-        return_diff = compare_states(state_before_return, state_after_return)
-        save_state_snapshot(log_dir, "date_return_state_diff.json", return_diff)
-        _log(log_dir, "date_return_diff",
-             has_changes=return_diff.has_changes,
-             changed_count=len(return_diff.changed_inputs))
-
-        success = pickup_diff.has_changes and return_diff.has_changes and return_result.success
-        error = None if success else (
-            return_result.error or "One or both diffs reported no changes"
+        final_return_ok = await is_field_at_target_date(
+            session, effective_return_field, return_target, return_date_widget.date_format
         )
+        _log(log_dir, "date_final_state_check",
+             final_pickup_ok=final_pickup_ok, final_return_ok=final_return_ok)
+
+        success = return_result.success and final_pickup_ok and final_return_ok
+
+        if success:
+            error = None
+        elif not return_result.success:
+            error = return_result.error
+        elif not final_pickup_ok:
+            error = f"Pickup date not in final form state (expected {pickup_target})"
+        elif not final_return_ok:
+            error = f"Return date not in final form state (expected {return_target})"
+        else:
+            error = "Unknown failure"
 
         _log(log_dir, "result",
              success=success,
              pickup_has_changes=pickup_diff.has_changes,
-             return_has_changes=return_diff.has_changes,
+             return_has_changes=return_diff.has_changes if return_diff else None,
+             return_strategy=return_result.strategy_used,
              cost_eur=total_cost)
 
         return DateFillExperimentReport(

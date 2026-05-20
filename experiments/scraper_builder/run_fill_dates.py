@@ -9,6 +9,8 @@ from pathlib import Path
 from date_filler_runner import DateFillExperimentReport, fill_dates_experiment
 from location_explorer import create_log_dir
 
+from dotenv import load_dotenv
+load_dotenv()
 
 TEST_CASES = [
     ("centauro", "https://www.centauro.net"),

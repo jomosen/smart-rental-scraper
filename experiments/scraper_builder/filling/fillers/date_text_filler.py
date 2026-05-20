@@ -8,21 +8,8 @@ from browser_session import BrowserSession
 from date_analysis.date_widget_classifier import DateWidgetInfo
 from field_analysis.field_identifier import IdentifiedField
 from filling.base_filler import DateFiller, FillResult
+from filling.date_utils import format_date
 from session_logger import SessionLogger
-
-
-def format_date(d: date, fmt: str | None) -> str:
-    """
-    Format *d* using a declarative format string such as "DD/MM/YYYY".
-    Supported tokens: DD, MM, YYYY, YY. Defaults to "DD/MM/YYYY".
-    """
-    fmt = fmt or "DD/MM/YYYY"
-    result = fmt
-    result = result.replace("YYYY", f"{d.year:04d}")
-    result = result.replace("YY", f"{d.year % 100:02d}")
-    result = result.replace("MM", f"{d.month:02d}")
-    result = result.replace("DD", f"{d.day:02d}")
-    return result
 
 
 class DateTextFiller(DateFiller):
