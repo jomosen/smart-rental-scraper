@@ -36,7 +36,7 @@ def _print_report(report: FillExperimentReport) -> None:
         for key, (before, after) in diff.changed_inputs.items():
             before_display = f"{before!r:.40}" if before else "''"
             after_display = f"{after!r:.40}" if after else "''"
-            print(f"    {key}: {before_display} → {after_display}")
+            print(f"    {key}: {before_display} -> {after_display}")
 
     if report.error:
         print(f"  Error: {report.error}")
@@ -53,7 +53,7 @@ async def main() -> None:
     for name, url, default_target in TEST_CASES:
         target = args.target or default_target
         log_dir = create_fill_log_dir(name)
-        print(f"\n=== {name} → target: {target!r} ===")
+        print(f"\n=== {name} -> target: {target!r} ===")
         print(f"  Logs: {log_dir}")
 
         try:

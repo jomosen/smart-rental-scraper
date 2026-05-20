@@ -15,17 +15,20 @@ def get_filler_for_widget(widget: WidgetInfo) -> LocationFiller:
     Return the appropriate filler for *widget*.
     Raises UnsupportedWidgetError when no implementation exists yet.
     """
-    if widget.widget_type == "autocomplete":
+    # Any searchable widget uses the autocomplete strategy regardless of whether
+    # the LLM classified it as "autocomplete" or "custom_dropdown" — the behavioral
+    # contract is the same: click to focus, type to filter, click option.
+    if widget.is_searchable:
         return AutocompleteFiller()
 
     # TODO: add more fillers as needed
-    # "custom_dropdown" → CustomDropdownFiller (with/without searchable)
-    # "native_select"   → NativeSelectFiller
-    # "custom_modal"    → CustomModalFiller
-    # "datalist"        → DatalistFiller
+    # non-searchable "custom_dropdown" → CustomDropdownFiller (click-only)
+    # "native_select"                  → NativeSelectFiller
+    # "custom_modal"                   → CustomModalFiller
+    # "datalist"                       → DatalistFiller
 
     raise UnsupportedWidgetError(
-        f"No filler implemented for widget_type={widget.widget_type!r}. "
-        f"Widget details: is_searchable={widget.is_searchable}, "
+        f"No filler implemented for widget_type={widget.widget_type!r} "
+        f"with is_searchable=False. "
         f"options_container={widget.options_container_selector!r}"
     )
