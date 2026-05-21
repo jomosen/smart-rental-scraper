@@ -14,6 +14,7 @@ from browser_session import BrowserSession
 from cookie_closer import close_cookies_in_session
 from field_analysis.field_identifier import identify_form_fields
 from field_analysis.widget_classifier import classify_widget
+from field_analysis.widget_opener import open_widget_reliably
 from filling.base_filler import FillResult
 from filling.filler_factory import UnsupportedWidgetError, get_filler_for_widget
 from filling.form_state import is_field_at_target_time
@@ -167,14 +168,20 @@ async def fill_times_experiment(
         # ── 4. PICKUP TIME ────────────────────────────────────────────────────
         pickup_field = fields.pickup_time
 
-        _log(log_dir, "time_pickup_field_clicked",
+        _log(log_dir, "time_pickup_field_opening",
              selector=pickup_field.selector, type=pickup_field.element_kind)
-        await session.click_selector(pickup_field.selector, pickup_field.selector_type)
-        await session.wait_ms(800)
+        open_result_pickup = await open_widget_reliably(
+            session, pickup_field, filler_logger, label="time_pickup"
+        )
+        _snap(log_dir, "time_pickup_after_click.html", open_result_pickup.html_after)
+        _log(log_dir, "time_pickup_field_opened",
+             opened=open_result_pickup.opened, method=open_result_pickup.method,
+             options=open_result_pickup.options_detected)
 
-        html_after_pickup_click = await session.get_html()
-        _snap(log_dir, "time_pickup_after_click.html", html_after_pickup_click)
-        cleaned_after_pickup = clean_html_for_llm(html_after_pickup_click)
+        if not open_result_pickup.opened:
+            return _fail(f"Could not open pickup_time widget: {open_result_pickup.error}")
+
+        cleaned_after_pickup = clean_html_for_llm(open_result_pickup.html_after)
 
         field_html_before_pickup = _extract_element_html(
             cleaned_form, pickup_field.selector, pickup_field.selector_type
@@ -213,14 +220,21 @@ async def fill_times_experiment(
         # ── 5. DROPOFF TIME ───────────────────────────────────────────────────
         dropoff_field = fields.return_time
 
-        _log(log_dir, "time_dropoff_field_clicked",
+        _log(log_dir, "time_dropoff_field_opening",
              selector=dropoff_field.selector, type=dropoff_field.element_kind)
-        await session.click_selector(dropoff_field.selector, dropoff_field.selector_type)
-        await session.wait_ms(800)
+        open_result_dropoff = await open_widget_reliably(
+            session, dropoff_field, filler_logger, label="time_dropoff"
+        )
+        _snap(log_dir, "time_dropoff_after_click.html", open_result_dropoff.html_after)
+        _log(log_dir, "time_dropoff_field_opened",
+             opened=open_result_dropoff.opened, method=open_result_dropoff.method,
+             options=open_result_dropoff.options_detected)
 
-        html_after_dropoff_click = await session.get_html()
-        _snap(log_dir, "time_dropoff_after_click.html", html_after_dropoff_click)
-        cleaned_after_dropoff = clean_html_for_llm(html_after_dropoff_click)
+        if not open_result_dropoff.opened:
+            return _fail(f"Could not open dropoff_time widget: {open_result_dropoff.error}",
+                         pickup_result=pickup_result)
+
+        cleaned_after_dropoff = clean_html_for_llm(open_result_dropoff.html_after)
 
         field_html_before_dropoff = _extract_element_html(
             cleaned_form, dropoff_field.selector, dropoff_field.selector_type

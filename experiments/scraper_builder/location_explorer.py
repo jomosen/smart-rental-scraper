@@ -1,7 +1,6 @@
 """Orchestrator: navigate → close cookies → find form → identify fields → classify location widget."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -18,6 +17,8 @@ from form_capture.form_capturer import capture_search_form
 from form_capture.html_cleaner import clean_html_for_llm
 from field_analysis.field_identifier import FormFields, identify_form_fields
 from field_analysis.widget_classifier import WidgetInfo, classify_widget
+from field_analysis.widget_opener import open_widget_reliably
+from session_logger import SessionLogger
 
 _BASE_LOGS = Path(__file__).parent / "logs"
 
@@ -153,19 +154,36 @@ async def explore_location_field_in_session(
             log_dir=str(log_dir),
         )
 
-    # 5. Click pickup_location
+    # 5-6. Open location widget reliably + capture HTML when confirmed open
     pickup = fields.pickup_location
-    _log(log_dir, "click_location_field",
+    _log(log_dir, "opening_location_widget",
          selector=pickup.selector, selector_type=pickup.selector_type)
-    await session.click_selector(pickup.selector, pickup.selector_type)
-    await asyncio.sleep(1.5)
 
-    # 6. Capture post-click HTML
-    html_after = await session.get_html()
-    _snap(log_dir, "04_after_click.html", html_after)
-    cleaned_after = clean_html_for_llm(html_after)
+    explorer_logger = SessionLogger(log_dir)
+    open_result = await open_widget_reliably(
+        session, pickup, explorer_logger, label="location"
+    )
+
+    _snap(log_dir, "04_after_click.html", open_result.html_after)
+    _log(log_dir, "location_widget_opened",
+         opened=open_result.opened, method=open_result.method,
+         aria_expanded=open_result.aria_expanded_after,
+         options_detected=open_result.options_detected)
+
+    if not open_result.opened:
+        return LocationExplorationReport(
+            success=False, site_name=site_name, site_url=url,
+            form_html_size=raw_size, form_html_cleaned_size=clean_size,
+            all_fields=fields, location_widget=None,
+            error=f"Could not open location widget: {open_result.error}",
+            duration_seconds=time.monotonic() - t0,
+            cost_estimate_eur=total_cost, llm_calls=n_llm_calls,
+            log_dir=str(log_dir),
+        )
+
+    cleaned_after = clean_html_for_llm(open_result.html_after)
     _log(log_dir, "html_captured_after_click",
-         size_bytes=len(html_after.encode("utf-8")))
+         size_bytes=len(open_result.html_after.encode("utf-8")))
 
     # 7. Classify widget
     field_html_before = _extract_element_html(

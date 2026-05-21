@@ -19,6 +19,7 @@ from rapidfuzz import process, fuzz
 from browser_session import BrowserSession
 from field_analysis.field_identifier import IdentifiedField
 from field_analysis.widget_classifier import WidgetInfo
+from field_analysis.widget_opener import open_widget_reliably
 from filling.base_filler import FillResult, LocationFiller
 from session_logger import SessionLogger
 
@@ -95,12 +96,14 @@ class AutocompleteFiller(LocationFiller):
         logger.log("filler_started", strategy=self.strategy_name,
                    target=target_value, match_mode=self.match_mode)
 
-        # Step 1: click to open/focus dropdown
-        clicked = await session.click_selector(field.selector, field.selector_type)
-        if not clicked:
-            return _fail(f"Could not click field selector: {field.selector!r}")
-        await session.wait_ms(1_500)
-        logger.log("filler_opened_dropdown", selector=field.selector)
+        # Step 1: open dropdown reliably (polling-based, not a blind fixed wait)
+        open_result = await open_widget_reliably(
+            session, field, logger, label="autocomplete"
+        )
+        if not open_result.opened:
+            return _fail(f"Could not open dropdown: {open_result.error}")
+        logger.log("filler_opened_dropdown",
+                   method=open_result.method, options=open_result.options_detected)
 
         # Step 2: type target value (character-by-character to trigger onChange)
         await session.type_text(field.selector, target_value, field.selector_type)
