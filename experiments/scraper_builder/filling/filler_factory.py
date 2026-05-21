@@ -4,6 +4,7 @@ from __future__ import annotations
 from field_analysis.widget_classifier import WidgetInfo
 from filling.base_filler import LocationFiller
 from filling.fillers.autocomplete_filler import AutocompleteFiller
+from filling.fillers.custom_dropdown_filler import CustomDropdownFiller
 
 
 class UnsupportedWidgetError(Exception):
@@ -29,11 +30,14 @@ def get_filler_for_widget(
     if widget.is_searchable:
         return AutocompleteFiller(match_mode=match_mode)
 
+    # Non-searchable widgets: open → read full list → match → scroll if virtualized
+    if widget.widget_type in ("custom_dropdown", "autocomplete", "unknown"):
+        return CustomDropdownFiller(match_mode=match_mode)
+
     # TODO: add more fillers as needed
-    # non-searchable "custom_dropdown" → CustomDropdownFiller (click-only)
-    # "native_select"                  → NativeSelectFiller
-    # "custom_modal"                   → CustomModalFiller
-    # "datalist"                       → DatalistFiller
+    # "native_select" → NativeSelectFiller
+    # "custom_modal"  → CustomModalFiller
+    # "datalist"      → DatalistFiller
 
     raise UnsupportedWidgetError(
         f"No filler implemented for widget_type={widget.widget_type!r} "

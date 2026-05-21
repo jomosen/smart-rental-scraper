@@ -116,6 +116,19 @@ class BrowserSession:
     async def wait_ms(self, ms: int) -> None:
         await asyncio.sleep(ms / 1000)
 
+    async def scroll_container(self, selector: str, delta_y: int = 200) -> None:
+        """Scroll a container element down by *delta_y* pixels (not the page)."""
+        try:
+            await self.page.evaluate(
+                """([sel, dy]) => {
+                    const el = document.querySelector(sel);
+                    if (el) el.scrollTop += dy;
+                }""",
+                [selector, delta_y],
+            )
+        except Exception:
+            pass
+
     async def click_selector(self, selector: str, selector_type: str) -> bool:
         """Click element by CSS or XPath selector. Returns True on success."""
         try:
