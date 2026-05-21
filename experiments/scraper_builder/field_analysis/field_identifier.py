@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dc_replace
 from pathlib import Path
 
 from anthropic import AsyncAnthropic
+from bs4 import BeautifulSoup
 
 _MODEL = "claude-sonnet-4-6"
 _COST_IN = 3.00 * 0.90 / 1_000_000
@@ -37,7 +38,22 @@ Estructura requerida:
   "submit_button": {...} | null
 }
 
-REGLAS:
+REGLA CRÍTICA — elemento interactivo, no el de almacenamiento:
+Muchos widgets modernos (combobox, autocomplete, dropdowns custom) tienen
+DOS elementos en su contenedor:
+  1. Un elemento VISIBLE e interactivo (con role="combobox", o un <input>
+     visible, o un <button>) con el que el usuario hace click y escribe.
+  2. Un <input type="hidden"> que solo ALMACENA el valor para el formulario.
+
+SIEMPRE identifica el elemento INTERACTIVO (el visible), NUNCA el
+input[type="hidden"]. El hidden no se puede clicar ni abrir.
+
+Si el elemento interactivo no tiene id/name pero el hidden sí, prefiere
+igualmente el interactivo: usa role, aria-label, o su posición dentro del
+contenedor. Por ejemplo, prefiere `#container [role='combobox']` antes que
+`input[name='x'][type='hidden']`.
+
+REGLAS ADICIONALES:
 - "return_location" suele ser null si el sitio asume return = pickup.
 - "submit_button" es el botón que ejecuta la búsqueda.
 - Si un campo no se identifica con claridad, devolver null para ese campo.
@@ -71,15 +87,143 @@ class FormFields:
     submit_button: IdentifiedField | None
 
 
+# ── Post-processing: hidden-selector safety net ───────────────────────────────
+
+def _is_selector_hidden(html: str, selector: str, selector_type: str) -> bool:
+    """Return True if *selector* resolves to an input[type='hidden'] element."""
+    if selector_type != "css":
+        return False
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        el = soup.select_one(selector)
+        if el is None:
+            return False
+        return el.get("type", "").lower() == "hidden"
+    except Exception:
+        return False
+
+
+def _selector_for_element(el, container) -> str:
+    """Build the most stable CSS selector for *el* within *container*."""
+    if el.get("id"):
+        return f"#{el['id']}"
+    role = el.get("role", "")
+    aria_label = el.get("aria-label", "")
+    if role and aria_label:
+        escaped = aria_label.replace('"', '\\"')
+        return f"[role='{role}'][aria-label=\"{escaped}\"]"
+    if role:
+        return f"[role='{role}']"
+    if aria_label:
+        escaped = aria_label.replace('"', '\\"')
+        return f"[aria-label=\"{escaped}\"]"
+    container_id = container.get("id", "")
+    if container_id:
+        return f"#{container_id} {el.name}"
+    return el.name
+
+
+def _find_interactive_replacement(
+    html: str, selector: str
+) -> tuple[str, str] | None:
+    """
+    Find the interactive element in the same container as *selector*.
+    Searches parent then grandparent, prioritising role=combobox >
+    visible input > button/select. Returns (new_selector, element_kind) or None.
+    """
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        hidden_el = soup.select_one(selector)
+        if hidden_el is None:
+            return None
+
+        ancestors = []
+        p = hidden_el.parent
+        if p:
+            ancestors.append(p)
+            if p.parent:
+                ancestors.append(p.parent)
+
+        for container in ancestors:
+            for candidate in container.find_all(True):
+                if candidate is hidden_el:
+                    continue
+                tag = getattr(candidate, "name", None)
+                if not tag:
+                    continue
+                typ = candidate.get("type", "").lower()
+                role = candidate.get("role", "")
+
+                if tag == "input" and typ == "hidden":
+                    continue
+
+                if role == "combobox":
+                    return _selector_for_element(candidate, container), tag
+
+                if tag == "input" and typ not in (
+                    "hidden", "submit", "reset", "button", "image"
+                ):
+                    return _selector_for_element(candidate, container), tag
+
+                if tag in ("button", "select") or role in ("button", "listbox"):
+                    return _selector_for_element(candidate, container), tag
+
+        return None
+    except Exception:
+        return None
+
+
+def _fix_hidden_field_selectors(
+    fields: FormFields, form_html: str, log_dir: Path
+) -> FormFields:
+    """
+    Safety net: any identified field whose selector resolves to an
+    input[type='hidden'] is replaced by the interactive element in the
+    same container. Provider-agnostic — uses HTML parsing only.
+    """
+    fixes: dict[str, IdentifiedField] = {}
+
+    for name in _FIELD_NAMES:
+        field = getattr(fields, name)
+        if field is None:
+            continue
+        if not _is_selector_hidden(form_html, field.selector, field.selector_type):
+            continue
+        replacement = _find_interactive_replacement(form_html, field.selector)
+        if replacement is None:
+            continue
+        new_selector, new_kind = replacement
+        fixes[name] = _dc_replace(field, selector=new_selector, element_kind=new_kind)
+
+    if not fixes:
+        return fields
+
+    fixes_log = log_dir / "llm_calls" / "hidden_selector_fixes.jsonl"
+    with open(fixes_log, "a", encoding="utf-8") as f:
+        for name, new_field in fixes.items():
+            old = getattr(fields, name)
+            f.write(json.dumps({
+                "field": name,
+                "old_selector": old.selector,
+                "new_selector": new_field.selector,
+                "new_kind": new_field.element_kind,
+            }, ensure_ascii=False) + "\n")
+
+    return FormFields(**{
+        n: fixes.get(n, getattr(fields, n))
+        for n in _FIELD_NAMES
+    })
+
+
+# ── LLM call ─────────────────────────────────────────────────────────────────
+
 def _parse_json_response(raw: str) -> dict:
     """Extract a JSON object from *raw*, tolerating markdown code fences."""
     text = raw.strip()
-    # Strip ```json ... ``` or ``` ... ``` fences
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
             text = text[: text.rfind("```")]
-    # Trim to the outermost { ... } in case of leading/trailing prose
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1:
@@ -106,6 +250,7 @@ async def identify_form_fields(
     """
     Ask the LLM to identify all standard form fields.
     Saves call_001_field_identification_input/output to log_dir/llm_calls/.
+    Applies _fix_hidden_field_selectors as a post-processing safety net.
     Returns (FormFields, cost_eur).
     """
     llm_calls = log_dir / "llm_calls"
@@ -136,4 +281,8 @@ async def identify_form_fields(
 
     data = _parse_json_response(raw)
     fields = FormFields(**{name: _parse_field(data.get(name)) for name in _FIELD_NAMES})
+
+    # Safety net: replace any selector that points to a hidden element
+    fields = _fix_hidden_field_selectors(fields, form_html, log_dir)
+
     return fields, cost_eur
