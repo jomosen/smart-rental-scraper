@@ -129,6 +129,10 @@ class BrowserSession:
         except Exception:
             pass
 
+    def get_url(self) -> str:
+        """Return the current page URL."""
+        return self.page.url
+
     async def click_selector(self, selector: str, selector_type: str) -> bool:
         """Click element by CSS or XPath selector. Returns True on success."""
         try:
