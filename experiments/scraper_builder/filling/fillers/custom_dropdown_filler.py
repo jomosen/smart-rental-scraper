@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 
 from rapidfuzz import process, fuzz
 
@@ -27,6 +28,113 @@ _MAX_SCROLL_STEPS = 20
 _FALLBACK_CONTAINER = "[role='listbox']"
 _FALLBACK_ITEM = "[role='option']"
 
+# Text longer than this in a single "option" → looks like a concatenated blob
+_BLOB_TEXT_THRESHOLD = 40
+# A real option set has at least this many items
+_MIN_PLAUSIBLE_OPTIONS = 3
+
+
+# ── Option handles ────────────────────────────────────────────────────────────
+
+@dataclass
+class OptionHandle:
+    """Encapsulates both the display text and how to click an option."""
+    text: str
+    click_base_selector: str   # CSS selector matching all options in the list
+    click_index: int           # 0-based index within click_base_selector
+
+
+# ── Heuristics ────────────────────────────────────────────────────────────────
+
+def _looks_like_concatenated_blob(texts: list[str]) -> bool:
+    """
+    True if the read captured the container instead of individual items:
+    very few elements where at least one has suspiciously long text.
+    """
+    if len(texts) > 2:
+        return False
+    return any(len(t) > _BLOB_TEXT_THRESHOLD for t in texts)
+
+
+def _is_plausible_option_set(texts: list[str]) -> bool:
+    """
+    True if texts look like a real option set:
+      - >= 3 non-empty elements
+      - average text length < 40 chars
+    """
+    non_empty = [t for t in texts if t.strip()]
+    if len(non_empty) < _MIN_PLAUSIBLE_OPTIONS:
+        return False
+    avg_len = sum(len(t) for t in non_empty) / len(non_empty)
+    return avg_len < _BLOB_TEXT_THRESHOLD
+
+
+# ── Robust option reader ──────────────────────────────────────────────────────
+
+async def _read_options_robust(
+    session: BrowserSession,
+    options_container_selector: str,
+    option_item_selector: str | None,
+    logger: SessionLogger,
+) -> tuple[list[OptionHandle], str]:
+    """
+    Read dropdown options resiliently. Returns (handles, strategy_name).
+
+    Tries up to five strategies, stopping at the first that yields a
+    plausible option set (>= 3 items with short, homogeneous texts).
+    Detects the "concatenated blob" symptom (few elements, very long text)
+    and falls through to the next strategy.
+
+    Strategies tried in order:
+      1. option_item_selector as-is (what the LLM gave)
+      2. option_item_selector + " > *"  — direct children of the wrapper
+      3. container + " [role='option']" — ARIA standard
+      4. container + " [id*='option']"  — react-select pattern
+      5. container + " [class*='option']" — class-name heuristic
+
+    All strategies are generic; no provider-specific selectors.
+    """
+    container = options_container_selector
+
+    strategies: list[tuple[str, str]] = []
+    if option_item_selector:
+        strategies.append(("item_selector", option_item_selector))
+        strategies.append(("item_selector_children", option_item_selector + " > *"))
+
+    strategies.extend([
+        ("role_option",  f"{container} [role='option']"),
+        ("id_option",    f"{container} [id*='option']"),
+        ("class_option", f"{container} [class*='option']"),
+    ])
+
+    for strategy_name, selector in strategies:
+        raw = await session.get_all_texts(selector)
+        texts = [t.strip() for t in raw if t.strip()]
+
+        if _looks_like_concatenated_blob(texts):
+            logger.log("options_read_rejected", strategy=strategy_name,
+                       reason="concatenated_blob", count=len(texts),
+                       sample_len=len(texts[0]) if texts else 0)
+            continue
+
+        if _is_plausible_option_set(texts):
+            logger.log("options_read_accepted", strategy=strategy_name,
+                       count=len(texts), selector=selector)
+            handles = [
+                OptionHandle(text=t, click_base_selector=selector, click_index=i)
+                for i, t in enumerate(texts)
+            ]
+            return handles, strategy_name
+
+        logger.log("options_read_rejected", strategy=strategy_name,
+                   reason="not_plausible", count=len(texts))
+
+    logger.log("options_read_all_strategies_failed",
+               container=container, item_selector=option_item_selector)
+    return [], "failed"
+
+
+# ── Matching ──────────────────────────────────────────────────────────────────
 
 def _normalize_for_exact(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
@@ -34,43 +142,41 @@ def _normalize_for_exact(value: str) -> str:
 
 def _match_option(
     target: str,
-    options: list[str],
+    handles: list[OptionHandle],
     mode: str,
-) -> tuple[str, int, float] | None:
-    """
-    Return (matched_text, index, score) or None.
+) -> OptionHandle | None:
+    """Return the matching OptionHandle or None."""
+    texts = [h.text for h in handles]
 
-    "exact" mode: normalized string equality, then time-aware fallback.
-    "fuzzy" mode: rapidfuzz WRatio with threshold 70.
-    """
     if mode == "exact":
         from filling.time_utils import normalize_time
 
         norm_target = _normalize_for_exact(target)
-        for idx, opt in enumerate(options):
-            if _normalize_for_exact(opt) == norm_target:
-                return opt, idx, 100.0
+        for h in handles:
+            if _normalize_for_exact(h.text) == norm_target:
+                return h
 
         t = normalize_time(target)
         if t is not None:
-            for idx, opt in enumerate(options):
-                if normalize_time(opt) == t:
-                    return opt, idx, 100.0
-
+            for h in handles:
+                if normalize_time(h.text) == t:
+                    return h
         return None
 
     # fuzzy
     best = process.extractOne(
         target,
-        options,
+        texts,
         scorer=fuzz.WRatio,
         score_cutoff=_FUZZY_THRESHOLD,
     )
     if not best:
         return None
     matched_text, score, idx = best
-    return matched_text, idx, float(score)
+    return handles[idx]
 
+
+# ── Filler ────────────────────────────────────────────────────────────────────
 
 class CustomDropdownFiller(LocationFiller):
     """
@@ -91,68 +197,80 @@ class CustomDropdownFiller(LocationFiller):
         logger: SessionLogger,
     ) -> tuple[bool, str | None, str | None]:
         """
-        Read options, match, and click. Scrolls the listbox up to
-        _MAX_SCROLL_STEPS times if the option is not yet rendered.
+        Read options (robustly), match, and click.
+        Scrolls the listbox up to _MAX_SCROLL_STEPS times for virtualized lists.
 
         Returns (success, matched_text, error).
         """
         container = widget.options_container_selector or _FALLBACK_CONTAINER
-        item_sel = widget.option_item_selector or _FALLBACK_ITEM
+        item_sel = widget.option_item_selector  # may be None or wrong-level
 
-        prev_options: list[str] = []
+        prev_texts: list[str] = []
 
         for step in range(_MAX_SCROLL_STEPS + 1):
-            options_texts: list[str] = await session.get_all_texts(item_sel)
-            options_texts = [t.strip() for t in options_texts if t.strip()]
+            handles, strategy = await _read_options_robust(
+                session, container, item_sel, logger
+            )
 
             logger.log(
                 "dropdown_options_read",
                 step=step,
-                count=len(options_texts),
-                container=container,
-                item_selector=item_sel,
+                count=len(handles),
+                strategy=strategy,
             )
 
-            result = _match_option(target_value, options_texts, self.match_mode)
+            if handles:
+                match = _match_option(target_value, handles, self.match_mode)
 
-            if result is not None:
-                matched_text, idx, score = result
-                logger.log(
-                    "dropdown_match",
-                    matched=matched_text,
-                    score=round(score, 1),
-                    idx=idx,
-                    step=step,
-                    match_mode=self.match_mode,
-                )
-
-                clicked = await session.click_nth(item_sel, idx)
-                if not clicked:
-                    clicked = await session.click_option_by_text(
-                        container, item_sel, matched_text
+                if match is not None:
+                    logger.log(
+                        "dropdown_match",
+                        matched=match.text,
+                        idx=match.click_index,
+                        step=step,
+                        match_mode=self.match_mode,
+                        strategy=strategy,
                     )
-                if not clicked:
-                    return False, None, f"Could not click option {matched_text!r} (idx={idx})"
-                return True, matched_text, None
 
-            # No match yet — check if the list has grown (i.e. new options rendered)
-            if step > 0 and options_texts == prev_options:
-                logger.log("dropdown_end_of_list", step=step, total_options=len(options_texts))
-                sample = options_texts[:5]
-                return False, None, (
-                    f"No {self.match_mode} match for {target_value!r} after scrolling "
-                    f"{step} steps. Total options seen: {len(options_texts)}. "
-                    f"Sample: {sample}"
-                )
+                    clicked = await session.click_nth(
+                        match.click_base_selector, match.click_index
+                    )
+                    if not clicked:
+                        clicked = await session.click_option_by_text(
+                            container, match.click_base_selector, match.text
+                        )
+                    if not clicked:
+                        return (
+                            False, None,
+                            f"Could not click option {match.text!r} (idx={match.click_index})"
+                        )
+                    return True, match.text, None
 
-            prev_options = list(options_texts)
+                # No match — check end-of-list before scrolling
+                cur_texts = [h.text for h in handles]
+                if step > 0 and cur_texts == prev_texts:
+                    logger.log("dropdown_end_of_list", step=step,
+                               total_options=len(handles))
+                    sample = cur_texts[:5]
+                    return False, None, (
+                        f"No {self.match_mode} match for {target_value!r} after scrolling "
+                        f"{step} steps. Total options seen: {len(handles)}. Sample: {sample}"
+                    )
+                prev_texts = cur_texts
+            else:
+                # All strategies failed to read options
+                if step > 0:
+                    return False, None, (
+                        f"Could not read any options from container {container!r} "
+                        f"(tried {step + 1} scroll steps)"
+                    )
 
             if step < _MAX_SCROLL_STEPS:
                 logger.log("dropdown_scroll", step=step, delta_y=200)
                 await session.scroll_container(container, delta_y=200)
                 await session.wait_ms(300)
 
-        sample = prev_options[:5]
+        sample = prev_texts[:5]
         return False, None, (
             f"No {self.match_mode} match for {target_value!r} after {_MAX_SCROLL_STEPS} "
             f"scroll steps. Sample: {sample}"
@@ -209,7 +327,7 @@ class CustomDropdownFiller(LocationFiller):
             listbox_html, encoding="utf-8"
         )
 
-        # Step 2: find and click option (with scroll support)
+        # Step 2: find and click option (with robust reading + scroll support)
         success, matched_text, error = await self._find_and_click_option(
             session, widget, target_value, logger
         )
