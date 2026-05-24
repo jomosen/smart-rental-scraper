@@ -65,6 +65,8 @@ def print_report(report: SubmitExperimentReport) -> None:
         )
         print(f"  page_type:      {c.page_type}{vehicle_str}")
         print(f"  rationale:      {c.rationale}")
+        if c.error:
+            print(f"  confirm_error:  {c.error}")
 
     if report.error:
         print(f"  error:          {report.error}")

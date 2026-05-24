@@ -122,7 +122,7 @@ async def submit_and_detect(
             url_after=wait_outcome.url_after,
         )
 
-        # ── 5. Confirm with LLM (one call) ────────────────────────────────────
+        # ── 5. Confirm with LLM (one call, one retry) ─────────────────────────
         confirmation, confirm_cost = await confirm_results(session, logger, client)
         total_cost += confirm_cost
         llm_calls += 1
@@ -131,6 +131,7 @@ async def submit_and_detect(
             page_type=confirmation.page_type,
             approx_vehicle_count=confirmation.approx_vehicle_count,
             rationale=confirmation.rationale,
+            error=confirmation.error,
         )
 
         success = (
@@ -141,6 +142,8 @@ async def submit_and_detect(
         if not success:
             if not wait_outcome.ready:
                 error = f"Results did not load (signal={wait_outcome.signal})"
+            elif confirmation.page_type == "confirmer_error":
+                error = f"LLM confirmation failed: {confirmation.error}"
             else:
                 error = f"Unexpected page type: {confirmation.page_type!r}"
 
