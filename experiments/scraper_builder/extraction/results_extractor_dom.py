@@ -71,31 +71,74 @@ def parse_price(text: str) -> tuple[float | None, str | None]:
 
 # Marks valid cards with data-scraper-card="N", returns stats dict.
 # Receives [cardSelector, priceReStr] as argument.
+#
+# Two-pass strategy:
+#   Pass 1 — use the LLM-provided cardSelector + leaf + price filter.
+#   Pass 2 — if Pass 1 yields < 3 valid cards, heuristic fallback:
+#             walk up from each price text node to find the nearest ancestor
+#             that contains a heading element (h1–h5 / role=heading), then
+#             apply the same leaf + price filter. Provider-agnostic.
 _MARK_CARDS_JS = """
 ([cardSelector, priceReStr]) => {
-    const allCards = Array.from(document.querySelectorAll(cardSelector));
     const priceRe = new RegExp(priceReStr, 'i');
 
-    // Remove previous marks
     document.querySelectorAll('[data-scraper-card]').forEach(
         el => el.removeAttribute('data-scraper-card'));
 
-    // Keep leaf cards: discard any element that CONTAINS another matched element.
-    // This removes container/wrapper elements that accidentally match the selector.
-    const leafCards = allCards.filter(el =>
-        !allCards.some(other => other !== el && el.contains(other)));
-
-    // Keep only complete cards: must have a price somewhere (text or aria-label).
-    const complete = leafCards.filter(el => {
+    function hasPrice(el) {
         if (priceRe.test(el.textContent)) return true;
         for (const d of el.querySelectorAll('[aria-label]')) {
             if (priceRe.test(d.getAttribute('aria-label') || '')) return true;
         }
         return false;
-    });
+    }
+
+    // ── Pass 1: LLM-provided selector ────────────────────────────────────
+    const allCards = Array.from(document.querySelectorAll(cardSelector));
+    const leafCards = allCards.filter(el =>
+        !allCards.some(other => other !== el && el.contains(other)));
+    let complete = leafCards.filter(hasPrice);
+
+    // ── Pass 2: heuristic fallback when selector yields < 3 valid cards ──
+    let usedHeuristic = false;
+    if (complete.length < 3) {
+        usedHeuristic = true;
+        // Walk up from each price text node to the nearest heading-containing ancestor.
+        // "Visited" set prevents adding the same card twice.
+        const visited = new Set();
+        const candidates = [];
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+            if (!priceRe.test(node.textContent)) continue;
+            if (!node.parentElement || node.parentElement.offsetParent === null) continue;
+            let el = node.parentElement;
+            while (el && el !== document.body) {
+                if (visited.has(el)) break;
+                if (el.querySelector('h1,h2,h3,h4,h5,[role="heading"]') !== null &&
+                        hasPrice(el)) {
+                    visited.add(el);
+                    candidates.push(el);
+                    break;
+                }
+                el = el.parentElement;
+            }
+        }
+        // Leaf filter: discard any candidate that contains another candidate
+        const leafFallback = candidates.filter(el =>
+            !candidates.some(other => other !== el && el.contains(other)));
+        if (leafFallback.length > complete.length) {
+            complete = leafFallback;
+        }
+    }
 
     complete.forEach((el, i) => el.setAttribute('data-scraper-card', String(i)));
-    return {total: allCards.length, afterDedup: leafCards.length, valid: complete.length};
+    return {
+        total: allCards.length,
+        afterDedup: leafCards.length,
+        valid: complete.length,
+        usedHeuristic: usedHeuristic,
+    };
 }
 """
 
@@ -352,6 +395,7 @@ async def extract_vehicles_dom(
         total=stats.get("total", 0),
         after_dedup=stats.get("afterDedup", 0),
         valid=stats.get("valid", 0),
+        used_heuristic=stats.get("usedHeuristic", False),
     )
 
     cards = await session.page.locator("[data-scraper-card]").all()

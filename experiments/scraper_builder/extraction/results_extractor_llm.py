@@ -96,28 +96,40 @@ async def extract_vehicles_llm(
     results_html: str,
     logger: SessionLogger,
     llm_client: AsyncAnthropic,
+    container_html: str | None = None,
 ) -> tuple[list[VehicleResult], float]:
     """
-    Clean *results_html*, send to LLM, parse vehicle list.
+    Clean HTML, send to LLM, parse vehicle list.
 
-    This is the reference truth extraction — do not truncate aggressively:
-    we need all vehicles. Uses a 60KB limit; if the page exceeds this,
-    the first 60KB is sent (assumption: cards appear early in DOM order).
+    When *container_html* is provided (the isolated vehicle-list container from the
+    live DOM), it is used instead of *results_html*. The container is far more compact
+    than the full page, so all vehicles fit without truncation.
+
+    Falls back to *results_html* truncated to _MAX_HTML_CHARS when no container is
+    available (original behaviour, kept for safety).
 
     Returns (list[VehicleResult], cost_eur).
     """
-    cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
-    truncated = cleaned[:_MAX_HTML_CHARS]
+    if container_html is not None:
+        cleaned = clean_html_for_llm(container_html, preserve_svg_aria=True)
+        input_html = cleaned          # container should fit; never truncate
+        source = "container"
+    else:
+        cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
+        input_html = cleaned[:_MAX_HTML_CHARS]
+        source = "full_page"
+
+    logger.log("llm_extraction_input", source=source, chars=len(input_html))
 
     (logger.log_dir / "dom_snapshots" / "vehicles_llm_input.html").write_text(
-        truncated, encoding="utf-8"
+        input_html, encoding="utf-8"
     )
 
     response = await llm_client.messages.create(
         model=_MODEL,
         max_tokens=4096,
         system=_SYSTEM,
-        messages=[{"role": "user", "content": truncated}],
+        messages=[{"role": "user", "content": input_html}],
     )
     raw = response.content[0].text.strip()
     cost = (

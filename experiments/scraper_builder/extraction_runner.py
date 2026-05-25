@@ -10,6 +10,7 @@ from pathlib import Path
 from anthropic import AsyncAnthropic
 
 from browser_session import BrowserSession
+from extraction.container_extractor import extract_results_container_html
 from extraction.extraction_verifier import VerificationResult, verify
 from extraction.models import ResultsStructure, VehicleResult
 from extraction.results_classifier import classify_results_structure
@@ -124,7 +125,22 @@ async def extract_experiment(
                 final_count=scroll_final_count,
             )
 
-        # Capture HTML regardless of ready state (best-effort extraction)
+        # ── Capture post-scroll DOM state ────────────────────────────────────
+        # Isolate vehicle-list container (compact; no truncation needed for LLM).
+        # Full page HTML is saved for debugging; container HTML drives extraction.
+        container_html: str | None = None
+        if reached:
+            container_html = await extract_results_container_html(session)
+            logger.log(
+                "container_extracted",
+                chars=len(container_html) if container_html else 0,
+            )
+            if container_html:
+                (log_dir / "dom_snapshots" / "results_container.html").write_text(
+                    clean_html_for_llm(container_html, preserve_svg_aria=True),
+                    encoding="utf-8",
+                )
+
         results_html = await session.get_html()
         cleaned_html = clean_html_for_llm(results_html)
         (log_dir / "dom_snapshots" / "results_full.html").write_text(
@@ -146,7 +162,7 @@ async def extract_experiment(
         # ── 4. Vía 1: LLM extracts all vehicles (reference truth) ─────────────
         try:
             llm_vehicles, llm_cost = await extract_vehicles_llm(
-                results_html, logger, client
+                results_html, logger, client, container_html=container_html
             )
             total_cost += llm_cost
             llm_calls += 1
@@ -160,7 +176,7 @@ async def extract_experiment(
 
         try:
             structure, struct_cost = await classify_results_structure(
-                results_html, logger, client
+                results_html, logger, client, container_html=container_html
             )
             total_cost += struct_cost
             llm_calls += 1

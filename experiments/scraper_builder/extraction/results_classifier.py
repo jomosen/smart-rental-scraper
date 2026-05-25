@@ -94,13 +94,23 @@ async def classify_results_structure(
     results_html: str,
     logger: SessionLogger,
     llm_client: AsyncAnthropic,
+    container_html: str | None = None,
 ) -> tuple[ResultsStructure, float]:
     """
-    Clean *results_html* and ask the LLM to identify the CSS structure.
+    Ask the LLM to identify the CSS structure of the vehicle-list.
+
+    When *container_html* is provided (isolated vehicle-list container from the
+    live DOM), it is used instead of *results_html* — more compact, no truncation.
+    Falls back to *results_html* truncated to _MAX_HTML_CHARS.
+
     Returns (ResultsStructure, cost_eur).
     """
-    cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
-    truncated = cleaned[:_MAX_HTML_CHARS]
+    if container_html is not None:
+        cleaned = clean_html_for_llm(container_html, preserve_svg_aria=True)
+        truncated = cleaned          # container is compact; never truncate
+    else:
+        cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
+        truncated = cleaned[:_MAX_HTML_CHARS]
 
     response = await llm_client.messages.create(
         model=_MODEL,
