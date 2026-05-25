@@ -8,7 +8,10 @@ from extraction.models import VehicleResult
 
 _PRICE_TOLERANCE = 0.02        # 2 cents tolerance for float price comparison
 _MATCH_THRESHOLD = 0.90        # 90% field agreement required for match=True
-_KEY_FIELDS = ("model", "group_code", "price_final")
+# Fields that must agree at >=_MATCH_THRESHOLD to declare match=True.
+# Secondary fields (category, seats, doors, bags, availability_note, discount)
+# are reported in field_agreement but do not block match.
+_KEY_FIELDS = ("model", "group_code", "price_final", "transmission")
 
 
 @dataclass

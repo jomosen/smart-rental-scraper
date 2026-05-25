@@ -8,10 +8,11 @@ from browser_session import BrowserSession
 from extraction.models import FieldSelector, ResultsStructure, VehicleResult
 from session_logger import SessionLogger
 
-# Fields that should be coerced to float (parsed as prices)
 _PRICE_FIELDS = frozenset({"price_final", "price_original"})
-# Fields that should be coerced to int
 _INT_FIELDS = frozenset({"seats", "doors", "bags"})
+
+# Passed to JS new RegExp() — literal currency chars, no backslash escaping needed
+_PRICE_RE_STR = "[€$£]\\s*\\d+[\\d.,]*|\\d[\\d.,]*\\s*[€$£]|\\d[\\d.,]*\\s*(?:EUR|USD|GBP)"
 
 
 # ── Price parser ──────────────────────────────────────────────────────────────
@@ -66,13 +67,192 @@ def parse_price(text: str) -> tuple[float | None, str | None]:
     return None, currency
 
 
+def _extract_discount_pct(text: str) -> float | None:
+    """Extract percentage number from text like '15%' or 'Descuento: 15%.'"""
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*%", text)
+    if m:
+        return float(m.group(1).replace(",", "."))
+    return None
+
+
+# ── Card deduplication via JS ─────────────────────────────────────────────────
+
+# Marks valid cards with data-scraper-card="N", returns stats dict.
+# Receives [cardSelector, priceReStr] as argument.
+_MARK_CARDS_JS = """
+([cardSelector, priceReStr]) => {
+    const allCards = Array.from(document.querySelectorAll(cardSelector));
+    const priceRe = new RegExp(priceReStr, 'i');
+
+    // Remove previous marks
+    document.querySelectorAll('[data-scraper-card]').forEach(
+        el => el.removeAttribute('data-scraper-card'));
+
+    // Keep leaf cards: discard any element that CONTAINS another matched element.
+    // This removes container/wrapper elements that accidentally match the selector.
+    const leafCards = allCards.filter(el =>
+        !allCards.some(other => other !== el && el.contains(other)));
+
+    // Keep only complete cards: must have a price somewhere (text or aria-label).
+    const complete = leafCards.filter(el => {
+        if (priceRe.test(el.textContent)) return true;
+        for (const d of el.querySelectorAll('[aria-label]')) {
+            if (priceRe.test(d.getAttribute('aria-label') || '')) return true;
+        }
+        return false;
+    });
+
+    complete.forEach((el, i) => el.setAttribute('data-scraper-card', String(i)));
+    return {total: allCards.length, afterDedup: leafCards.length, valid: complete.length};
+}
+"""
+
+# JS price-extraction cascade. Called via card.evaluate(js, priceReStr).
+# Returns {source, text} for aria-label, {source, nonStruck, struck} for text,
+# or null if no price found.
+_PRICE_CASCADE_JS = """
+(el, priceReStr) => {
+    const priceRe = new RegExp(priceReStr, 'i');
+
+    // S1: aria-label on any descendant (highest fidelity — often has clean price)
+    for (const d of el.querySelectorAll('[aria-label]')) {
+        const label = d.getAttribute('aria-label') || '';
+        if (priceRe.test(label)) {
+            return {source: 'aria_label', text: label};
+        }
+    }
+
+    // S2: text nodes, separating struck (price_original) from non-struck (price_final)
+    const struckTags = new Set(['S', 'DEL', 'STRIKE']);
+
+    function isStruck(textNode) {
+        let p = textNode.parentElement;
+        while (p && p !== el) {
+            if (struckTags.has(p.tagName)) return true;
+            if ((p.getAttribute('style') || '').includes('line-through')) return true;
+            p = p.parentElement;
+        }
+        return false;
+    }
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nonStruck = [], struck = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        const t = node.textContent.trim();
+        if (!priceRe.test(t)) continue;
+        (isStruck(node) ? struck : nonStruck).push(t);
+    }
+
+    if (nonStruck.length || struck.length) {
+        return {source: 'text', nonStruck: nonStruck, struck: struck};
+    }
+    return null;
+}
+"""
+
+
+# ── Card marking ──────────────────────────────────────────────────────────────
+
+async def _mark_valid_cards(session: BrowserSession, card_sel: str) -> dict:
+    """
+    Run deduplication in-browser: mark complete leaf cards with data-scraper-card.
+    Returns {total, afterDedup, valid}.
+    """
+    return await session.page.evaluate(_MARK_CARDS_JS, [card_sel, _PRICE_RE_STR])
+
+
+# ── Price cascade ─────────────────────────────────────────────────────────────
+
+async def _extract_price_cascade(
+    card,
+    price_fs: FieldSelector | None,
+) -> dict:
+    """
+    Generic price extraction with three-level cascade:
+    1. Try the field_selector for price_final (if provided).
+    2. JS: any descendant aria-label containing a price.
+    3. JS: text nodes separated by struck/non-struck; non-struck = final, struck = original.
+
+    Returns dict with keys: price_final, price_original, currency, discount_pct.
+    """
+    empty = {"price_final": None, "price_original": None,
+             "currency": None, "discount_pct": None}
+
+    # Level 1: use the field_selector if provided
+    if price_fs is not None:
+        raw = await _apply_extraction(card, price_fs)
+        if raw:
+            val, cur = parse_price(raw)
+            if val is not None:
+                return {
+                    "price_final": val,
+                    "price_original": None,
+                    "currency": cur,
+                    "discount_pct": _extract_discount_pct(raw),
+                }
+
+    # Levels 2 & 3: JS cascade
+    try:
+        result = await card.evaluate(_PRICE_CASCADE_JS, _PRICE_RE_STR)
+    except Exception:
+        result = None
+
+    if not result:
+        return empty
+
+    source = result.get("source")
+
+    if source == "aria_label":
+        text = result["text"]
+        val, cur = parse_price(text)
+        return {
+            "price_final": val,
+            "price_original": None,
+            "currency": cur,
+            "discount_pct": _extract_discount_pct(text),
+        }
+
+    if source == "text":
+        non_struck = result.get("nonStruck", [])
+        struck = result.get("struck", [])
+
+        ns_parsed = [(v, c) for t in non_struck for v, c in [parse_price(t)] if v is not None]
+        s_parsed = [(v, c) for t in struck for v, c in [parse_price(t)] if v is not None]
+
+        if ns_parsed:
+            final_val = min(v for v, _ in ns_parsed)
+            currency = ns_parsed[0][1]
+        elif s_parsed:
+            # All prices struck — take the smallest as the "final"
+            final_val = min(v for v, _ in s_parsed)
+            currency = s_parsed[0][1]
+        else:
+            return empty
+
+        original_val = max((v for v, _ in s_parsed), default=None)
+        if not currency and s_parsed:
+            currency = s_parsed[0][1]
+
+        if final_val and original_val and original_val > final_val:
+            discount = round((1 - final_val / original_val) * 100, 1)
+        else:
+            discount = _extract_discount_pct(" ".join(non_struck + struck))
+
+        return {
+            "price_final": final_val,
+            "price_original": original_val,
+            "currency": currency,
+            "discount_pct": discount,
+        }
+
+    return empty
+
+
 # ── Field extraction helpers ──────────────────────────────────────────────────
 
 async def _apply_extraction(card, field_sel: FieldSelector) -> str | None:
-    """
-    Apply a FieldSelector to a Playwright card locator.
-    Returns the raw string (or None on any error).
-    """
+    """Apply a FieldSelector to a Playwright card locator; return raw string or None."""
     try:
         el = card.locator(field_sel.selector).first
         ext = field_sel.extraction
@@ -96,38 +276,22 @@ async def _apply_extraction(card, field_sel: FieldSelector) -> str | None:
         return None
 
 
-def _coerce(field: str, raw: str | None) -> "str | int | float | None":
-    """Convert raw string to the appropriate Python type for the given field name."""
+def _coerce(field: str, raw: str | None) -> "str | int | None":
+    """Type-coerce raw string for non-price fields."""
     if raw is None:
         return None
-    raw = raw.strip()
+    raw = str(raw).strip()
     if not raw:
-        return None
-
-    if field in _PRICE_FIELDS:
-        val, _ = parse_price(raw)
-        return val
-
-    if field == "discount_pct":
-        m = re.search(r"(\d+(?:[.,]\d+)?)", raw)
-        if m:
-            return float(m.group(1).replace(",", "."))
         return None
 
     if field in _INT_FIELDS:
         m = re.search(r"(\d+)", raw)
         return int(m.group(1)) if m else None
 
+    if field == "discount_pct":
+        return _extract_discount_pct(raw)
+
     return raw or None
-
-
-def _build_vehicle(field_values: dict) -> VehicleResult:
-    v = VehicleResult()
-    for field, raw in field_values.items():
-        coerced = _coerce(field, raw)
-        if hasattr(v, field):
-            setattr(v, field, coerced)
-    return v
 
 
 # ── Main extractor ────────────────────────────────────────────────────────────
@@ -139,60 +303,61 @@ async def extract_vehicles_dom(
 ) -> list[VehicleResult]:
     """
     Apply *structure* selectors deterministically (no LLM):
-    1. Locate all vehicle cards with vehicle_card_selector.
-    2. For each card, apply each FieldSelector (text / attribute / regex).
-    3. Coerce types and build VehicleResult objects.
-
-    If vehicle_card_selector returns ≤1 card (may point at the container),
-    tries selector + " > *" (direct children) as a fallback.
+    1. Mark valid leaf cards (dedup nested elements, require price presence).
+    2. For each card: apply field selectors for non-price fields; use the
+       three-level price cascade for price_final/price_original/discount_pct.
+    3. Return one VehicleResult per valid card.
     """
     card_sel = structure.vehicle_card_selector
+    if not card_sel:
+        logger.log("dom_extractor_no_selector")
+        return []
 
-    async def _count(sel: str) -> int:
-        try:
-            return await session.page.locator(sel).count()
-        except Exception:
-            return 0
+    # Dedup and mark valid cards in-browser
+    stats = await _mark_valid_cards(session, card_sel)
+    logger.log(
+        "dom_extractor_dedup",
+        selector=card_sel,
+        total=stats.get("total", 0),
+        after_dedup=stats.get("afterDedup", 0),
+        valid=stats.get("valid", 0),
+    )
 
-    count = await _count(card_sel)
-    if count <= 1:
-        fallback = card_sel + " > *"
-        fb_count = await _count(fallback)
-        if fb_count > count:
-            logger.log(
-                "dom_extractor_fallback",
-                original_selector=card_sel,
-                fallback_selector=fallback,
-                original_count=count,
-                fallback_count=fb_count,
-            )
-            card_sel = fallback
-            count = fb_count
+    cards = await session.page.locator("[data-scraper-card]").all()
+    if not cards:
+        logger.log("dom_extractor_no_cards_after_dedup", selector=card_sel)
+        return []
 
-    logger.log("dom_extractor_cards_found", selector=card_sel, count=count)
+    # Build field_selector lookup (skip price/discount — handled separately)
+    _SKIP_FIELDS = _PRICE_FIELDS | {"discount_pct", "currency"}
+    non_price_selectors = [
+        fs for fs in structure.field_selectors
+        if fs.field not in _SKIP_FIELDS
+    ]
+    price_fs = next(
+        (fs for fs in structure.field_selectors if fs.field == "price_final"),
+        None,
+    )
 
     vehicles: list[VehicleResult] = []
-    cards = await session.page.locator(card_sel).all()
 
-    for i, card in enumerate(cards):
+    for card in cards:
+        # Non-price fields
         field_values: dict = {}
-        currency_seen: str | None = None
-
-        for fs in structure.field_selectors:
+        for fs in non_price_selectors:
             raw = await _apply_extraction(card, fs)
-            field_values[fs.field] = raw
+            field_values[fs.field] = _coerce(fs.field, raw)
 
-            if fs.field in _PRICE_FIELDS and raw:
-                _, cur = parse_price(raw)
-                if cur:
-                    currency_seen = cur
+        # Price extraction via cascade
+        price_data = await _extract_price_cascade(card, price_fs)
+        field_values.update(price_data)
 
-        # If currency wasn't an explicit field, fill from price parsing
-        if "currency" not in field_values and currency_seen:
-            field_values["currency"] = currency_seen
-
-        vehicle = _build_vehicle(field_values)
-        vehicles.append(vehicle)
+        # Build VehicleResult
+        v = VehicleResult()
+        for field, val in field_values.items():
+            if hasattr(v, field):
+                setattr(v, field, val)
+        vehicles.append(v)
 
     (logger.log_dir / "dom_snapshots" / "vehicles_dom.json").write_text(
         json.dumps(
@@ -201,5 +366,5 @@ async def extract_vehicles_dom(
         ),
         encoding="utf-8",
     )
-    logger.log("dom_extraction", count=len(vehicles), selector=card_sel)
+    logger.log("dom_extraction", count=len(vehicles))
     return vehicles
