@@ -51,6 +51,9 @@ def print_report(report: ExtractionExperimentReport) -> None:
     dom_n = len(report.dom_vehicles)
     print(f"  vehicles:        LLM={llm_n}  DOM={dom_n}")
 
+    print(f"  scroll:          rounds={report.scroll_rounds}  "
+          f"final_count={report.scroll_final_count}")
+
     if report.structure:
         print(f"  card_selector:   {report.structure.vehicle_card_selector!r}")
         print(f"  price_strategy:  {report.structure.price_strategy}")

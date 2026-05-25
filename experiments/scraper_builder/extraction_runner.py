@@ -18,6 +18,7 @@ from extraction.results_extractor_llm import extract_vehicles_llm
 from form_capture.html_cleaner import clean_html_for_llm
 from form_fill_orchestrator import fill_form_in_session
 from results_detection.results_waiter import wait_for_results
+from results_detection.scroll_loader import ensure_all_results_loaded
 from session_logger import SessionLogger
 
 
@@ -35,6 +36,8 @@ class ExtractionExperimentReport:
     cost_estimate_eur: float
     llm_calls: int
     error: str | None
+    scroll_rounds: int = 0
+    scroll_final_count: int = 0
 
 
 async def extract_experiment(
@@ -107,6 +110,19 @@ async def extract_experiment(
             candidate_count=wait_outcome.candidate_count,
         )
         reached = wait_outcome.ready
+
+        # ── Scroll-to-complete: ensure the full list is rendered ──────────────
+        scroll_final_count = 0
+        scroll_rounds = 0
+        if reached:
+            scroll_final_count, scroll_rounds = await ensure_all_results_loaded(
+                session, logger
+            )
+            logger.log(
+                "scroll_summary",
+                rounds=scroll_rounds,
+                final_count=scroll_final_count,
+            )
 
         # Capture HTML regardless of ready state (best-effort extraction)
         results_html = await session.get_html()
@@ -216,4 +232,6 @@ async def extract_experiment(
             cost_estimate_eur=total_cost,
             llm_calls=llm_calls,
             error=error,
+            scroll_rounds=scroll_rounds,
+            scroll_final_count=scroll_final_count,
         )
