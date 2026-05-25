@@ -8,8 +8,8 @@ from browser_session import BrowserSession
 from extraction.models import FieldSelector, ResultsStructure, VehicleResult
 from session_logger import SessionLogger
 
-_PRICE_FIELDS = frozenset({"price_final", "price_original"})
-_INT_FIELDS = frozenset({"seats", "doors", "bags"})
+_PRICE_FIELDS = frozenset({"price_final"})
+_INT_FIELDS = frozenset({"seats"})
 
 # Passed to JS new RegExp() — literal currency chars, no backslash escaping needed
 _PRICE_RE_STR = "[€$£]\\s*\\d+[\\d.,]*|\\d[\\d.,]*\\s*[€$£]|\\d[\\d.,]*\\s*(?:EUR|USD|GBP)"
@@ -65,14 +65,6 @@ def parse_price(text: str) -> tuple[float | None, str | None]:
         return value, currency
 
     return None, currency
-
-
-def _extract_discount_pct(text: str) -> float | None:
-    """Extract percentage number from text like '15%' or 'Descuento: 15%.'"""
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*%", text)
-    if m:
-        return float(m.group(1).replace(",", "."))
-    return None
 
 
 # ── Card deduplication via JS ─────────────────────────────────────────────────
@@ -151,6 +143,37 @@ _PRICE_CASCADE_JS = """
 }
 """
 
+# JS: scan all descendants for aria-label/title containing seats keywords.
+# Returns integer seat count or null.
+_SEATS_BY_ARIA_JS = """
+el => {
+    const keywords = ['plazas', 'asientos', 'seats', 'places', 'sitzplätze', 'posti', 'plaza'];
+    for (const d of el.querySelectorAll('[aria-label], [title]')) {
+        const label = (d.getAttribute('aria-label') || d.getAttribute('title') || '').toLowerCase();
+        if (keywords.some(kw => label.includes(kw))) {
+            const m = label.match(/\\b(\\d+)\\b/);
+            if (m) return parseInt(m[1], 10);
+        }
+    }
+    return null;
+}
+"""
+
+# JS: scan all descendants for aria-label/title indicating transmission type.
+# Returns 'A' (automatic), 'M' (manual), or null.
+_TRANSMISSION_BY_ARIA_JS = """
+el => {
+    const autoKw = ['automático', 'automática', 'automatic', 'automatique', 'automatik'];
+    const manKw  = ['manual', 'manuale'];
+    for (const d of el.querySelectorAll('[aria-label], [title]')) {
+        const label = (d.getAttribute('aria-label') || d.getAttribute('title') || '').toLowerCase();
+        if (autoKw.some(kw => label.includes(kw))) return 'A';
+        if (manKw.some(kw => label.includes(kw))) return 'M';
+    }
+    return null;
+}
+"""
+
 
 # ── Card marking ──────────────────────────────────────────────────────────────
 
@@ -172,12 +195,11 @@ async def _extract_price_cascade(
     Generic price extraction with three-level cascade:
     1. Try the field_selector for price_final (if provided).
     2. JS: any descendant aria-label containing a price.
-    3. JS: text nodes separated by struck/non-struck; non-struck = final, struck = original.
+    3. JS: text nodes separated by struck/non-struck; non-struck = final.
 
-    Returns dict with keys: price_final, price_original, currency, discount_pct.
+    Returns dict with keys: price_final, currency.
     """
-    empty = {"price_final": None, "price_original": None,
-             "currency": None, "discount_pct": None}
+    empty = {"price_final": None, "currency": None}
 
     # Level 1: use the field_selector if provided
     if price_fs is not None:
@@ -185,12 +207,7 @@ async def _extract_price_cascade(
         if raw:
             val, cur = parse_price(raw)
             if val is not None:
-                return {
-                    "price_final": val,
-                    "price_original": None,
-                    "currency": cur,
-                    "discount_pct": _extract_discount_pct(raw),
-                }
+                return {"price_final": val, "currency": cur}
 
     # Levels 2 & 3: JS cascade
     try:
@@ -206,12 +223,7 @@ async def _extract_price_cascade(
     if source == "aria_label":
         text = result["text"]
         val, cur = parse_price(text)
-        return {
-            "price_final": val,
-            "price_original": None,
-            "currency": cur,
-            "discount_pct": _extract_discount_pct(text),
-        }
+        return {"price_final": val, "currency": cur}
 
     if source == "text":
         non_struck = result.get("nonStruck", [])
@@ -224,29 +236,48 @@ async def _extract_price_cascade(
             final_val = min(v for v, _ in ns_parsed)
             currency = ns_parsed[0][1]
         elif s_parsed:
-            # All prices struck — take the smallest as the "final"
             final_val = min(v for v, _ in s_parsed)
             currency = s_parsed[0][1]
         else:
             return empty
 
-        original_val = max((v for v, _ in s_parsed), default=None)
         if not currency and s_parsed:
             currency = s_parsed[0][1]
 
-        if final_val and original_val and original_val > final_val:
-            discount = round((1 - final_val / original_val) * 100, 1)
-        else:
-            discount = _extract_discount_pct(" ".join(non_struck + struck))
-
-        return {
-            "price_final": final_val,
-            "price_original": original_val,
-            "currency": currency,
-            "discount_pct": discount,
-        }
+        return {"price_final": final_val, "currency": currency}
 
     return empty
+
+
+# ── Semantic field extractors ─────────────────────────────────────────────────
+
+async def _extract_seats_by_aria(card) -> int | None:
+    """Extract seat count from aria-label/title semantics. No positional fallback."""
+    try:
+        result = await card.evaluate(_SEATS_BY_ARIA_JS)
+        return int(result) if result is not None else None
+    except Exception:
+        return None
+
+
+async def _extract_transmission_by_aria(
+    card,
+    transmission_fs: FieldSelector | None,
+) -> str | None:
+    """
+    Extract transmission type: aria-label/title semantics first ('A'/'M'),
+    then fall back to field_selector text if no aria match found.
+    """
+    try:
+        result = await card.evaluate(_TRANSMISSION_BY_ARIA_JS)
+        if result is not None:
+            return result
+    except Exception:
+        pass
+    if transmission_fs is not None:
+        raw = await _apply_extraction(card, transmission_fs)
+        return _coerce("transmission", raw)
+    return None
 
 
 # ── Field extraction helpers ──────────────────────────────────────────────────
@@ -288,9 +319,6 @@ def _coerce(field: str, raw: str | None) -> "str | int | None":
         m = re.search(r"(\d+)", raw)
         return int(m.group(1)) if m else None
 
-    if field == "discount_pct":
-        return _extract_discount_pct(raw)
-
     return raw or None
 
 
@@ -304,8 +332,11 @@ async def extract_vehicles_dom(
     """
     Apply *structure* selectors deterministically (no LLM):
     1. Mark valid leaf cards (dedup nested elements, require price presence).
-    2. For each card: apply field selectors for non-price fields; use the
-       three-level price cascade for price_final/price_original/discount_pct.
+    2. For each card:
+       - Apply field selectors for model, group_code, availability_note.
+       - Extract seats via aria-label keyword match (None if no match).
+       - Extract transmission via aria-label keyword match, fallback to selector.
+       - Use the three-level price cascade for price_final/currency.
     3. Return one VehicleResult per valid card.
     """
     card_sel = structure.vehicle_card_selector
@@ -328,25 +359,38 @@ async def extract_vehicles_dom(
         logger.log("dom_extractor_no_cards_after_dedup", selector=card_sel)
         return []
 
-    # Build field_selector lookup (skip price/discount — handled separately)
-    _SKIP_FIELDS = _PRICE_FIELDS | {"discount_pct", "currency"}
-    non_price_selectors = [
+    # Fields handled by dedicated extractors — skip from field_selector loop
+    _SPECIAL_FIELDS = _PRICE_FIELDS | {"currency", "seats", "transmission"}
+    other_selectors = [
         fs for fs in structure.field_selectors
-        if fs.field not in _SKIP_FIELDS
+        if fs.field not in _SPECIAL_FIELDS
     ]
     price_fs = next(
         (fs for fs in structure.field_selectors if fs.field == "price_final"),
+        None,
+    )
+    transmission_fs = next(
+        (fs for fs in structure.field_selectors if fs.field == "transmission"),
         None,
     )
 
     vehicles: list[VehicleResult] = []
 
     for card in cards:
-        # Non-price fields
         field_values: dict = {}
-        for fs in non_price_selectors:
+
+        # Generic non-special fields (model, group_code, availability_note, …)
+        for fs in other_selectors:
             raw = await _apply_extraction(card, fs)
             field_values[fs.field] = _coerce(fs.field, raw)
+
+        # Seats: semantic aria-label match only; None if no clear label found
+        field_values["seats"] = await _extract_seats_by_aria(card)
+
+        # Transmission: aria-label first, field_selector text fallback
+        field_values["transmission"] = await _extract_transmission_by_aria(
+            card, transmission_fs
+        )
 
         # Price extraction via cascade
         price_data = await _extract_price_cascade(card, price_fs)

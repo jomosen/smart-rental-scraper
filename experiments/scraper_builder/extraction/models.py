@@ -1,7 +1,7 @@
 """Domain models for the extraction experiment."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -9,16 +9,10 @@ class VehicleResult:
     model: str | None = None
     group_code: str | None = None
     availability_note: str | None = None   # "o similar" | "garantizado" | None
-    category: str | None = None            # provider tier, e.g. "Económico"
     transmission: str | None = None        # "M" | "A" | "Manual" | "Automático"
     seats: int | None = None
-    doors: int | None = None
-    bags: int | None = None
-    rate_type: str | None = None           # e.g. "Premium", "Básica"
-    price_final: float | None = None       # price the customer pays (post-discount)
-    price_original: float | None = None    # struck-through price, if present
-    currency: str | None = None            # "EUR" / "$"
-    discount_pct: float | None = None
+    price_final: float | None = None       # price the customer pays
+    currency: str | None = None            # "EUR" / "USD" / "GBP"
 
 
 @dataclass

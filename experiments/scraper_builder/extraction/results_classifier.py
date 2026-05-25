@@ -26,8 +26,14 @@ Te paso el HTML limpio. Identifica:
 
 2. field_selectors: para cada campo, un selector RELATIVO a la tarjeta y
    cómo extraerlo. Incluye los campos que puedas identificar:
-   model, group_code, availability_note, category, transmission,
-   seats, doors, bags, rate_type, price_final, price_original, discount_pct.
+   model, group_code, availability_note, transmission, seats,
+   price_final, currency.
+
+   Para seats y transmission: PRIORIZA aria-labels en <span> (los SVGs de
+   iconos han sido sustituidos por <span aria-label="..."> en este HTML).
+   Ejemplo: <span aria-label="Nº de plazas: 5"> → seats con
+   "regex:\\d+" sobre "attribute:aria-label". Si hay aria-label con
+   "automático"/"manual"/"automatic", úsalo para transmission.
 
    extraction puede ser:
    - "text"              → usar textContent del elemento
@@ -93,7 +99,7 @@ async def classify_results_structure(
     Clean *results_html* and ask the LLM to identify the CSS structure.
     Returns (ResultsStructure, cost_eur).
     """
-    cleaned = clean_html_for_llm(results_html)
+    cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
     truncated = cleaned[:_MAX_HTML_CHARS]
 
     response = await llm_client.messages.create(

@@ -25,23 +25,22 @@ puedas identificar (null si no aparece o es ambiguo):
 
 - model: nombre del modelo del vehículo (ej. "FIAT 500")
 - group_code: código de grupo del provider (ej. "Grupo A", "S1A")
-- availability_note: "o similar" si es aproximado, "garantizado" si el
-  modelo está garantizado, null si no se indica
-- category: categoría/tier del provider (ej. "Económico", "Familiar")
-- transmission: como aparezca ("M", "A", "Manual", "Automático")
-- seats, doors, bags: números enteros si se identifican, null si ambiguo
-- rate_type: tipo de tarifa (ej. "Premium", "Básica", "Alquiler Premium")
+- availability_note: "o similar" si el modelo es aproximado, "garantizado"
+  si está garantizado, null si no se indica
+- transmission: tipo de cambio ("M"=manual, "A"=automático, o como aparezca).
+  Busca aria-labels o atributos title con palabras como "automático",
+  "manual", "automatic". Si no hay indicación clara, devuelve null.
+- seats: número de plazas como entero. Busca aria-labels tipo
+  "Nº de plazas: 5" o "5 seats". Si no aparece con claridad, devuelve null.
 - price_final: el precio que el cliente PAGA realmente (con descuento si
-  lo hay). Si un atributo como aria-label expone el precio limpio, úsalo
-  como fuente fiable.
-- price_original: precio tachado/original si existe, si no null
-- currency: código de moneda ("EUR", "USD", etc.) o símbolo si no hay código
-- discount_pct: porcentaje de descuento como número (ej. 15.0), null si no hay
+  lo hay). Si un atributo aria-label expone el precio limpio (ej.
+  "FIAT 500: 273,00 €"), úsalo como fuente fiable.
+- currency: código de moneda ("EUR", "USD", etc.) o símbolo si no hay código.
 
 REGLA DE PRECIO CRÍTICA: price_final es lo que el cliente PAGA. Si hay un
-precio tachado (precio original) y un precio final (con descuento), price_final
-es el menor/final. Si un atributo aria-label contiene el precio de forma limpia
-(ej. "FIAT 500: 273,00 €. Descuento: 15%."), usa ese valor para price_final.
+precio tachado y un precio con descuento, price_final es el menor. Si un
+atributo aria-label contiene el precio (ej. "FIAT 500: 273,00 €. Descuento:
+15%."), usa ese valor para price_final.
 
 Devuelve ÚNICAMENTE un JSON con este formato:
 {"vehicles": [{"model": "...", "group_code": "...", ...}, ...]}
@@ -86,16 +85,10 @@ def _parse_vehicle(raw: dict) -> VehicleResult:
         model=raw.get("model") or None,
         group_code=raw.get("group_code") or None,
         availability_note=raw.get("availability_note") or None,
-        category=raw.get("category") or None,
         transmission=raw.get("transmission") or None,
         seats=_int(raw.get("seats")),
-        doors=_int(raw.get("doors")),
-        bags=_int(raw.get("bags")),
-        rate_type=raw.get("rate_type") or None,
         price_final=_float(raw.get("price_final")),
-        price_original=_float(raw.get("price_original")),
         currency=raw.get("currency") or None,
-        discount_pct=_float(raw.get("discount_pct")),
     )
 
 
@@ -113,7 +106,7 @@ async def extract_vehicles_llm(
 
     Returns (list[VehicleResult], cost_eur).
     """
-    cleaned = clean_html_for_llm(results_html)
+    cleaned = clean_html_for_llm(results_html, preserve_svg_aria=True)
     truncated = cleaned[:_MAX_HTML_CHARS]
 
     (logger.log_dir / "dom_snapshots" / "vehicles_llm_input.html").write_text(

@@ -82,9 +82,9 @@ def print_report(report: ExtractionExperimentReport) -> None:
         print("  sample (LLM, first 3):")
         for v in sample:
             price_str = f"{v.price_final} {v.currency}" if v.price_final else "?"
-            disc_str = f"  -{v.discount_pct}%" if v.discount_pct else ""
+            seats_str = f"  {v.seats}p" if v.seats else ""
             print(f"    {v.model or '?':<25}  {(v.group_code or '?'):<8}  "
-                  f"{(v.transmission or '?'):<3}  {price_str}{disc_str}")
+                  f"{(v.transmission or '?'):<3}  {price_str}{seats_str}")
 
     if report.error:
         print(f"  error:           {report.error}")
