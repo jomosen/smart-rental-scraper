@@ -20,23 +20,123 @@ from session_logger import SessionLogger
 
 _MAX_ATTEMPTS = 3
 
-# CSS selector covering the most common CMP patterns.
-# Used to wait for JS-rendered banners before attempting detection.
-_BANNER_HINTS = ", ".join([
-    "dialog[role='dialog']",
-    "[data-cookiefirst-action]",
-    "#onetrust-consent-sdk",
-    "#cookiebanner",
-    "[id*='cookiebot']",
-    "[class*='cookie-banner']",
-    "[class*='cookie-consent']",
-    "[aria-label*='cookie' i]",
-    "[aria-label*='cookies' i]",
-])
+# Adaptive banner polling — replaces the old single wait_for_selector.
+_POLL_INTERVAL_S = 1.0           # seconds between poll iterations
+_BANNER_POLL_TIMEOUT_S = 15.0    # total wait budget for async banner injection
+_HTML_GROWTH_THRESHOLD = 5_000   # chars growth from baseline → async content injected
+_SETTLE_S = 0.3                  # pause after signal so fade-in animations finish
+
+# JS: check two generic banner signals in a single DOM walk.
+#
+# html_growth — document grew > _HTML_GROWTH_THRESHOLD chars from the baseline
+#               captured right after domcontentloaded; async CMP injection detected.
+#
+# overlay     — a direct body child or dialog element is fixed/absolute,
+#               z-index ≥ 100, and covers enough of the viewport
+#               (height > 50 px AND width > 50 % of viewport width).
+#               Catches both full-screen modals and sticky bottom banners.
+#
+# Only body's direct children + semantic dialog elements are inspected
+# (not querySelectorAll('*')) to keep the check fast on large DOMs.
+_POLL_SIGNALS_JS = """
+([baselineLen]) => {
+    const currentLen = document.documentElement.innerHTML.length;
+    const growth = currentLen - baselineLen;
+    const vw = window.innerWidth;
+
+    const toCheck = [
+        ...document.body.children,
+        ...document.querySelectorAll('[role="dialog"],[role="alertdialog"]'),
+    ];
+
+    let hasOverlay = false;
+    for (const el of toCheck) {
+        const s = window.getComputedStyle(el);
+        if (s.position !== 'fixed' && s.position !== 'absolute') continue;
+        const z = parseInt(s.zIndex || '0', 10);
+        if (isNaN(z) || z < 100) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height > 50 && r.width > vw * 0.5) { hasOverlay = true; break; }
+    }
+
+    return {growth, hasOverlay};
+}
+"""
 
 
 def _result_fields(r: CloseResult) -> dict:
     return {"success": r.success, "action": r.action, "selector": r.selector, "attempts": r.attempts}
+
+
+async def _get_html_length(session: BrowserSession) -> int:
+    """Return document.documentElement.innerHTML.length (cheap, no Python serialisation)."""
+    try:
+        return await session.page.evaluate(
+            "() => document.documentElement.innerHTML.length"
+        )
+    except Exception:
+        return 0
+
+
+async def _poll_for_banner_signal(
+    session: BrowserSession,
+    baseline_len: int,
+    logger: SessionLogger,
+) -> tuple[bool, str]:
+    """
+    Poll for generic banner signals every _POLL_INTERVAL_S for up to
+    _BANNER_POLL_TIMEOUT_S seconds.
+
+    Signals (provider-agnostic — no CMP-specific selectors):
+      html_growth — HTML grew > _HTML_GROWTH_THRESHOLD chars since baseline,
+                    indicating an async script injected content (e.g. a CMP module).
+      overlay     — a visible fixed/absolute element with z-index ≥ 100 and
+                    height > 50 px + width > 50 % of viewport.
+
+    Returns (signal_found, signal_type) where signal_type is
+    "html_growth" | "overlay" | "timeout".
+    """
+    t0 = time.monotonic()
+    poll_n = 0
+
+    while True:
+        elapsed_s = time.monotonic() - t0
+        if elapsed_s >= _BANNER_POLL_TIMEOUT_S:
+            logger.log(
+                "banner_poll_timeout",
+                polls=poll_n,
+                elapsed_ms=int(elapsed_s * 1000),
+            )
+            return False, "timeout"
+
+        try:
+            result = await session.page.evaluate(_POLL_SIGNALS_JS, [baseline_len])
+        except Exception:
+            result = {"growth": 0, "hasOverlay": False}
+
+        growth = result.get("growth", 0)
+        has_overlay = result.get("hasOverlay", False)
+
+        signal: str | None = None
+        if growth >= _HTML_GROWTH_THRESHOLD:
+            signal = "html_growth"
+        elif has_overlay:
+            signal = "overlay"
+
+        logger.log(
+            "banner_poll",
+            poll=poll_n,
+            elapsed_ms=int(elapsed_s * 1000),
+            growth=growth,
+            has_overlay=has_overlay,
+            signal=signal,
+        )
+
+        if signal:
+            return True, signal
+
+        await asyncio.sleep(_POLL_INTERVAL_S)
+        poll_n += 1
 
 
 async def close_cookies_in_session(
@@ -50,20 +150,30 @@ async def close_cookies_in_session(
     Appends events to log_dir/trace.jsonl and saves snapshots/llm_calls
     into the same log_dir, making all logs inspectable in one place.
     """
-    logger = SessionLogger(log_dir)   # reuses existing dir; counters reset to 0
+    logger = SessionLogger(log_dir)
     t0 = time.monotonic()
     total_cost = 0.0
 
-    # Wait for JS-rendered CMPs (e.g. CookieFirst ES module) to inject the banner.
-    # domcontentloaded fires before async modules finish — without this wait the
-    # snapshot may not contain the banner element at all.
-    appeared = await session.wait_for_selector(_BANNER_HINTS, timeout_ms=8_000)
-    logger.log("banner_wait", appeared=appeared,
-               waited_ms=int((time.monotonic() - t0) * 1000))
-    if appeared:
-        # Brief pause for fade-in animations so the element is clickable
-        await asyncio.sleep(0.3)
+    # ── Adaptive banner poll ──────────────────────────────────────────────────
+    # Capture the HTML size right after page load as the baseline.
+    # Then poll cheap generic signals until a banner appears or timeout.
+    # The expensive heuristic + LLM detection runs ONCE after the poll.
+    baseline_len = await _get_html_length(session)
+    logger.log("banner_poll_start", baseline_chars=baseline_len)
 
+    signal_found, signal_type = await _poll_for_banner_signal(
+        session, baseline_len, logger
+    )
+    if signal_found:
+        await asyncio.sleep(_SETTLE_S)   # let fade-in animations finish
+    logger.log(
+        "banner_poll_done",
+        signal_found=signal_found,
+        signal_type=signal_type,
+        waited_ms=int((time.monotonic() - t0) * 1000),
+    )
+
+    # ── Heuristic + LLM detection (unchanged from before) ────────────────────
     last_click_selector: str | None = None
     last_click_selector_type: str | None = None
     last_click_rationale: str | None = None
@@ -147,14 +257,13 @@ async def close_cookies_in_session(
         clicked = await session.click_selector(decision.selector, decision.selector_type)
 
         if clicked:
-            logger.log("click", selector=decision.selector, selector_type=decision.selector_type, success=True)
+            logger.log("click", selector=decision.selector,
+                       selector_type=decision.selector_type, success=True)
             last_click_selector = decision.selector
             last_click_selector_type = decision.selector_type
             last_click_rationale = decision.rationale
             last_click_attempt = attempt
 
-            # Check visibility of the clicked element rather than re-running the
-            # heuristic (which produces false positives from footer/layout nodes).
             await asyncio.sleep(0.5)
             still_visible = await session.is_visible(decision.selector, decision.selector_type)
             if not still_visible:
@@ -170,7 +279,8 @@ async def close_cookies_in_session(
 
             html_after = await session.get_html()
             snap_after = logger.save_snapshot(html_after, f"cc_after_click_{attempt}")
-            logger.log("html_captured", snapshot_file=snap_after, size_bytes=len(html_after.encode("utf-8")))
+            logger.log("html_captured", snapshot_file=snap_after,
+                       size_bytes=len(html_after.encode("utf-8")))
             logger.log("banner_still_visible_after_click", attempt=attempt)
         else:
             logger.log("click_failed", selector=decision.selector, attempt=attempt)
