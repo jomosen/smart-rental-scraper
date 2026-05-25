@@ -8,7 +8,8 @@ from browser_session import BrowserSession
 from session_logger import SessionLogger
 
 _SCROLL_SETTLE_S = 1.5          # seconds to wait after each scroll + load-more trigger
-_STABLE_ROUNDS_NEEDED = 2       # consecutive rounds with same count → list complete
+_STABLE_ROUNDS_NEEDED = 2       # consecutive stable card counts → list complete
+_DEFAULT_MAX_ROUNDS = 8         # hard cap; keeps total overhead ≤ 12 s when stable at 2
 
 # Multilingual "load more" text patterns (case-insensitive substring match)
 _LOAD_MORE_PATTERNS = [
@@ -17,53 +18,63 @@ _LOAD_MORE_PATTERNS = [
     "voir plus", "mehr laden", "carica altri",
 ]
 
-# Same currency-pattern TreeWalker used by results_waiter — no class-name dependency.
-_PRICE_COUNT_JS = """
+# Count VEHICLE CARDS, not price occurrences.
+# Mirrors the heuristic fallback in _MARK_CARDS_JS (results_extractor_dom):
+#   walk up from visible price text nodes → nearest ancestor with heading + price
+#   → apply leaf filter to deduplicate nested matches.
+# Returns the number of distinct leaf cards visible on the page.
+_CARD_COUNT_JS = """
 () => {
-    const priceRe = /[\\u20ac$\\u00a3]\\s*\\d+([.,]\\d{1,2})?|\\d+([.,]\\d{1,2})?\\s*[\\u20ac$\\u00a3]|\\d+([.,]\\d{1,2})?\\s*(EUR|USD|GBP)/i;
-    const seen = new Set();
+    const priceRe = /[\\u20ac$\\u00a3]\\s*\\d+[\\d.,]*|\\d[\\d.,]*\\s*[\\u20ac$\\u00a3]|\\d[\\d.,]*\\s*(EUR|USD|GBP)/i;
+
+    function hasPrice(el) {
+        if (priceRe.test(el.textContent)) return true;
+        for (const d of el.querySelectorAll('[aria-label]')) {
+            if (priceRe.test(d.getAttribute('aria-label') || '')) return true;
+        }
+        return false;
+    }
+
+    // Walk up from each visible price text node to the nearest ancestor
+    // that also contains a heading element — that element is a vehicle card.
+    const visited = new Set();
+    const candidates = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-        if (priceRe.test(node.textContent)) {
-            const parent = node.parentElement;
-            if (parent && parent.offsetParent !== null) seen.add(parent);
+        if (!priceRe.test(node.textContent)) continue;
+        if (!node.parentElement || node.parentElement.offsetParent === null) continue;
+        let el = node.parentElement;
+        while (el && el !== document.body) {
+            if (visited.has(el)) break;
+            if (el.querySelector('h1,h2,h3,h4,h5,[role="heading"]') !== null && hasPrice(el)) {
+                visited.add(el);
+                candidates.push(el);
+                break;
+            }
+            el = el.parentElement;
         }
     }
-    return seen.size;
-}
-"""
-
-# Scroll both the window and any overflow-scroll containers to their bottom.
-_SCROLL_ALL_JS = """
-() => {
-    window.scrollTo(0, document.body.scrollHeight);
-    let scrolled = 0;
-    for (const el of document.querySelectorAll('*')) {
-        const s = window.getComputedStyle(el);
-        if ((s.overflowY === 'scroll' || s.overflowY === 'auto') &&
-                el.scrollHeight > el.clientHeight + 50) {
-            el.scrollTop = el.scrollHeight;
-            scrolled++;
-        }
-    }
-    return scrolled;
+    // Leaf filter: discard any candidate that contains another candidate
+    return candidates.filter(el =>
+        !candidates.some(other => other !== el && el.contains(other))
+    ).length;
 }
 """
 
 
-async def _count_price_elements(session: BrowserSession) -> int:
+async def _count_vehicle_cards(session: BrowserSession) -> int:
+    """Count visible vehicle cards (heading + price, leaf filter). Returns 0 on error."""
     try:
-        return await session.page.evaluate(_PRICE_COUNT_JS)
+        return await session.page.evaluate(_CARD_COUNT_JS)
     except Exception:
         return 0
 
 
-async def _scroll_all(session: BrowserSession) -> None:
-    """Scroll the page and any overflow containers to the bottom, press End for reinforcement."""
+async def _scroll_page(session: BrowserSession) -> None:
+    """Soft scroll to page bottom to trigger any lazy-loading. Non-destructive."""
     try:
-        await session.page.evaluate(_SCROLL_ALL_JS)
-        await session.page.keyboard.press("End")
+        await session.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     except Exception:
         pass
 
@@ -92,29 +103,34 @@ async def _try_click_load_more(session: BrowserSession) -> bool:
 async def ensure_all_results_loaded(
     session: BrowserSession,
     logger: SessionLogger,
-    max_scroll_rounds: int = 25,
+    max_scroll_rounds: int = _DEFAULT_MAX_ROUNDS,
 ) -> tuple[int, int]:
     """
-    Scroll progressively until the count of price-containing elements stabilizes.
+    Scroll progressively until the vehicle-card count stabilizes.
+
+    Card counting uses the same heuristic as _mark_valid_cards (leaf element
+    with heading + price) — one shared definition of "vehicle card". This is
+    immune to each card having multiple price values (struck + final + aria-label)
+    that would inflate a raw "€ occurrence" count.
 
     Each round:
-      1. Count visible price-containing elements.
-      2. If unchanged for _STABLE_ROUNDS_NEEDED consecutive rounds, stop.
-      3. Scroll to bottom (page + any overflow containers) and press End.
-      4. Click a visible "load more / ver más / …" button if one exists.
+      1. Count visible vehicle cards.
+      2. If count unchanged for _STABLE_ROUNDS_NEEDED consecutive rounds, stop.
+      3. Soft scroll to page bottom (single window.scrollTo, no keyboard events).
+      4. Click a visible "load more / ver más / …" button if one is found.
       5. Wait _SCROLL_SETTLE_S seconds for newly triggered content to render.
 
     Stops early on stability or at max_scroll_rounds (hard cap).
-    Provider-agnostic: no provider-specific selectors or text.
+    Provider-agnostic: no provider-specific selectors or class names.
 
-    Returns (final_count, rounds_used).
+    Returns (final_card_count, rounds_used).
     """
     stable_streak = 0
     prev_count = -1
     counts: list[int] = []
 
     for round_n in range(max_scroll_rounds):
-        current = await _count_price_elements(session)
+        current = await _count_vehicle_cards(session)
         counts.append(current)
 
         if current == prev_count:
@@ -126,7 +142,7 @@ async def ensure_all_results_loaded(
         logger.log(
             "scroll_round",
             round=round_n,
-            count=current,
+            card_count=current,
             stable_streak=stable_streak,
         )
 
@@ -140,7 +156,7 @@ async def ensure_all_results_loaded(
             )
             return current, round_n + 1
 
-        await _scroll_all(session)
+        await _scroll_page(session)
         clicked_more = await _try_click_load_more(session)
         if clicked_more:
             logger.log("scroll_load_more_clicked", round=round_n)
@@ -148,7 +164,7 @@ async def ensure_all_results_loaded(
         await asyncio.sleep(_SCROLL_SETTLE_S)
 
     # Hit the hard cap
-    final = await _count_price_elements(session)
+    final = await _count_vehicle_cards(session)
     logger.log(
         "scroll_complete",
         reason="max_rounds",
