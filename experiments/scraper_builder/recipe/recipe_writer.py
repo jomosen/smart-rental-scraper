@@ -7,6 +7,11 @@ from pathlib import Path
 
 import yaml
 
+from extraction.results_extractor_dom import (
+    DEFAULT_AUTO_KEYWORDS,
+    DEFAULT_MANUAL_KEYWORDS,
+    DEFAULT_SEAT_KEYWORDS,
+)
 from scraper_engine import ScrapeResult
 from .models import Recipe, RecipeField, RecipeFieldExtractor
 
@@ -26,9 +31,10 @@ def build_recipe(
 
     IMPORTANT: card_source is always "mark_valid_cards" — the structural
     card_selector from the LLM (fragile, breaks on re-renders) is never stored.
-    Seats and transmission are omitted from field_extractors because the DOM
-    extractor handles them via semantic aria-label matching without needing a
-    selector.
+    All 5 extraction fields are stored: model and group_code with their CSS
+    selectors; transmission, seats and price_final with their semantic strategy
+    (aria_keyword_transmission, aria_keyword, price_cascade) so the recipe is
+    fully self-contained and the DOM extractor needs no hardcoded fallbacks.
     """
     if result.form_fields is None:
         raise ValueError("ScrapeResult.form_fields is None — was the form filled?")
@@ -79,22 +85,41 @@ def build_recipe(
     submit_sel = sb.selector if sb else ""
     submit_sel_type = sb.selector_type if sb else "css"
 
-    # ── Field extractors from results_structure ───────────────────────────────
-    # Only include fields that need an explicit selector.
-    # seats, transmission, price_final, currency → handled by the DOM extractor's
-    # built-in semantic (aria-label) and three-level price cascade — no selector needed.
-    _SEMANTIC_FIELDS = frozenset({"seats", "transmission", "price_final", "currency",
-                                   "availability_note"})
+    # ── Field extractors ──────────────────────────────────────────────────────
+    # selector-based fields (model, group_code, …) come from the LLM discovery;
+    # semantic fields are always appended with fixed strategies so the recipe is
+    # fully self-contained.
+    _SELECTOR_SKIP = frozenset({"seats", "transmission", "price_final", "currency"})
     extractors: list[RecipeFieldExtractor] = []
     if result.results_structure:
         for fs in result.results_structure.field_selectors:
-            if fs.field in _SEMANTIC_FIELDS:
+            if fs.field in _SELECTOR_SKIP:
                 continue
             extractors.append(RecipeFieldExtractor(
                 field=fs.field,
                 selector=fs.selector if fs.selector else None,
                 extraction=fs.extraction,
             ))
+
+    # Semantic extractors — always present, strategy independent of LLM output
+    extractors.append(RecipeFieldExtractor(
+        field="transmission",
+        selector=None,
+        extraction="aria_keyword_transmission",
+        auto_keywords=DEFAULT_AUTO_KEYWORDS,
+        manual_keywords=DEFAULT_MANUAL_KEYWORDS,
+    ))
+    extractors.append(RecipeFieldExtractor(
+        field="seats",
+        selector=None,
+        extraction="aria_keyword",
+        keywords=DEFAULT_SEAT_KEYWORDS,
+    ))
+    extractors.append(RecipeFieldExtractor(
+        field="price_final",
+        selector=None,
+        extraction="price_cascade",
+    ))
 
     price_strategy = (
         result.results_structure.price_strategy
@@ -163,7 +188,14 @@ def _to_dict(recipe: Recipe) -> dict:
         "submit_selector_type": recipe.submit_selector_type,
         "card_source": recipe.card_source,
         "field_extractors": [
-            {"field": e.field, "selector": e.selector, "extraction": e.extraction}
+            {k: v for k, v in {
+                "field": e.field,
+                "selector": e.selector,
+                "extraction": e.extraction,
+                "keywords": e.keywords,
+                "auto_keywords": e.auto_keywords,
+                "manual_keywords": e.manual_keywords,
+            }.items() if v is not None}
             for e in recipe.field_extractors
         ],
         "price_strategy": recipe.price_strategy,

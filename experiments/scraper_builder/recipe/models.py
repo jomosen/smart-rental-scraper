@@ -34,9 +34,15 @@ class RecipeField:
 @dataclass
 class RecipeFieldExtractor:
     """Selector + extraction rule for one vehicle-card field."""
-    field: str                      # "model" | "group_code" | "availability_note"
-    selector: str | None            # CSS selector relative to card; None → semantic
+    field: str                      # "model" | "group_code" | "seats" | "transmission" | "price_final"
+    selector: str | None            # CSS selector relative to card; None for semantic strategies
     extraction: str                 # "text" | "attribute:X" | "regex:Y"
+                                    # | "aria_keyword"            → seats
+                                    # | "aria_keyword_transmission" → transmission
+                                    # | "price_cascade"           → price_final
+    keywords: list[str] | None = None          # aria_keyword: seat keyword list
+    auto_keywords: list[str] | None = None     # aria_keyword_transmission: auto keywords
+    manual_keywords: list[str] | None = None   # aria_keyword_transmission: manual keywords
 
 
 @dataclass

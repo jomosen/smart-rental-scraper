@@ -17,9 +17,13 @@ class VehicleResult:
 @dataclass
 class FieldSelector:
     field: str           # "model", "group_code", "price_final", ...
-    selector: str        # CSS selector relative to the vehicle card
+    selector: str        # CSS selector relative to the vehicle card; "" for semantic strategies
     extraction: str      # "text" | "attribute:ATTR" | "regex:PATTERN"
+                         # | "aria_keyword" | "aria_keyword_transmission" | "price_cascade"
     rationale: str
+    keywords: list[str] | None = None          # aria_keyword: seat keywords
+    auto_keywords: list[str] | None = None     # aria_keyword_transmission: auto keywords
+    manual_keywords: list[str] | None = None   # aria_keyword_transmission: manual keywords
 
 
 @dataclass

@@ -40,6 +40,9 @@ def load_recipe(path: Path) -> Recipe:
             field=e["field"],
             selector=e.get("selector"),
             extraction=e.get("extraction", "text"),
+            keywords=e.get("keywords"),
+            auto_keywords=e.get("auto_keywords"),
+            manual_keywords=e.get("manual_keywords"),
         )
         for e in data.get("field_extractors", [])
     ]

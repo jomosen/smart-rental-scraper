@@ -186,11 +186,21 @@ _PRICE_CASCADE_JS = """
 }
 """
 
-# JS: scan all descendants for aria-label/title containing seats keywords.
+# Default keyword lists — used as fallback in LLM path (no recipe-provided keywords).
+# recipe_writer.py imports these to embed them in generated recipes.
+DEFAULT_SEAT_KEYWORDS: list[str] = [
+    'plazas', 'asientos', 'seats', 'places', 'sitzplätze', 'posti', 'plaza',
+]
+DEFAULT_AUTO_KEYWORDS: list[str] = [
+    'automático', 'automática', 'automatic', 'automatique', 'automatik',
+]
+DEFAULT_MANUAL_KEYWORDS: list[str] = ['manual', 'manuale']
+
+# JS: scan descendants for aria-label/title containing seat keywords.
+# Parameterized: (el, keywords) where keywords is a JSON-serialised JS array.
 # Returns integer seat count or null.
 _SEATS_BY_ARIA_JS = """
-el => {
-    const keywords = ['plazas', 'asientos', 'seats', 'places', 'sitzplätze', 'posti', 'plaza'];
+(el, keywords) => {
     for (const d of el.querySelectorAll('[aria-label], [title]')) {
         const label = (d.getAttribute('aria-label') || d.getAttribute('title') || '').toLowerCase();
         if (keywords.some(kw => label.includes(kw))) {
@@ -202,12 +212,12 @@ el => {
 }
 """
 
-# JS: scan all descendants for aria-label/title indicating transmission type.
+# JS: scan descendants for aria-label/title indicating transmission type.
+# Parameterized: (el, kwPair) where kwPair = [autoKw, manKw], each a JS array.
 # Returns 'A' (automatic), 'M' (manual), or null.
 _TRANSMISSION_BY_ARIA_JS = """
-el => {
-    const autoKw = ['automático', 'automática', 'automatic', 'automatique', 'automatik'];
-    const manKw  = ['manual', 'manuale'];
+(el, kwPair) => {
+    const autoKw = kwPair[0], manKw = kwPair[1];
     for (const d of el.querySelectorAll('[aria-label], [title]')) {
         const label = (d.getAttribute('aria-label') || d.getAttribute('title') || '').toLowerCase();
         if (autoKw.some(kw => label.includes(kw))) return 'A';
@@ -294,10 +304,10 @@ async def _extract_price_cascade(
 
 # ── Semantic field extractors ─────────────────────────────────────────────────
 
-async def _extract_seats_by_aria(card) -> int | None:
-    """Extract seat count from aria-label/title semantics. No positional fallback."""
+async def _extract_seats_by_aria(card, keywords: list[str]) -> int | None:
+    """Extract seat count from aria-label/title semantics using the provided keyword list."""
     try:
-        result = await card.evaluate(_SEATS_BY_ARIA_JS)
+        result = await card.evaluate(_SEATS_BY_ARIA_JS, keywords)
         return int(result) if result is not None else None
     except Exception:
         return None
@@ -305,14 +315,16 @@ async def _extract_seats_by_aria(card) -> int | None:
 
 async def _extract_transmission_by_aria(
     card,
+    auto_keywords: list[str],
+    manual_keywords: list[str],
     transmission_fs: FieldSelector | None,
 ) -> str | None:
     """
-    Extract transmission type: aria-label/title semantics first ('A'/'M'),
-    then fall back to field_selector text if no aria match found.
+    Extract transmission: aria-label/title keyword match ('A'/'M') first,
+    then fall back to field_selector text extraction if no aria match.
     """
     try:
-        result = await card.evaluate(_TRANSMISSION_BY_ARIA_JS)
+        result = await card.evaluate(_TRANSMISSION_BY_ARIA_JS, [auto_keywords, manual_keywords])
         if result is not None:
             return result
     except Exception:
@@ -373,14 +385,16 @@ async def extract_vehicles_dom(
     logger: SessionLogger,
 ) -> list[VehicleResult]:
     """
-    Apply *structure* selectors deterministically (no LLM):
-    1. Mark valid leaf cards (dedup nested elements, require price presence).
-    2. For each card:
-       - Apply field selectors for model, group_code, availability_note.
-       - Extract seats via aria-label keyword match (None if no match).
-       - Extract transmission via aria-label keyword match, fallback to selector.
-       - Use the three-level price cascade for price_final/currency.
-    3. Return one VehicleResult per valid card.
+    Apply *structure* selectors deterministically (no LLM).
+
+    Dispatches each FieldSelector by its extraction type:
+      text/attribute/regex     → _apply_extraction (generic CSS path)
+      aria_keyword             → _extract_seats_by_aria with recipe keywords
+      aria_keyword_transmission→ _extract_transmission_by_aria with recipe keywords
+      price_cascade            → _extract_price_cascade (JS cascade, no CSS level-1)
+
+    When no semantic FieldSelector is present (LLM path), defaults fire for
+    seats and transmission; the JS cascade fires for price.
     """
     card_sel = structure.vehicle_card_selector
     if not card_sel:
@@ -403,41 +417,62 @@ async def extract_vehicles_dom(
         logger.log("dom_extractor_no_cards_after_dedup", selector=card_sel)
         return []
 
-    # Fields handled by dedicated extractors — skip from field_selector loop
-    _SPECIAL_FIELDS = _PRICE_FIELDS | {"currency", "seats", "transmission"}
-    other_selectors = [
-        fs for fs in structure.field_selectors
-        if fs.field not in _SPECIAL_FIELDS
-    ]
-    price_fs = next(
-        (fs for fs in structure.field_selectors if fs.field == "price_final"),
-        None,
-    )
-    transmission_fs = next(
-        (fs for fs in structure.field_selectors if fs.field == "transmission"),
-        None,
-    )
+    # Pre-classify field selectors by extraction strategy.
+    #
+    # Recipe path:  FSes carry extraction="aria_keyword" / "aria_keyword_transmission" /
+    #               "price_cascade" — routed to the matching semantic function.
+    # LLM path:     FSes carry "text" / "attribute:X" / "regex:Y" — routed to
+    #               _apply_extraction.  Aria/cascade fallbacks fire with default keywords.
+    seats_fs = None           # aria_keyword for seats (recipe path)
+    trans_semantic_fs = None  # aria_keyword_transmission (recipe path)
+    price_cascade_fs = None   # price_cascade (recipe path)
+    trans_text_fs = None      # text/regex selector for transmission (LLM fallback)
+    price_text_fs = None      # text/regex selector for price_final (LLM level-1)
+    generic_selectors = []    # all other text/attribute/regex selectors
+
+    for fs in structure.field_selectors:
+        if fs.extraction == "aria_keyword" and fs.field == "seats":
+            seats_fs = fs
+        elif fs.extraction == "aria_keyword_transmission" and fs.field == "transmission":
+            trans_semantic_fs = fs
+        elif fs.extraction == "price_cascade" and fs.field == "price_final":
+            price_cascade_fs = fs
+        elif fs.field == "transmission":
+            trans_text_fs = fs          # LLM-provided selector, used as aria fallback
+        elif fs.field in _PRICE_FIELDS | {"currency"}:
+            price_text_fs = fs          # LLM-provided price selector (level-1 cascade)
+        elif fs.field != "seats":       # seats with non-semantic selector → ignored
+            generic_selectors.append(fs)
 
     vehicles: list[VehicleResult] = []
 
     for card in cards:
         field_values: dict = {}
 
-        # Generic non-special fields (model, group_code, …)
-        for fs in other_selectors:
+        # Generic fields (model, group_code, …) — text/attribute/regex selectors
+        for fs in generic_selectors:
             raw = await _apply_extraction(card, fs)
             field_values[fs.field] = _coerce(fs.field, raw)
 
-        # Seats: semantic aria-label match only; None if no clear label found
-        field_values["seats"] = await _extract_seats_by_aria(card)
+        # Seats: recipe-provided keywords → defaults
+        seat_kw = (seats_fs.keywords or DEFAULT_SEAT_KEYWORDS) if seats_fs else DEFAULT_SEAT_KEYWORDS
+        field_values["seats"] = await _extract_seats_by_aria(card, seat_kw)
 
-        # Transmission: aria-label first, field_selector text fallback
-        field_values["transmission"] = await _extract_transmission_by_aria(
-            card, transmission_fs
-        )
+        # Transmission: recipe-provided keywords → defaults; text selector as aria fallback
+        if trans_semantic_fs:
+            auto_kw = trans_semantic_fs.auto_keywords or DEFAULT_AUTO_KEYWORDS
+            man_kw = trans_semantic_fs.manual_keywords or DEFAULT_MANUAL_KEYWORDS
+            field_values["transmission"] = await _extract_transmission_by_aria(
+                card, auto_kw, man_kw, None
+            )
+        else:
+            field_values["transmission"] = await _extract_transmission_by_aria(
+                card, DEFAULT_AUTO_KEYWORDS, DEFAULT_MANUAL_KEYWORDS, trans_text_fs
+            )
 
-        # Price extraction via cascade
-        price_data = await _extract_price_cascade(card, price_fs)
+        # Price: skip level-1 selector in recipe path (price_cascade_fs present)
+        price_sel = None if price_cascade_fs else price_text_fs
+        price_data = await _extract_price_cascade(card, price_sel)
         field_values.update(price_data)
 
         # Build VehicleResult

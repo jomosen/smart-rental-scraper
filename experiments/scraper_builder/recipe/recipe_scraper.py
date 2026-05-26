@@ -115,6 +115,10 @@ def _recipe_to_results_structure(recipe: Recipe) -> ResultsStructure:
     nothing ("[data-recipe-heuristic]"), so Pass 1 yields 0 cards and the
     heuristic Pass 2 (heading+price walk-up, leaf filter) always fires.
     This is the "mark_valid_cards" strategy.
+
+    All field_extractors are included — semantic ones (aria_keyword,
+    aria_keyword_transmission, price_cascade) carry no selector but carry
+    their keyword lists so the DOM extractor can dispatch correctly.
     """
     field_selectors = [
         FieldSelector(
@@ -122,9 +126,11 @@ def _recipe_to_results_structure(recipe: Recipe) -> ResultsStructure:
             selector=e.selector or "",
             extraction=e.extraction,
             rationale="From recipe",
+            keywords=e.keywords,
+            auto_keywords=e.auto_keywords,
+            manual_keywords=e.manual_keywords,
         )
         for e in recipe.field_extractors
-        if e.selector
     ]
     return ResultsStructure(
         vehicle_card_selector="[data-recipe-heuristic]",
