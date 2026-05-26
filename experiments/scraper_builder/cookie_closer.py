@@ -9,6 +9,7 @@ Cookie-banner closer — two entry points:
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 
@@ -25,6 +26,17 @@ _POLL_INTERVAL_S = 1.0           # seconds between poll iterations
 _BANNER_POLL_TIMEOUT_S = 15.0    # total wait budget for async banner injection
 _HTML_GROWTH_THRESHOLD = 5_000   # chars growth from baseline → async content injected
 _SETTLE_S = 0.3                  # pause after signal so fade-in animations finish
+
+# Multilingual accept-button text patterns used by the heuristic closer.
+# Ordered most-specific first to reduce false positives.
+_ACCEPT_TEXTS = [
+    "accept all cookies", "accept all", "accept cookies",
+    "aceptar todas", "aceptar todo", "aceptar cookies", "aceptar",
+    "agree and continue", "agree", "got it", "i understand", "entendido",
+    "allow all", "allow cookies", "continuar", "continue",
+    "tout accepter", "alle akzeptieren", "accetta tutto",
+    "consent", "ok",
+]
 
 # JS: check two generic banner signals in a single DOM walk.
 #
@@ -139,9 +151,38 @@ async def _poll_for_banner_signal(
         poll_n += 1
 
 
+async def _close_banner_heuristic(
+    session: BrowserSession,
+    logger: SessionLogger,
+) -> bool:
+    """
+    Click the first visible accept-like button without LLM.
+
+    Scans the live DOM for buttons/links matching multilingual accept patterns.
+    Returns True if a button was found and clicked.
+    """
+    for text in _ACCEPT_TEXTS:
+        try:
+            loc = (
+                session.page
+                .locator('button, a, [role="button"]')
+                .filter(has_text=re.compile(text, re.IGNORECASE))
+                .first
+            )
+            if await loc.is_visible():
+                await loc.click(timeout=2_000)
+                logger.log("heuristic_banner_click", matched_text=text)
+                return True
+        except Exception:
+            continue
+    logger.log("heuristic_banner_click_failed")
+    return False
+
+
 async def close_cookies_in_session(
     session: BrowserSession,
     log_dir: Path,
+    heuristic_only: bool = False,
 ) -> CloseResult:
     """
     Close the cookie banner on the currently loaded page.
@@ -172,6 +213,18 @@ async def close_cookies_in_session(
         signal_type=signal_type,
         waited_ms=int((time.monotonic() - t0) * 1000),
     )
+
+    # ── Heuristic path (no LLM) ───────────────────────────────────────────────
+    if heuristic_only:
+        if not signal_found:
+            return _make_result(success=True, action="no_banner_found", attempts=0)
+        clicked = await _close_banner_heuristic(session, logger)
+        return _make_result(
+            success=clicked,
+            action="clicked" if clicked else "failed",
+            attempts=1,
+            error=None if clicked else "Heuristic found no accept button",
+        )
 
     # ── Heuristic + LLM detection (unchanged from before) ────────────────────
     last_click_selector: str | None = None

@@ -1,6 +1,7 @@
 """End-to-end form fill orchestrator: location → dates → times in one browser session."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import time
@@ -156,6 +157,7 @@ async def fill_form_in_session(
     outcomes: list[FieldFillOutcome] = []
     failed_at: str | None = None
     fields: FormFields | None = None
+    widget_data: dict = {}
 
     def _fail_field(name: str, target: str, strategy: str | None, error: str) -> FieldFillOutcome:
         nonlocal failed_at
@@ -283,6 +285,12 @@ async def fill_form_in_session(
                 llm_calls += 1
                 _log(log_dir, "field_widget_classified", name="pickup_location",
                      widget_type=loc_widget.widget_type, is_searchable=loc_widget.is_searchable)
+                widget_data["pickup_location"] = {
+                    "kind": "widget",
+                    **dataclasses.asdict(loc_widget),
+                    "match_mode": "fuzzy",
+                    "strategy": None,
+                }
             except Exception as exc:
                 loc_widget = None
                 outcomes.append(_fail_field("pickup_location", loc_target, None,
@@ -350,6 +358,11 @@ async def fill_form_in_session(
             _log(log_dir, "field_widget_classified", name="pickup_date",
                  widget_type=pickup_date_widget.widget_type,
                  is_range_calendar=pickup_date_widget.is_range_calendar)
+            widget_data["pickup_date"] = {
+                "kind": "date_widget",
+                **dataclasses.asdict(pickup_date_widget),
+                "strategy": None,
+            }
         except Exception as exc:
             outcomes.append(_fail_field("pickup_date", str(pickup_date_target), None,
                                         f"pickup_date widget classification failed: {exc}"))
@@ -398,6 +411,11 @@ async def fill_form_in_session(
             return_date_widget = pickup_date_widget
             outcomes.append(_ok("return_date", str(return_date_target),
                                 "range_calendar_autofill"))
+            widget_data["return_date"] = {
+                "kind": "date_widget",
+                **dataclasses.asdict(pickup_date_widget),
+                "strategy": "range_calendar_autofill",
+            }
 
         elif return_date_field is None:
             outcomes.append(_fail_field("return_date", str(return_date_target), None,
@@ -426,6 +444,11 @@ async def fill_form_in_session(
                 llm_calls += 1
                 _log(log_dir, "field_widget_classified", name="return_date",
                      widget_type=return_date_widget.widget_type)
+                widget_data["return_date"] = {
+                    "kind": "date_widget",
+                    **dataclasses.asdict(return_date_widget),
+                    "strategy": None,
+                }
             except Exception as exc:
                 outcomes.append(_fail_field("return_date", str(return_date_target), None,
                                             f"return_date widget classification failed: {exc}"))
@@ -492,6 +515,12 @@ async def fill_form_in_session(
                 llm_calls += 1
                 _log(log_dir, "field_widget_classified", name="pickup_time",
                      widget_type=pt_widget.widget_type, is_searchable=pt_widget.is_searchable)
+                widget_data["pickup_time"] = {
+                    "kind": "widget",
+                    **dataclasses.asdict(pt_widget),
+                    "match_mode": "exact",
+                    "strategy": None,
+                }
             except Exception as exc:
                 pt_widget = None
                 outcomes.append(_fail_field("pickup_time", pickup_time_target, None,
@@ -554,6 +583,12 @@ async def fill_form_in_session(
                 llm_calls += 1
                 _log(log_dir, "field_widget_classified", name="return_time",
                      widget_type=rt_widget.widget_type, is_searchable=rt_widget.is_searchable)
+                widget_data["return_time"] = {
+                    "kind": "widget",
+                    **dataclasses.asdict(rt_widget),
+                    "match_mode": "exact",
+                    "strategy": None,
+                }
             except Exception as exc:
                 rt_widget = None
                 outcomes.append(_fail_field("return_time", return_time_target, None,
@@ -638,6 +673,12 @@ async def fill_form_in_session(
     _log(log_dir, "orchestrator_result",
          success=success, failed_at=failed_at,
          verification=verification, cost_eur=total_cost, llm_calls=llm_calls)
+
+    if widget_data:
+        (log_dir / "form_widget_infos.json").write_text(
+            json.dumps(widget_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     return FormFillReport(
         site_url=url,
