@@ -208,6 +208,16 @@ async def fill_form_in_session(
     _log(log_dir, "cookie_closer_invoked",
          success=cookie_result.success, cost_eur=cookie_result.cost_estimate_eur)
 
+    if not cookie_result.success:
+        error = f"Cookie banner not closed: {cookie_result.error}"
+        _log(log_dir, "orchestrator_result", success=False, error=error)
+        return FormFillReport(
+            site_url=url, targets=targets, success=False,
+            outcomes=[], failed_at="cookies",
+            duration_seconds=time.monotonic() - t0,
+            cost_estimate_eur=total_cost, llm_calls=llm_calls, error=error,
+        ), None
+
     # ── 3. Capture form + identify ALL fields (one LLM call) ──────────────────
     form_result = await capture_search_form(session, log_dir)
     if form_result is None:

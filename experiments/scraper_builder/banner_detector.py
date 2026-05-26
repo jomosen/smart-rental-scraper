@@ -4,28 +4,47 @@ from __future__ import annotations
 from bs4 import BeautifulSoup, Tag
 
 _KEYWORD_ATTRS = {
-    "cookie", "cookies", "consent", "gdpr", "banner",
-    "notice", "privacy", "overlay", "modal", "popup",
+    "cookie", "cookies", "consent", "gdpr", "rgpd", "banner",
+    "notice", "privacy", "privacidad", "consentimiento", "privacité",
+    "datenschutz", "overlay", "modal", "popup",
 }
+
+# Multilingual consent keywords for visible text scoring.
+_CONSENT_TEXT_KW = (
+    "cookie", "cookies", "aceptar", "accept", "consent", "consentimiento",
+    "privacy", "privacidad", "gdpr", "rgpd", "datenschutz",
+)
 
 _MAX_CHARS = 2_000
 
 
 def _score_element(tag: Tag) -> int:
     score = 0
+
+    # Structural modal/dialog signals — strongest indicators of a banner overlay.
+    if tag.name == "dialog":
+        score += 8
+    if tag.get("aria-modal") == "true":
+        score += 7
+
+    # ARIA roles — dialog roles boosted; banner role (page <header> landmark) kept low.
+    role = tag.get("role", "")
+    if role in ("dialog", "alertdialog"):
+        score += 6
+    elif role == "banner":
+        score += 1   # WAI-ARIA landmark for <header> — very common false positive
+
+    # Keyword matches in common attributes.
     for attr in ("id", "class", "aria-label", "data-testid"):
         value = tag.get(attr, "")
         if isinstance(value, list):
             value = " ".join(value)
-        value_lower = value.lower()
-        if any(kw in value_lower for kw in _KEYWORD_ATTRS):
+        if any(kw in value.lower() for kw in _KEYWORD_ATTRS):
             score += 3
 
-    if tag.get("role") in ("dialog", "alertdialog", "banner"):
-        score += 2
-
-    text = tag.get_text(" ", strip=True)
-    if any(kw in text.lower() for kw in ("cookie", "cookies", "aceptar", "accept", "consent")):
+    # Consent-related visible text (multilingual).
+    text = tag.get_text(" ", strip=True).lower()
+    if any(kw in text for kw in _CONSENT_TEXT_KW):
         score += 2
 
     return score

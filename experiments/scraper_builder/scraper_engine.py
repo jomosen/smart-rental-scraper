@@ -142,7 +142,8 @@ async def scrape(
                 return _make_result("form", f"Form phase exception: {exc}")
 
             if not form_report.success:
-                return _make_result("form", form_report.error or "Form fill failed")
+                failed_phase = "cookies" if form_report.failed_at == "cookies" else "form"
+                return _make_result(failed_phase, form_report.error or f"{failed_phase} failed")
 
             if form_fields is None or form_fields.submit_button is None:
                 return _make_result("form", "No submit button identified")
