@@ -25,8 +25,6 @@ puedas identificar (null si no aparece o es ambiguo):
 
 - model: nombre del modelo del vehículo (ej. "FIAT 500")
 - group_code: código de grupo del provider (ej. "Grupo A", "S1A")
-- availability_note: "o similar" si el modelo es aproximado, "garantizado"
-  si está garantizado, null si no se indica
 - transmission: tipo de cambio ("M"=manual, "A"=automático, o como aparezca).
   Busca aria-labels o atributos title con palabras como "automático",
   "manual", "automatic". Si no hay indicación clara, devuelve null.
@@ -84,7 +82,6 @@ def _parse_vehicle(raw: dict) -> VehicleResult:
     return VehicleResult(
         model=raw.get("model") or None,
         group_code=raw.get("group_code") or None,
-        availability_note=raw.get("availability_note") or None,
         transmission=raw.get("transmission") or None,
         seats=_int(raw.get("seats")),
         price_final=_float(raw.get("price_final")),

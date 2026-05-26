@@ -423,7 +423,7 @@ async def extract_vehicles_dom(
     for card in cards:
         field_values: dict = {}
 
-        # Generic non-special fields (model, group_code, availability_note, …)
+        # Generic non-special fields (model, group_code, …)
         for fs in other_selectors:
             raw = await _apply_extraction(card, fs)
             field_values[fs.field] = _coerce(fs.field, raw)

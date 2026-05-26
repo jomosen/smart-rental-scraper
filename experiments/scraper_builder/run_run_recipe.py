@@ -61,8 +61,15 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def print_recipe_report(result: ScrapeResult, label: str = "recipe") -> None:
-    llm_flag = "" if result.llm_calls == 0 else "  [BUG: llm_calls > 0]"
+def print_recipe_report(
+    result: ScrapeResult,
+    label: str = "recipe",
+    check_llm_calls: bool = True,
+) -> None:
+    llm_flag = (
+        "" if not check_llm_calls or result.llm_calls == 0
+        else "  [BUG: llm_calls > 0]"
+    )
     overall = "[OK]" if result.success else "[FAIL]"
     print(f"  {overall}  [{label}]  "
           f"duration={result.duration_seconds:.1f}s  "
@@ -130,7 +137,7 @@ async def main() -> None:
         llm_result = await scrape(
             url, targets, log_dir_llm, headless=not args.visible
         )
-        print_recipe_report(llm_result, label="scrape/llm")
+        print_recipe_report(llm_result, label="scrape/llm", check_llm_calls=False)
 
         if llm_result.vehicles and recipe_result.vehicles:
             verification = verify(llm_result.vehicles, recipe_result.vehicles)

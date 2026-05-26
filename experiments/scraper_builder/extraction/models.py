@@ -8,7 +8,6 @@ from dataclasses import dataclass
 class VehicleResult:
     model: str | None = None
     group_code: str | None = None
-    availability_note: str | None = None   # "o similar" | "garantizado" | None
     transmission: str | None = None        # "M" | "A" | "Manual" | "Automático"
     seats: int | None = None
     price_final: float | None = None       # price the customer pays

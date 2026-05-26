@@ -83,7 +83,8 @@ def build_recipe(
     # Only include fields that need an explicit selector.
     # seats, transmission, price_final, currency → handled by the DOM extractor's
     # built-in semantic (aria-label) and three-level price cascade — no selector needed.
-    _SEMANTIC_FIELDS = frozenset({"seats", "transmission", "price_final", "currency"})
+    _SEMANTIC_FIELDS = frozenset({"seats", "transmission", "price_final", "currency",
+                                   "availability_note"})
     extractors: list[RecipeFieldExtractor] = []
     if result.results_structure:
         for fs in result.results_structure.field_selectors:
