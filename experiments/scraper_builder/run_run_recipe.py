@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -22,7 +23,7 @@ load_dotenv()
 
 from extraction.extraction_verifier import verify
 from location_explorer import create_log_dir
-from recipe import load_recipe, run_recipe
+from recipe import RecipeHealthCheck, check_recipe_health, load_recipe, run_recipe
 from scraper_engine import ScrapeResult, scrape
 
 _BASE = Path(__file__).parent
@@ -96,7 +97,27 @@ def print_recipe_report(
         print(f"  error:           {result.error}")
 
 
-async def main() -> None:
+def print_health_report(health: RecipeHealthCheck, provider_key: str) -> None:
+    status = "[OK] healthy" if health.healthy else "[BROKEN]"
+    print(f"  recipe health:   {status}")
+    print(f"    vehicles:        {health.vehicle_count}")
+    if health.vehicle_count > 0:
+        print(f"    with model:      {health.pct_with_model:.0%}")
+        print(f"    with price:      {health.pct_with_price:.0%}")
+        print(f"    with key fields: {health.pct_with_key_fields:.0%}")
+        print(f"    prices in range: {'yes' if health.prices_in_range else 'NO'}")
+    if health.failed_checks:
+        print("    failed:")
+        for fc in health.failed_checks:
+            print(f"      [{fc}]")
+        print(f"    -> Recipe likely stale. Regenerate: "
+              f"python run_build_recipe.py --provider-key {provider_key}")
+    if health.warnings:
+        for w in health.warnings:
+            print(f"    warning: {w}")
+
+
+async def main() -> int:
     args = parse_args()
     targets = compute_targets(args)
     provider_key = args.provider_key
@@ -105,7 +126,7 @@ async def main() -> None:
     if not recipe_path.exists():
         print(f"Recipe not found: {recipe_path}")
         print(f"Run run_build_recipe.py --provider-key {provider_key} first.")
-        return
+        return 1
 
     recipe = load_recipe(recipe_path)
     print(f"\n=== recipe: {provider_key} | url={recipe.url} ===")
@@ -121,6 +142,10 @@ async def main() -> None:
         recipe, targets, log_dir, headless=not args.visible
     )
     print_recipe_report(recipe_result, label="recipe/no-llm")
+
+    # ── Health check (no LLM) ─────────────────────────────────────────────────
+    health = check_recipe_health(recipe_result)
+    print_health_report(health, provider_key)
 
     # ── Optional LLM validation ───────────────────────────────────────────────
     if args.validate:
@@ -166,6 +191,8 @@ async def main() -> None:
             if not recipe_result.vehicles:
                 print("  validation skipped: recipe returned no vehicles")
 
+    return 0 if health.healthy else 1
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

@@ -53,6 +53,9 @@ class ScrapeResult:
     scroll_rounds: int
     scroll_final_count: int
     error: str | None
+    # True when results_waiter detected a "no availability" page body message.
+    # Used by check_recipe_health to distinguish legit empty results from breakage.
+    has_empty_page: bool = False
 
 
 async def scrape(
@@ -81,6 +84,7 @@ async def scrape(
     llm_calls = 0
     scroll_rounds = 0
     scroll_final_count = 0
+    has_empty_page = False
     form_fields: FormFields | None = None
     results_structure: ResultsStructure | None = None
     vehicles: list[VehicleResult] = []
@@ -125,6 +129,7 @@ async def scrape(
             llm_calls=llm_calls,
             scroll_rounds=scroll_rounds,
             scroll_final_count=scroll_final_count,
+            has_empty_page=has_empty_page,
         )
 
     try:
@@ -179,6 +184,7 @@ async def scrape(
                     waited_ms=wait_outcome.waited_ms,
                     candidate_count=wait_outcome.candidate_count,
                 )
+                has_empty_page = wait_outcome.signal == "empty_message"
                 if not wait_outcome.ready:
                     return _make_result(
                         "results",
@@ -290,6 +296,8 @@ async def scrape(
                 )
 
             if not vehicles:
+                if has_empty_page:
+                    return _make_result(None, None, success=True)
                 return _make_result("extraction", "LLM extraction returned no vehicles")
 
             success = verification is not None and verification.match

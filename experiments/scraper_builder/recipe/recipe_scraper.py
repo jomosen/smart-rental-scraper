@@ -228,6 +228,7 @@ async def run_recipe(
     t0 = time.monotonic()
     scroll_rounds = 0
     scroll_final_count = 0
+    has_empty_page = False
     vehicles: list[VehicleResult] = []
 
     logger = SessionLogger(log_dir)
@@ -267,6 +268,7 @@ async def run_recipe(
             llm_calls=0,
             scroll_rounds=scroll_rounds,
             scroll_final_count=scroll_final_count,
+            has_empty_page=has_empty_page,
         )
 
     try:
@@ -324,6 +326,7 @@ async def run_recipe(
                     signal=wait_outcome.signal,
                     waited_ms=wait_outcome.waited_ms,
                 )
+                has_empty_page = wait_outcome.signal == "empty_message"
                 if not wait_outcome.ready:
                     return _make_result(
                         "results",
@@ -353,6 +356,8 @@ async def run_recipe(
                 return _make_result("extraction", f"DOM extraction failed: {exc}")
 
             if not vehicles:
+                if has_empty_page:
+                    return _make_result(None, None, success=True)
                 return _make_result("extraction",
                                     "DOM extraction returned no vehicles")
 
