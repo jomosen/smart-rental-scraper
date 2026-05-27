@@ -1,14 +1,20 @@
 """
-Fase C1 — execution step.
+Fase D1 — execution step.
 
-Loads a recipe YAML and runs it with ZERO LLM calls.  Optionally validates
-the output against a fresh LLM scrape (--validate) using the existing verifier.
+Reads the active recipe from the database and runs it with ZERO LLM calls.
+Optionally validates the output against a fresh LLM scrape (--validate).
+
+Replaces the old YAML-based approach from C1.
 
 Usage:
     python run_run_recipe.py [--visible] [--location CITY]
                              [--pickup-offset DAYS] [--pickup-time HH:MM]
                              [--dropoff-time HH:MM] [--provider-key KEY]
                              [--validate]
+
+Prerequisites:
+  - DB running with a recipe saved (run_build_recipe.py first).
+  - ADMIN_DATABASE_URL or APP_DATABASE_URL set in .env.
 """
 from __future__ import annotations
 
@@ -18,16 +24,32 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+# ── Make src/ importable from experiments/ context ───────────────────────────
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 from dotenv import load_dotenv
 load_dotenv()
 
+# experiments/ infrastructure (still lives here in D1)
 from extraction.extraction_verifier import verify
 from location_explorer import create_log_dir
-from recipe import RecipeHealthCheck, check_recipe_health, load_recipe, run_recipe
+from recipe.recipe_scraper import run_recipe as _run_recipe_browser
 from scraper_engine import ScrapeResult, scrape
 
-_BASE = Path(__file__).parent
-RECIPES_DIR = _BASE / "recipes"
+# src/scraper application + persistence
+from src.scraper.application.builder.run_recipe import run_recipe_from_db
+from src.scraper.domain.builder.recipe_health import RecipeHealthCheck, check_recipe_health
+from src.scraper.infrastructure.repositories.provider_recipe_repository import (
+    ProviderRecipeRepository,
+)
+from src.saas.infrastructure.persistence.engine import app_engine
+from src.saas.infrastructure.persistence.session import make_session_factory
+from src.saas.infrastructure.persistence.models.catalog import Provider
+
+from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 TEST_CASES = [
     ("centauro", "https://www.centauro.net"),
@@ -48,7 +70,7 @@ def compute_targets(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Execute a recipe without LLM and optionally validate (Fase C1)"
+        description="Execute a recipe from DB without LLM and optionally validate (Fase D1)"
     )
     p.add_argument("--visible", action="store_true", help="Show browser window")
     p.add_argument("--location", default="Alicante")
@@ -56,10 +78,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pickup-time", default="10:00")
     p.add_argument("--dropoff-time", default="10:00")
     p.add_argument("--provider-key", default="centauro",
-                   help="Recipe key (default: centauro)")
+                   help="providers.code to look up recipe for (default: centauro)")
     p.add_argument("--validate", action="store_true",
                    help="Also run scrape() with LLM and compare outputs")
     return p.parse_args()
+
+
+def _get_provider_id(session: Session, provider_key: str) -> int:
+    row = session.scalar(select(Provider).where(Provider.code == provider_key))
+    if row is None:
+        raise ValueError(
+            f"Provider '{provider_key}' not found in providers table."
+        )
+    return row.id
 
 
 def print_recipe_report(
@@ -121,14 +152,23 @@ async def main() -> int:
     args = parse_args()
     targets = compute_targets(args)
     provider_key = args.provider_key
-    recipe_path = RECIPES_DIR / f"{provider_key}.yaml"
 
-    if not recipe_path.exists():
-        print(f"Recipe not found: {recipe_path}")
-        print(f"Run run_build_recipe.py --provider-key {provider_key} first.")
+    engine = app_engine()
+    factory = make_session_factory(engine)
+
+    session = factory()
+    try:
+        provider_id = _get_provider_id(session, provider_key)
+        repo = ProviderRecipeRepository(session)
+        recipe = repo.get_active_recipe(provider_id)
+    finally:
+        session.close()
+
+    if recipe is None:
+        print(f"No active recipe for '{provider_key}' in DB.")
+        print(f"Run: python run_build_recipe.py --provider-key {provider_key}")
         return 1
 
-    recipe = load_recipe(recipe_path)
     print(f"\n=== recipe: {provider_key} | url={recipe.url} ===")
     print(f"  Discovered: {recipe.discovered_at}")
     print(f"  card_source: {recipe.card_source}  "
@@ -138,9 +178,20 @@ async def main() -> int:
     log_dir = create_log_dir(provider_key, suffix="_run_recipe")
     print(f"  Logs: {log_dir}")
 
-    recipe_result = await run_recipe(
-        recipe, targets, log_dir, headless=not args.visible
-    )
+    session = factory()
+    try:
+        repo = ProviderRecipeRepository(session)
+        recipe_result = await run_recipe_from_db(
+            provider_id=provider_id,
+            targets=targets,
+            log_dir=log_dir,
+            headless=not args.visible,
+            repo=repo,
+            executor=_run_recipe_browser,
+        )
+    finally:
+        session.close()
+
     print_recipe_report(recipe_result, label="recipe/no-llm")
 
     # ── Health check (no LLM) ─────────────────────────────────────────────────
@@ -151,7 +202,6 @@ async def main() -> int:
     if args.validate:
         print("\n  -- LLM validation --")
 
-        # find provider URL from TEST_CASES (by provider_key or first match)
         url = next(
             (u for n, u in TEST_CASES if n == provider_key),
             TEST_CASES[0][1],

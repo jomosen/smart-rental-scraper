@@ -215,6 +215,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 - `acriss_codes`, `provider_vehicle_categories`
 - `homogeneous_zones`, `price_observations`, `price_observation_heartbeats`
 - `scrape_runs`
+- `provider_recipes`  (see Decision 11)
 
 **Tenant-scoped tables (with `tenant_id` and RLS):**
 - `users`, `tenant_vehicle_groups`, `tenant_vehicle_group_mappings`
@@ -254,6 +255,29 @@ Pragmatic mix, not uniform across all entities.
 - Group/mapping edits are interpretive; the snapshot in `pricing_outputs` already preserves audit value.
 - The canonical taxonomy is product-wide configuration; the YAML + version mechanism gives a single, reviewable source of truth.
 - Pricing rules carry direct economic consequence and are few in number; versioning them is cheap and high-value.
+
+---
+
+### 11. Scraping recipes — versioned, provider-scoped
+
+A **recipe** is a complete, deterministic description of how to scrape one provider: URL, cookie-banner strategy, form-field selectors and widget types, submit selector, and field-extraction strategies for every vehicle attribute. Recipes are discovered automatically by the LLM-driven builder (`run_build_recipe`); subsequent runs execute with **zero LLM calls** (`run_run_recipe`), which is what makes the daily pricing pipeline cheap.
+
+**Why version recipes in the database instead of YAML files.**
+- The website of a provider changes over time. When selectors become stale, the builder is re-run and the new recipe supersedes the old one. Keeping every past recipe in the DB gives an exact record of what configuration was active during each scrape run.
+- A YAML file on disk has no audit trail, no FK linkage to `providers`, and no rollback mechanism.
+- The recipe is global (catalog, not per-tenant), so it belongs in the shared catalog alongside `providers`.
+
+**Append-versioning, no in-place UPDATE.**
+Re-running the builder inserts a new row with `version = max(version) + 1` and `active = true`; the previous active row is simultaneously flipped to `active = false`. Historical rows are kept indefinitely for audit. Rollback = flip `active` flags in a back-office query.
+
+**One active recipe per provider.**
+Enforced by a partial unique index: `UNIQUE (provider_id) WHERE active = true`. At most one row satisfies the predicate per provider at any time.
+
+**No tenant_id, no RLS.**
+Recipes are operator-curated catalog data — the same recipe serves all tenants subscribed to a given provider. Same isolation boundary as `providers`.
+
+**Recipe storage format: JSONB.**
+The Python `Recipe` dataclass (domain model) is serialised to a JSONB column by the repository layer (`ProviderRecipeRepository`). The domain model is the source of truth; the JSONB is the persistence representation. No separate recipe-field tables — the whole recipe is one atomic document.
 
 ---
 
@@ -458,6 +482,19 @@ provider_vehicle_categories
   -- of the same provider may share acriss_code (provider distinguishes price
   -- tiers more finely than ACRISS does — see Decision 1, "Within-
   -- provider heterogeneity"). Aggregation across them happens at query time.
+
+provider_recipes
+  id BIGSERIAL PK
+  provider_id FK → providers          -- catalog scope (no tenant_id)
+  version INT NOT NULL                 -- monotonically increasing per provider
+  recipe_jsonb JSONB NOT NULL          -- complete Recipe document (domain → JSONB)
+  discovered_at TIMESTAMPTZ NULL       -- timestamp from the discovery scrape
+  active BOOLEAN NOT NULL DEFAULT false
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  -- Partial unique index: UNIQUE (provider_id) WHERE active = true
+  -- Invariant: at most one active recipe per provider at any time.
+  -- Append-versioning: re-run builder → new row version N+1 active=true,
+  --   previous row set active=false atomically in the same transaction.
 
 scrape_runs
   id PK

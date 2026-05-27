@@ -309,3 +309,34 @@ class PriceObservationHeartbeat(Base):
     duration_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, primary_key=True)
     last_checked_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_price_per_day: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+
+class ProviderRecipe(Base):
+    """Versioned scraping recipe for one provider.
+
+    Append-only versioning: re-running the builder inserts a new row with
+    version = max(version) + 1 and active = true; the previous active row is
+    flipped to active = false in the same transaction.  A partial unique index
+    (provider_id WHERE active = true) ensures at most one active recipe per
+    provider at all times.
+
+    recipe_jsonb stores the complete Recipe domain object serialised as JSONB
+    by ProviderRecipeRepository.  No tenant_id; no RLS — catalog scope.
+    """
+    __tablename__ = "provider_recipes"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    provider_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("providers.id", name="fk_provider_recipes_provider", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    recipe_jsonb: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    discovered_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
