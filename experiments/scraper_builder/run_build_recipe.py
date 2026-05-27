@@ -32,8 +32,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # experiments/ infrastructure (still lives here in D1)
-from location_explorer import create_log_dir
-from scraper_engine import scrape
+from src.scraper.infrastructure.builder.location_explorer import create_log_dir
+from src.scraper.infrastructure.builder.scraper_engine import scrape
 
 # src/scraper application + persistence
 from src.scraper.application.builder.build_recipe import build_recipe

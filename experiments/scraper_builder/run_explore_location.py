@@ -8,15 +8,21 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from argparse import ArgumentParser
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-sys.path.insert(0, os.path.dirname(__file__))
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from location_explorer import LocationExplorationReport, create_log_dir, explore_location_field
+from src.scraper.infrastructure.builder.location_explorer import (
+    LocationExplorationReport,
+    create_log_dir,
+    explore_location_field,
+)
 
 load_dotenv()
 

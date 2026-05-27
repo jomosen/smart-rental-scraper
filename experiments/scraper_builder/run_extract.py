@@ -3,13 +3,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from extraction_runner import ExtractionExperimentReport, extract_experiment
-from location_explorer import create_log_dir
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.scraper.infrastructure.builder.extraction_runner import (
+    ExtractionExperimentReport,
+    extract_experiment,
+)
+from src.scraper.infrastructure.builder.location_explorer import create_log_dir
 
 TEST_CASES = [
     ("centauro", "https://www.centauro.net"),
@@ -62,7 +71,6 @@ def print_report(report: ExtractionExperimentReport) -> None:
         v = report.verification
         match_flag = "[OK]" if v.match else "[FAIL]"
         print(f"  verification:    {match_flag}  {v.rationale}")
-        # Field agreement table (only fields with any comparison)
         compared_fields = {
             f: pct for f, pct in v.field_agreement.items()
             if pct < 1.0 or f in ("model", "group_code", "price_final")
@@ -79,7 +87,6 @@ def print_report(report: ExtractionExperimentReport) -> None:
             if len(v.mismatches) > 8:
                 print(f"    ... and {len(v.mismatches) - 8} more")
 
-    # Sample vehicles from LLM extraction
     sample = report.llm_vehicles[:3]
     if sample:
         print("  sample (LLM, first 3):")

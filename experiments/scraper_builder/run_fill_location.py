@@ -3,10 +3,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-from location_filler_runner import FillExperimentReport, create_fill_log_dir, fill_location_experiment
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.scraper.infrastructure.builder.location_filler_runner import (
+    FillExperimentReport,
+    create_fill_log_dir,
+    fill_location_experiment,
+)
 
 load_dotenv()
 

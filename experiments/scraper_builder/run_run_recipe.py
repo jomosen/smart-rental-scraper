@@ -33,10 +33,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # experiments/ infrastructure (still lives here in D1)
-from extraction.extraction_verifier import verify
-from location_explorer import create_log_dir
-from recipe.recipe_scraper import run_recipe as _run_recipe_browser
-from scraper_engine import ScrapeResult, scrape
+from src.scraper.infrastructure.builder.extraction.extraction_verifier import verify
+from src.scraper.infrastructure.builder.location_explorer import create_log_dir
+from src.scraper.infrastructure.builder.recipe_executor import run_recipe as _run_recipe_browser
+from src.scraper.infrastructure.builder.scraper_engine import ScrapeResult, scrape
 
 # src/scraper application + persistence
 from src.scraper.application.builder.run_recipe import run_recipe_from_db

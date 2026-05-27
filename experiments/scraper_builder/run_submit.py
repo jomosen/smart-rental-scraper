@@ -3,14 +3,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from location_explorer import create_log_dir
-from submit_runner import SubmitExperimentReport, submit_and_detect
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.scraper.infrastructure.builder.location_explorer import create_log_dir
+from src.scraper.infrastructure.builder.submit_runner import (
+    SubmitExperimentReport,
+    submit_and_detect,
+)
 
 TEST_CASES = [
     ("centauro", "https://www.centauro.net"),

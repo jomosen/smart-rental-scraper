@@ -1,0 +1,137 @@
+provider_key: centauro
+discovered_at: '2026-05-27T08:17:45.647988+00:00'
+url: https://www.centauro.net
+cookies_strategy: adaptive_poll_heuristic
+form_fields:
+  pickup_location:
+    selector: input[role='combobox'][aria-label='Ciudad, aeropuerto, estación de tren...']
+    selector_type: css
+    element_kind: input
+    widget_type: custom_dropdown
+    strategy: null
+    is_searchable: true
+    options_container_selector: '#pickUpBranchCode > div:last-of-type'
+    option_item_selector: '#pickUpBranchCode > div:last-of-type > div > div'
+    match_mode: fuzzy
+    accepts_direct_typing: null
+    date_format: null
+    calendar_container_selector: null
+    next_month_selector: null
+    prev_month_selector: null
+    day_cell_selector: null
+    month_year_label_selector: null
+    is_range_calendar: null
+  pickup_date:
+    selector: '#pickUpDate'
+    selector_type: css
+    element_kind: input
+    widget_type: custom_calendar
+    strategy: null
+    is_searchable: null
+    options_container_selector: null
+    option_item_selector: null
+    match_mode: null
+    accepts_direct_typing: false
+    date_format: DD/MM/YYYY
+    calendar_container_selector: .react-calendar
+    next_month_selector: .react-calendar__navigation__next-button
+    prev_month_selector: .react-calendar__navigation__prev-button
+    day_cell_selector: .react-calendar__month-view__days__day
+    month_year_label_selector: .react-calendar__navigation__label__labelText--from
+    is_range_calendar: true
+  return_date:
+    selector: '#dropOffDate'
+    selector_type: css
+    element_kind: input
+    widget_type: custom_calendar
+    strategy: range_calendar_autofill
+    is_searchable: null
+    options_container_selector: null
+    option_item_selector: null
+    match_mode: null
+    accepts_direct_typing: false
+    date_format: DD/MM/YYYY
+    calendar_container_selector: .react-calendar
+    next_month_selector: .react-calendar__navigation__next-button
+    prev_month_selector: .react-calendar__navigation__prev-button
+    day_cell_selector: .react-calendar__month-view__days__day
+    month_year_label_selector: .react-calendar__navigation__label__labelText--from
+    is_range_calendar: true
+  pickup_time:
+    selector: '#pickUpTime [role=''combobox'']'
+    selector_type: css
+    element_kind: input
+    widget_type: custom_dropdown
+    strategy: null
+    is_searchable: false
+    options_container_selector: '#pickUpTime > div > div:last-child'
+    option_item_selector: '#pickUpTime > div > div:last-child > div'
+    match_mode: exact
+    accepts_direct_typing: null
+    date_format: null
+    calendar_container_selector: null
+    next_month_selector: null
+    prev_month_selector: null
+    day_cell_selector: null
+    month_year_label_selector: null
+    is_range_calendar: null
+  return_time:
+    selector: '#dropOffTime [role=''combobox'']'
+    selector_type: css
+    element_kind: input
+    widget_type: custom_dropdown
+    strategy: null
+    is_searchable: false
+    options_container_selector: '#dropOffTime > div > div:last-child'
+    option_item_selector: '#dropOffTime > div > div:last-child > div'
+    match_mode: exact
+    accepts_direct_typing: null
+    date_format: null
+    calendar_container_selector: null
+    next_month_selector: null
+    prev_month_selector: null
+    day_cell_selector: null
+    month_year_label_selector: null
+    is_range_calendar: null
+submit_selector: button[type='submit']
+submit_selector_type: css
+card_source: mark_valid_cards
+field_extractors:
+- field: model
+  selector: h3
+  extraction: text
+- field: group_code
+  selector: small
+  extraction: regex:\(([^)]+)\)
+- field: availability_note
+  selector: small
+  extraction: text
+- field: transmission
+  extraction: aria_keyword_transmission
+  auto_keywords:
+  - automático
+  - automática
+  - automatic
+  - automatique
+  - automatik
+  manual_keywords:
+  - manual
+  - manuale
+- field: seats
+  extraction: aria_keyword
+  keywords:
+  - plazas
+  - asientos
+  - seats
+  - places
+  - sitzplätze
+  - posti
+  - plaza
+- field: price_final
+  selector: ".precio-que-no-existe"
+  extraction: text
+price_strategy: 'El precio final (ya con descuento aplicado) está en el aria-label
+  del botón de selección de precio, en el formato ''MODELO: 290,00 €. Descuento: 15%.''.
+  El primer valor numérico seguido de '' €.'' es el precio final. El precio tachado
+  (original) aparece en un span interior, pero el aria-label del botón es la fuente
+  más fiable y semántica para el precio final.'

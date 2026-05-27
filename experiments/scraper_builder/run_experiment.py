@@ -8,17 +8,18 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from argparse import ArgumentParser
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Allow sibling imports without installing as a package
-sys.path.insert(0, os.path.dirname(__file__))
+_PROJECT_ROOT = Path(__file__).parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from cookie_closer import close_cookies
-from models import CloseResult
+from src.scraper.infrastructure.builder.cookie_closer import close_cookies
+from src.scraper.infrastructure.builder.models import CloseResult
 
 load_dotenv()
 
