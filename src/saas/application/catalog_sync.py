@@ -14,7 +14,7 @@ from ..infrastructure.persistence.models.catalog import (
     Provider,
     ProviderLocation,
     ProviderRate,
-)
+)  # kept for return type annotations
 from ..infrastructure.persistence.repositories import (
     ProviderLocationRepository,
     ProviderRateRepository,
@@ -68,56 +68,23 @@ class CatalogSyncService:
     # ------------------------------------------------------------------
 
     def _upsert_provider(self, entry: dict) -> Provider:
-        code = entry["scraper"]
-        display_name = entry["name"]
-        provider = self._provider_repo.get_by_code(code)
-        if provider is None:
-            provider = Provider(
-                code=code,
-                display_name=display_name,
-                scraper_key=code,
-                default_currency="EUR",
-                status="active",
-            )
-            self._session.add(provider)
-            self._session.flush()
-        elif provider.display_name != display_name:
-            provider.display_name = display_name
-            self._session.flush()
-        return provider
+        return self._provider_repo.get_or_create(
+            code=entry["scraper"],
+            display_name=entry["name"],
+            scraper_key=entry["scraper"],
+            currency="EUR",
+        )
 
     def _upsert_location(self, entry: dict, provider_id: int) -> ProviderLocation:
-        location_code = entry["location_id"]
-        location_name = entry["location_name"]
-        location = self._location_repo.get_by_provider_and_code(provider_id, location_code)
-        if location is None:
-            location = ProviderLocation(
-                provider_id=provider_id,
-                location_code=location_code,
-                location_name=location_name,
-                active=True,
-            )
-            self._session.add(location)
-            self._session.flush()
-        elif location.location_name != location_name:
-            location.location_name = location_name
-            self._session.flush()
-        return location
+        return self._location_repo.get_or_create(
+            provider_id=provider_id,
+            location_code=entry["location_id"],
+            location_name=entry["location_name"],
+        )
 
     def _upsert_rate(self, entry: dict, provider_id: int) -> ProviderRate:
-        rate_code = _slugify(entry["rate_name"])
-        rate_name = entry["rate_name"]
-        rate = self._rate_repo.get_by_provider_and_code(provider_id, rate_code)
-        if rate is None:
-            rate = ProviderRate(
-                provider_id=provider_id,
-                rate_code=rate_code,
-                rate_name=rate_name,
-                active=True,
-            )
-            self._session.add(rate)
-            self._session.flush()
-        elif rate.rate_name != rate_name:
-            rate.rate_name = rate_name
-            self._session.flush()
-        return rate
+        return self._rate_repo.get_or_create(
+            provider_id=provider_id,
+            rate_code=_slugify(entry["rate_name"]),
+            rate_name=entry["rate_name"],
+        )

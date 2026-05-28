@@ -12,7 +12,6 @@ Usage:
 
 Prerequisites:
   - DB running with migrations applied (alembic upgrade head).
-  - providers table has a row with code == --provider-key.
   - ADMIN_DATABASE_URL or APP_DATABASE_URL set in .env.
 """
 from __future__ import annotations
@@ -31,21 +30,21 @@ if str(_PROJECT_ROOT) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv()
 
-# experiments/ infrastructure (still lives here in D1)
 from src.scraper.infrastructure.builder.location_explorer import create_log_dir
 from src.scraper.infrastructure.builder.scraper_engine import scrape
 
-# src/scraper application + persistence
 from src.scraper.application.builder.build_recipe import build_recipe
+from src.scraper.application.builder.provision import ProviderProvisioningService
 from src.scraper.infrastructure.repositories.provider_recipe_repository import (
     ProviderRecipeRepository,
 )
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.session import make_session_factory
-from src.saas.infrastructure.persistence.models.catalog import Provider
-
-from sqlalchemy.orm import Session
-from sqlalchemy import select
+from src.saas.infrastructure.persistence.repositories import (
+    ProviderRepository,
+    ProviderLocationRepository,
+    ProviderRateRepository,
+)
 
 TEST_CASES = [
     ("centauro", "https://www.centauro.net"),
@@ -74,18 +73,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pickup-time", default="10:00")
     p.add_argument("--dropoff-time", default="10:00")
     p.add_argument("--provider-key", default=None,
-                   help="Recipe key matching providers.code (default: site name)")
+                   help="providers.code for this site (default: site name)")
     return p.parse_args()
-
-
-def _get_provider_id(session: Session, provider_key: str) -> int:
-    row = session.scalar(select(Provider).where(Provider.code == provider_key))
-    if row is None:
-        raise ValueError(
-            f"Provider '{provider_key}' not found in providers table. "
-            "Add it via CatalogSyncService or insert manually first."
-        )
-    return row.id
 
 
 async def main() -> None:
@@ -116,9 +105,17 @@ async def main() -> None:
 
         session = factory()
         try:
-            provider_id = _get_provider_id(session, provider_key)
+            # 1. Ensure provider + location + rate rows exist (idempotent)
+            provisioning_svc = ProviderProvisioningService(
+                provider_repo=ProviderRepository(session),
+                location_repo=ProviderLocationRepository(session),
+                rate_repo=ProviderRateRepository(session),
+            )
+            prov = provisioning_svc.ensure(provider_key, targets)
+
+            # 2. Build recipe from discovery result and save to DB
             repo = ProviderRecipeRepository(session)
-            recipe = build_recipe(provider_key, result, log_dir, repo, provider_id)
+            recipe = build_recipe(provider_key, result, log_dir, repo, prov.provider_id)
             session.commit()
         except Exception:
             session.rollback()
@@ -126,7 +123,7 @@ async def main() -> None:
         finally:
             session.close()
 
-        print(f"  Recipe saved to DB (provider_id={provider_id})")
+        print(f"  Recipe saved to DB (provider_id={prov.provider_id})")
         print(f"  form_fields:      {list(recipe.form_fields)}")
         print(f"  field_extractors: {[e.field for e in recipe.field_extractors]}")
         print(f"  card_source:      {recipe.card_source}")

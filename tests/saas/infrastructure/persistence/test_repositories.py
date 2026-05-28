@@ -613,6 +613,65 @@ class TestHomogeneousZoneRepository:
         assert new_zone.active is True
 
 
+class TestGetOrCreate:
+    """Verify idempotent get-or-create on provider/location/rate repos."""
+
+    def test_provider_get_or_create_creates_new(self, super_db_session):
+        repo = ProviderRepository(super_db_session)
+        provider = repo.get_or_create(
+            code="prov_gc_test",
+            display_name="GC Test",
+            scraper_key="prov_gc_test",
+        )
+        assert provider.id is not None
+        assert provider.code == "prov_gc_test"
+        assert provider.display_name == "GC Test"
+        assert provider.status == "active"
+
+    def test_provider_get_or_create_is_idempotent(self, super_db_session):
+        repo = ProviderRepository(super_db_session)
+        p1 = repo.get_or_create(code="prov_gc_idem", display_name="Idem", scraper_key="prov_gc_idem")
+        p2 = repo.get_or_create(code="prov_gc_idem", display_name="Idem", scraper_key="prov_gc_idem")
+        assert p1.id == p2.id
+
+    def test_provider_get_or_create_updates_display_name(self, super_db_session):
+        repo = ProviderRepository(super_db_session)
+        p1 = repo.get_or_create(code="prov_gc_upd", display_name="Old Name", scraper_key="k")
+        p2 = repo.get_or_create(code="prov_gc_upd", display_name="New Name", scraper_key="k")
+        assert p1.id == p2.id
+        assert p2.display_name == "New Name"
+
+    def test_location_get_or_create_creates_new(self, super_db_session):
+        p = _provider(super_db_session, code="prov_loc_gc")
+        repo = ProviderLocationRepository(super_db_session)
+        loc = repo.get_or_create(provider_id=p.id, location_code="alicante", location_name="Alicante")
+        assert loc.id is not None
+        assert loc.location_code == "alicante"
+        assert loc.active is True
+
+    def test_location_get_or_create_is_idempotent(self, super_db_session):
+        p = _provider(super_db_session, code="prov_loc_idem")
+        repo = ProviderLocationRepository(super_db_session)
+        l1 = repo.get_or_create(provider_id=p.id, location_code="loc1", location_name="Loc 1")
+        l2 = repo.get_or_create(provider_id=p.id, location_code="loc1", location_name="Loc 1")
+        assert l1.id == l2.id
+
+    def test_rate_get_or_create_creates_new(self, super_db_session):
+        p = _provider(super_db_session, code="prov_rate_gc")
+        repo = ProviderRateRepository(super_db_session)
+        rate = repo.get_or_create(provider_id=p.id, rate_code="standard", rate_name="Standard")
+        assert rate.id is not None
+        assert rate.rate_code == "standard"
+        assert rate.active is True
+
+    def test_rate_get_or_create_is_idempotent(self, super_db_session):
+        p = _provider(super_db_session, code="prov_rate_idem")
+        repo = ProviderRateRepository(super_db_session)
+        r1 = repo.get_or_create(provider_id=p.id, rate_code="premium", rate_name="Premium")
+        r2 = repo.get_or_create(provider_id=p.id, rate_code="premium", rate_name="Premium")
+        assert r1.id == r2.id
+
+
 class TestTenantIsolation:
     """Verify that the RLS policy prevents cross-tenant data leakage.
 

@@ -20,6 +20,28 @@ class ProviderLocationRepository:
             )
         )
 
+    def get_or_create(
+        self,
+        provider_id: int,
+        location_code: str,
+        location_name: str,
+    ) -> ProviderLocation:
+        """Get existing location or create it. Updates location_name if changed."""
+        location = self.get_by_provider_and_code(provider_id, location_code)
+        if location is None:
+            location = ProviderLocation(
+                provider_id=provider_id,
+                location_code=location_code,
+                location_name=location_name,
+                active=True,
+            )
+            self._s.add(location)
+            self._s.flush()
+        elif location.location_name != location_name:
+            location.location_name = location_name
+            self._s.flush()
+        return location
+
     def list_for_provider(self, provider_id: int) -> list[ProviderLocation]:
         return list(
             self._s.scalars(

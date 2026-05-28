@@ -19,3 +19,25 @@ class ProviderRateRepository:
                 ProviderRate.rate_code == rate_code,
             )
         )
+
+    def get_or_create(
+        self,
+        provider_id: int,
+        rate_code: str,
+        rate_name: str,
+    ) -> ProviderRate:
+        """Get existing rate or create it. Updates rate_name if changed."""
+        rate = self.get_by_provider_and_code(provider_id, rate_code)
+        if rate is None:
+            rate = ProviderRate(
+                provider_id=provider_id,
+                rate_code=rate_code,
+                rate_name=rate_name,
+                active=True,
+            )
+            self._s.add(rate)
+            self._s.flush()
+        elif rate.rate_name != rate_name:
+            rate.rate_name = rate_name
+            self._s.flush()
+        return rate
