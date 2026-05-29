@@ -14,9 +14,8 @@ class PricePointExtractor:
     SRP: sole responsibility is conversion between models.
     Does not analyse prices or make business decisions.
 
-    For season detection not all groups or rates are needed:
-    the first car with a valid rate is sufficient as a reference.
-    If rate_name is specified, filters by that rate name.
+    One PricePoint is emitted per car with a valid rate in each result.
+    If rate_name is specified, only rates with that name qualify.
     """
 
     def __init__(self, rate_name: Optional[str] = None) -> None:
@@ -31,27 +30,27 @@ class PricePointExtractor:
         for search, result in zip(searches, results):
             if not result or not result.cars:
                 continue
-            point = self._first_price_point(search, result)
-            if point is not None:
-                points.append(point)
+            points.extend(self._price_points_for(search, result))
         return points
 
-    def _first_price_point(
+    def _price_points_for(
         self,
         search: BookingSearch,
         result: BookingResult,
-    ) -> Optional[PricePoint]:
+    ) -> List[PricePoint]:
+        """One PricePoint per car with a valid rate (not just the first)."""
+        points = []
         for car in result.cars:
             rate = self._find_rate(car)
             if rate is None:
                 continue
-            return PricePoint(
+            points.append(PricePoint(
                 pickup_date=search.pickup_at.date(),
                 duration_days=search.rental_days,
                 total_price=rate.total,
                 car_group=car.group,
-            )
-        return None
+            ))
+        return points
 
     def _find_rate(self, car):
         if not car.rates:

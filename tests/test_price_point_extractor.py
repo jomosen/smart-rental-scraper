@@ -1,4 +1,9 @@
-"""Unit tests for PricePointExtractor.extract()."""
+"""Unit tests for PricePointExtractor.extract().
+
+Contract (post-fix): one PricePoint per car with a valid rate, per search.
+The old "first car is sufficient" assumption has been removed; all cars
+that match the rate filter contribute a point.
+"""
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -32,7 +37,7 @@ def _car(group: str, rate_name: str, total: Decimal) -> Car:
 
 
 class TestBasicExtraction:
-    def test_extracts_first_car_first_rate(self):
+    def test_single_car_yields_single_point(self):
         extractor = PricePointExtractor()
         search = _search(date(2026, 3, 1))
         result = _result(_car("A", "Standard", Decimal("70.0")))
@@ -41,6 +46,19 @@ class TestBasicExtraction:
         assert points[0].total_price == 70.0
         assert points[0].car_group == "A"
         assert points[0].duration_days == 7
+
+    def test_multiple_cars_all_extracted(self):
+        """All cars with a valid rate must produce a point — not just the first."""
+        extractor = PricePointExtractor()
+        search = _search(date(2026, 3, 1))
+        result = _result(
+            _car("A", "Std", Decimal("70.0")),
+            _car("C", "Std", Decimal("100.0")),
+            _car("D", "Std", Decimal("120.0")),
+        )
+        points = extractor.extract([search], [result])
+        assert len(points) == 3
+        assert {p.car_group for p in points} == {"A", "C", "D"}
 
     def test_skips_empty_results(self):
         extractor = PricePointExtractor()
@@ -78,7 +96,8 @@ class TestRateFilter:
         points = extractor.extract([search], [result])
         assert points == []
 
-    def test_falls_back_to_next_car_when_first_lacks_rate(self):
+    def test_car_without_matching_rate_is_skipped(self):
+        """Cars that don't match the rate filter are skipped; others are included."""
         extractor = PricePointExtractor(rate_name="Premium")
         search = _search(date(2026, 3, 1))
         car_without = _car("A", "Standard", Decimal("50.0"))
@@ -87,9 +106,20 @@ class TestRateFilter:
         assert len(points) == 1
         assert points[0].car_group == "B"
 
+    def test_rate_name_filters_each_car_independently(self):
+        """With rate_name set, every car is checked individually; matching ones all yield points."""
+        extractor = PricePointExtractor(rate_name="Premium")
+        search = _search(date(2026, 3, 1))
+        car_a = _car("A", "Premium", Decimal("90.0"))
+        car_b = _car("B", "Standard", Decimal("60.0"))
+        car_c = _car("C", "Premium", Decimal("110.0"))
+        points = extractor.extract([search], [_result(car_a, car_b, car_c)])
+        assert len(points) == 2
+        assert {p.car_group for p in points} == {"A", "C"}
+
 
 class TestMultipleSearches:
-    def test_extracts_one_point_per_valid_search(self):
+    def test_accumulates_points_across_searches(self):
         extractor = PricePointExtractor()
         searches = [_search(date(2026, 3, d)) for d in (1, 8, 15)]
         results = [_result(_car("A", "Std", Decimal(str(70.0 + d)))) for d in range(3)]
@@ -101,3 +131,17 @@ class TestMultipleSearches:
         d = date(2026, 4, 10)
         points = extractor.extract([_search(d)], [_result(_car("A", "Std", Decimal("70.0")))])
         assert points[0].pickup_date == d
+
+    def test_car_groups_preserved_across_multi_car_searches(self):
+        """Points from multi-car results preserve their car_group across searches."""
+        extractor = PricePointExtractor()
+        searches = [_search(date(2026, 3, 1)), _search(date(2026, 3, 8))]
+        results = [
+            _result(_car("A", "Std", Decimal("70.0")), _car("C", "Std", Decimal("100.0"))),
+            _result(_car("A", "Std", Decimal("75.0")), _car("C", "Std", Decimal("105.0"))),
+        ]
+        points = extractor.extract(searches, results)
+        assert len(points) == 4
+        groups = [p.car_group for p in points]
+        assert groups.count("A") == 2
+        assert groups.count("C") == 2
