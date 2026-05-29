@@ -378,3 +378,100 @@ def fetch_pvc_details(
         _get_engine(), acriss_code, pickup_date, duration_days,
         providers, include_pending_review,
     )
+
+
+# ---------------------------------------------------------------------------
+# Tariff table (per-provider)
+# ---------------------------------------------------------------------------
+
+_TARIFF_COLUMNS = [
+    "acriss_code", "display_name", "start_date", "end_date",
+    "duration_days", "price_per_day", "has_pending_review",
+]
+
+_DEFAULT_DURATIONS = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
+
+
+def _fetch_tariff_table_impl(
+    engine: Engine,
+    provider_code: str,
+    acriss_codes: tuple[str, ...] | None = None,
+    durations: tuple[int, ...] = _DEFAULT_DURATIONS,
+    include_pending_review: bool = True,
+) -> pd.DataFrame:
+    conditions = [
+        "pvc.acriss_code IS NOT NULL",
+        "pvc.active = TRUE",
+        "p.code = :provider_code",
+    ]
+    params: dict = {
+        "provider_code": provider_code,
+        "durations": list(durations),
+    }
+
+    if acriss_codes:
+        conditions.append("pvc.acriss_code = ANY(:acriss_codes)")
+        params["acriss_codes"] = list(acriss_codes)
+
+    if not include_pending_review:
+        conditions.append("pvc.pending_review = FALSE")
+
+    where = " AND ".join(conditions)
+
+    sql = text(f"""
+        WITH zones AS (
+            SELECT hz.provider_vehicle_category_id,
+                   hz.representative_date,
+                   hz.start_date,
+                   hz.end_date
+            FROM   homogeneous_zones hz
+            WHERE  hz.active = TRUE
+        ),
+        latest_obs AS (
+            SELECT DISTINCT ON (provider_vehicle_category_id, pickup_date, duration_days)
+                   provider_vehicle_category_id,
+                   pickup_date,
+                   duration_days,
+                   price_per_day
+            FROM   price_observations
+            WHERE  duration_days = ANY(:durations)
+            ORDER  BY provider_vehicle_category_id, pickup_date, duration_days, observed_at DESC
+        )
+        SELECT pvc.acriss_code,
+               ac.display_name,
+               z.start_date,
+               z.end_date,
+               lo.duration_days,
+               MIN(lo.price_per_day)       AS price_per_day,
+               BOOL_OR(pvc.pending_review) AS has_pending_review
+        FROM   provider_vehicle_categories pvc
+        JOIN   providers    p   ON p.id    = pvc.provider_id
+        JOIN   acriss_codes ac  ON ac.code = pvc.acriss_code
+        JOIN   zones        z   ON z.provider_vehicle_category_id = pvc.id
+        JOIN   latest_obs   lo  ON lo.provider_vehicle_category_id = pvc.id
+                                AND lo.pickup_date = z.representative_date
+        WHERE  {where}
+        GROUP  BY pvc.acriss_code, ac.display_name, z.start_date, z.end_date, lo.duration_days
+        ORDER  BY ac.display_name, z.start_date, lo.duration_days
+    """)
+
+    with engine.connect() as conn:
+        result = conn.execute(sql, params)
+        rows = result.fetchall()
+        cols = list(result.keys())
+
+    if not rows:
+        return pd.DataFrame(columns=_TARIFF_COLUMNS)
+    return pd.DataFrame(rows, columns=cols)
+
+
+@st.cache_data(ttl=60)
+def fetch_tariff_table(
+    provider_code: str,
+    acriss_codes: tuple[str, ...] | None,
+    durations: tuple[int, ...],
+    include_pending_review: bool,
+) -> pd.DataFrame:
+    return _fetch_tariff_table_impl(
+        _get_engine(), provider_code, acriss_codes, durations, include_pending_review,
+    )
