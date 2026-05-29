@@ -96,12 +96,9 @@ class VictoriaScraper(BaseScraper):
         await self._pause(2.0, 4.0)
         await self._fill_form(criteria)
 
-        # --- Submit the form (opens a new tab) ---
         await self._pause(2.0, 3.5)
-        await self._driver.click_and_switch_tab("#btnBuscar")
+        await self._driver.click("#btnBuscar")
         await self._accept_cookies_if_present()
-
-        # --- Wait for results ---
         await self._driver.wait_for_selector("#cont_vehiculos", timeout=20000, state="attached")
 
     async def _extract_results(self, criteria: BookingSearch) -> BookingResult:
