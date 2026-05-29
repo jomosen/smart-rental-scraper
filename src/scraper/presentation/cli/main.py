@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from datetime import datetime, timedelta
 from functools import partial
 
@@ -10,11 +11,35 @@ from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.presentation.cli.container import build_container
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
+
+class _ColorFormatter(logging.Formatter):
+    _BLUE   = "\033[34m"
+    _GREEN  = "\033[32m"
+    _YELLOW = "\033[33m"
+    _RED    = "\033[31m"
+    _RESET  = "\033[0m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        if record.levelno >= logging.ERROR:
+            return self._RED + msg + self._RESET
+        if record.levelno >= logging.WARNING:
+            return self._YELLOW + msg + self._RESET
+        if record.levelno == logging.INFO:
+            text = record.getMessage()
+            if "Phase" in text:
+                return self._BLUE + msg + self._RESET
+            if "done in" in text:
+                return self._GREEN + msg + self._RESET
+        return msg
+
+
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(_ColorFormatter(
+    fmt="%(asctime)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
-)
+))
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 # --- Scraping period ---
 PERIOD_DAYS = 90
