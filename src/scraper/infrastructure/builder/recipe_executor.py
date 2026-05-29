@@ -410,33 +410,64 @@ async def _fill_date_fields(
     return_date: date,
     logger: SessionLogger,
 ) -> None:
-    """Fill only the pickup/return date fields using the recipe's calendar selectors.
+    """Fill pickup and return date fields explicitly. Never relies on autofill.
 
-    Skips return_date when strategy='range_calendar_autofill' (the pickup-date
-    filler already set it via the range calendar).  Raises RuntimeError on any
-    fill failure so the caller can map it to the appropriate failed_phase.
+    For range-calendar providers (return_date.strategy='range_calendar_autofill'):
+      - Fills pickup_date without dismissing so the calendar stays open.
+      - Fills return_date reusing pickup_date's DateWidgetInfo (same calendar
+        container/nav selectors) but return_date's own selector.
+        DateCalendarFiller detects the calendar is already open and skips the
+        open-click.  If the calendar closed after the pickup click, it is
+        reopened via return_date's own selector.
+    Raises RuntimeError on any fill failure.
     """
-    date_targets = {"pickup_date": pickup_date, "return_date": return_date}
-    for fname in ("pickup_date", "return_date"):
-        rf = recipe.form_fields.get(fname)
-        if rf is None:
-            logger.log("refine_dates_field_missing", name=fname)
-            continue
-        if rf.strategy == "range_calendar_autofill":
-            logger.log("refine_dates_field_skip", name=fname,
-                       strategy="range_calendar_autofill")
-            continue
-        dw = _make_date_widget_info(rf)
+    pickup_rf = recipe.form_fields.get("pickup_date")
+    return_rf = recipe.form_fields.get("return_date")
+    is_range = return_rf is not None and return_rf.strategy == "range_calendar_autofill"
+
+    # ── pickup_date ──────────────────────────────────────────────────────────
+    if pickup_rf is None:
+        logger.log("refine_dates_field_missing", name="pickup_date")
+    else:
+        dw = _make_date_widget_info(pickup_rf)
         try:
-            date_filler = get_date_filler(dw)
+            filler = get_date_filler(dw)
         except UnsupportedDateWidgetError as exc:
-            raise RuntimeError(f"Unsupported date widget for {fname}: {exc}") from exc
-        ifield = _make_identified_field(rf)
-        result = await date_filler.fill(session, ifield, dw, date_targets[fname], logger)
-        logger.log("refine_dates_fill_done", name=fname,
+            raise RuntimeError(f"Unsupported date widget for pickup_date: {exc}") from exc
+        result = await filler.fill(
+            session, _make_identified_field(pickup_rf), dw, pickup_date, logger
+        )
+        logger.log("refine_pickup_set", date=pickup_date.isoformat(),
                    success=result.success, error=result.error)
         if not result.success:
-            raise RuntimeError(f"Date fill failed for {fname}: {result.error}")
+            raise RuntimeError(f"Date fill failed for pickup_date: {result.error}")
+        # Don't dismiss range calendars — the calendar stays open for return_date.
+        if not is_range:
+            await _dismiss(session)
+
+    # ── return_date — always explicit, never depends on autofill ─────────────
+    if return_rf is None:
+        logger.log("refine_dates_field_missing", name="return_date")
+    else:
+        # Range calendars: use pickup_date's DateWidgetInfo so the filler can
+        # detect the already-open calendar and reuse it (skipping the open-click).
+        # return_date's own selector is passed as the field so DateCalendarFiller
+        # can reopen the calendar via that selector if it closed after pickup.
+        if is_range and pickup_rf is not None:
+            calendar_dw = _make_date_widget_info(pickup_rf)
+        else:
+            calendar_dw = _make_date_widget_info(return_rf)
+        try:
+            filler = get_date_filler(calendar_dw)
+        except UnsupportedDateWidgetError as exc:
+            raise RuntimeError(f"Unsupported date widget for return_date: {exc}") from exc
+        result = await filler.fill(
+            session, _make_identified_field(return_rf), calendar_dw, return_date, logger
+        )
+        logger.log("refine_return_set", date=return_date.isoformat(),
+                   success=result.success, error=result.error)
+        if not result.success:
+            raise RuntimeError(f"Date fill failed for return_date: {result.error}")
         await _dismiss(session)
 
 
