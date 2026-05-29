@@ -193,7 +193,12 @@ class RecipeScraper(BaseScraper):
 
     async def _refine_form(self, criteria: BookingSearch) -> None:
         if self._session is None or self._recipe is None:
-            # No live session yet — fall back to a full submit.
+            await self._submit_form(criteria)
+            return
+
+        strategy = (self._recipe.refine_strategy or "none").lower()
+        if strategy == "none":
+            # Provider doesn't support refine — full submit each time.
             await self._submit_form(criteria)
             return
 

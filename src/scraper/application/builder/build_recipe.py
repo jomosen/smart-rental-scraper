@@ -67,6 +67,8 @@ def recipe_to_dict(recipe: Recipe) -> dict:
             for e in recipe.field_extractors
         ],
         "price_strategy": recipe.price_strategy,
+        "refine_url": recipe.refine_url,
+        "refine_strategy": recipe.refine_strategy,
     }
 
 
@@ -117,6 +119,8 @@ def recipe_from_dict(data: dict) -> Recipe:
         card_source=data.get("card_source", "mark_valid_cards"),
         field_extractors=extractors,
         price_strategy=data.get("price_strategy", ""),
+        refine_url=data.get("refine_url"),
+        refine_strategy=data.get("refine_strategy", "none"),
     )
 
 
@@ -265,6 +269,8 @@ def build_recipe(
         card_source="mark_valid_cards",
         field_extractors=extractors,
         price_strategy=price_strategy,
+        refine_url=None,
+        refine_strategy="none",
     )
 
     repo.save_recipe(provider_id=provider_id, recipe=recipe)

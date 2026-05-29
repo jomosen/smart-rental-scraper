@@ -54,3 +54,6 @@ class Recipe:
     card_source: str                # "mark_valid_cards"
     field_extractors: list[RecipeFieldExtractor]
     price_strategy: str
+    # ── Refine strategy (operator-set, not LLM-discovered) ──────────────────
+    refine_url: str | None = None
+    refine_strategy: str = "none"   # "navigate_and_change_dates" | "in_place" | "none"
