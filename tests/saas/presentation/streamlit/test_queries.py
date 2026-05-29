@@ -221,8 +221,9 @@ class TestFetchPvcDetails:
 # ---------------------------------------------------------------------------
 
 _COLUMNS_TARIFF = {
-    "acriss_code", "display_name", "start_date", "end_date",
-    "duration_days", "price_per_day", "has_pending_review",
+    "acriss_code", "display_name", "example_models",
+    "start_date", "end_date",
+    "duration_days", "price_per_day", "total_price", "has_pending_review",
 }
 
 _TARIFF_PROVIDER = "tariff_test_sc"
@@ -299,12 +300,16 @@ def tariff_fixtures(engine):
                         '2026-06-01', '2026-06-30', '2026-06-15', TRUE)
             """), {"pid": prov_id, "lid": loc_id, "rid": rate_id, "pvc_id": pvc_id})
 
-        # ECO: 7d→20 €/d, 1d→35 €/d  |  ECO2: 7d→30 €/d, 1d→25 €/d
-        # EDMR MIN(7d) = 20  |  EDMR MIN(1d) = 25
+        # ECO: cheaper ppd (20) but higher total (200)
+        # ECO2: pricier ppd (30) but lower total (150)
+        # This intentional mismatch lets the coherence test verify that
+        # total_price comes from the same PVC as price_per_day (ECO → 200),
+        # not from a separate MIN(total) across both PVCs (which would give 150).
+        # EDMR 1d: ECO2 wins (ppd=25 < 35), paired total=25.
         obs_rows = [
-            (pvc_eco_id,  7, "20.00", "140.00"),
+            (pvc_eco_id,  7, "20.00", "200.00"),
             (pvc_eco_id,  1, "35.00",  "35.00"),
-            (pvc_eco2_id, 7, "30.00", "210.00"),
+            (pvc_eco2_id, 7, "30.00", "150.00"),
             (pvc_eco2_id, 1, "25.00",  "25.00"),
             (pvc_cmp_id,  7, "50.00", "350.00"),
             (pvc_cmp_id,  1, "55.00",  "55.00"),
@@ -353,7 +358,7 @@ class TestFetchTariffTable:
         assert set(df.columns) >= _COLUMNS_TARIFF
 
     def test_two_pvcs_same_acriss_min_price_aggregation(self, engine, tariff_fixtures):
-        """Two PVCs share EDMR; 7d prices are 20 and 30 — query must return 20."""
+        """Two PVCs share EDMR; 7d ppd are 20 (ECO) and 30 (ECO2) — query picks 20."""
         from src.saas.presentation.streamlit.queries import _fetch_tariff_table_impl
 
         df = _fetch_tariff_table_impl(engine, _TARIFF_PROVIDER, durations=(7,))
@@ -361,6 +366,19 @@ class TestFetchTariffTable:
 
         assert not edmr.empty
         assert float(edmr.iloc[0]["price_per_day"]) == pytest.approx(20.0)
+
+    def test_coherent_total_price_paired_with_min_per_day(self, engine, tariff_fixtures):
+        """ECO (ppd=20, total=200) beats ECO2 (ppd=30, total=150) on price_per_day.
+        total_price must be ECO's 200, not the cross-row minimum of 150."""
+        from src.saas.presentation.streamlit.queries import _fetch_tariff_table_impl
+
+        df = _fetch_tariff_table_impl(engine, _TARIFF_PROVIDER, durations=(7,))
+        edmr = df[df["acriss_code"] == "EDMR"]
+
+        assert not edmr.empty
+        row = edmr.iloc[0]
+        assert float(row["price_per_day"]) == pytest.approx(20.0)
+        assert float(row["total_price"]) == pytest.approx(200.0)
 
     def test_exclude_pending_review_hides_pending_category(self, engine, tariff_fixtures):
         """CDMR is pending=True; excluding pending must drop it from the result."""

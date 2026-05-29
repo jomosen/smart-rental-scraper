@@ -385,74 +385,101 @@ def fetch_pvc_details(
 # ---------------------------------------------------------------------------
 
 _TARIFF_COLUMNS = [
-    "acriss_code", "display_name", "start_date", "end_date",
-    "duration_days", "price_per_day", "has_pending_review",
+    "acriss_code", "display_name", "example_models",
+    "start_date", "end_date",
+    "duration_days", "price_per_day", "total_price", "has_pending_review",
 ]
 
-_DEFAULT_DURATIONS = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
+DURATION_BRACKET = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
 
 
 def _fetch_tariff_table_impl(
     engine: Engine,
     provider_code: str,
     acriss_codes: tuple[str, ...] | None = None,
-    durations: tuple[int, ...] = _DEFAULT_DURATIONS,
+    durations: tuple[int, ...] = DURATION_BRACKET,
     include_pending_review: bool = True,
 ) -> pd.DataFrame:
-    conditions = [
-        "pvc.acriss_code IS NOT NULL",
-        "pvc.active = TRUE",
-        "p.code = :provider_code",
-    ]
+    acriss_clause = (
+        "AND pvc.acriss_code = ANY(:acriss_codes)" if acriss_codes else ""
+    )
+    pending_clause = "" if include_pending_review else "AND pvc.pending_review = FALSE"
+
     params: dict = {
         "provider_code": provider_code,
         "durations": list(durations),
     }
-
     if acriss_codes:
-        conditions.append("pvc.acriss_code = ANY(:acriss_codes)")
         params["acriss_codes"] = list(acriss_codes)
 
-    if not include_pending_review:
-        conditions.append("pvc.pending_review = FALSE")
-
-    where = " AND ".join(conditions)
-
     sql = text(f"""
-        WITH zones AS (
-            SELECT hz.provider_vehicle_category_id,
-                   hz.representative_date,
-                   hz.start_date,
-                   hz.end_date
-            FROM   homogeneous_zones hz
-            WHERE  hz.active = TRUE
+        WITH latest_obs AS (
+            SELECT DISTINCT ON (po.provider_vehicle_category_id, po.pickup_date, po.duration_days)
+                   po.provider_vehicle_category_id,
+                   po.pickup_date,
+                   po.duration_days,
+                   po.price_per_day,
+                   po.total_price
+            FROM   price_observations po
+            JOIN   providers p ON p.id = po.provider_id
+            WHERE  p.code             = :provider_code
+              AND  po.duration_days   = ANY(:durations)
+            ORDER  BY po.provider_vehicle_category_id, po.pickup_date, po.duration_days,
+                      po.observed_at DESC
         ),
-        latest_obs AS (
-            SELECT DISTINCT ON (provider_vehicle_category_id, pickup_date, duration_days)
-                   provider_vehicle_category_id,
-                   pickup_date,
-                   duration_days,
-                   price_per_day
-            FROM   price_observations
-            WHERE  duration_days = ANY(:durations)
-            ORDER  BY provider_vehicle_category_id, pickup_date, duration_days, observed_at DESC
+        zones AS (
+            SELECT pvc.acriss_code,
+                   ac.display_name,
+                   pvc.example_models,
+                   pvc.pending_review,
+                   hz.start_date,
+                   hz.end_date,
+                   hz.representative_date,
+                   hz.provider_vehicle_category_id
+            FROM   homogeneous_zones hz
+            JOIN   provider_vehicle_categories pvc ON pvc.id = hz.provider_vehicle_category_id
+            JOIN   providers    p   ON p.id    = pvc.provider_id
+            JOIN   acriss_codes ac  ON ac.code = pvc.acriss_code
+            WHERE  hz.active       = TRUE
+              AND  pvc.active      = TRUE
+              AND  pvc.acriss_code IS NOT NULL
+              AND  p.code          = :provider_code
+              {acriss_clause}
+              {pending_clause}
+        ),
+        joined AS (
+            SELECT z.acriss_code,
+                   z.display_name,
+                   z.example_models,
+                   z.start_date,
+                   z.end_date,
+                   lo.duration_days,
+                   lo.price_per_day,
+                   lo.total_price,
+                   BOOL_OR(z.pending_review) OVER (
+                       PARTITION BY z.acriss_code, z.start_date, z.end_date
+                   ) AS has_pending_review,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY z.acriss_code, z.start_date, z.end_date, lo.duration_days
+                       ORDER BY lo.price_per_day ASC
+                   ) AS rn
+            FROM   zones z
+            JOIN   latest_obs lo
+                       ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
+                      AND lo.pickup_date = z.representative_date
         )
-        SELECT pvc.acriss_code,
-               ac.display_name,
-               z.start_date,
-               z.end_date,
-               lo.duration_days,
-               MIN(lo.price_per_day)       AS price_per_day,
-               BOOL_OR(pvc.pending_review) AS has_pending_review
-        FROM   provider_vehicle_categories pvc
-        JOIN   providers    p   ON p.id    = pvc.provider_id
-        JOIN   acriss_codes ac  ON ac.code = pvc.acriss_code
-        JOIN   zones        z   ON z.provider_vehicle_category_id = pvc.id
-        JOIN   latest_obs   lo  ON lo.provider_vehicle_category_id = pvc.id
-                                AND lo.pickup_date = z.representative_date
-        WHERE  {where}
-        GROUP  BY pvc.acriss_code, ac.display_name, z.start_date, z.end_date, lo.duration_days
-        ORDER  BY ac.display_name, z.start_date, lo.duration_days
+        SELECT acriss_code,
+               display_name,
+               example_models,
+               start_date,
+               end_date,
+               duration_days,
+               price_per_day,
+               total_price,
+               has_pending_review
+        FROM   joined
+        WHERE  rn = 1
+        ORDER  BY acriss_code, start_date, duration_days
     """)
 
     with engine.connect() as conn:
