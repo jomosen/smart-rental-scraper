@@ -8,6 +8,7 @@ ready-to-use AppContainer — it does not know how anything is constructed.
 """
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +29,7 @@ from ...infrastructure.playwright.playwright_driver import PlaywrightDriver
 from ...infrastructure.scrapers.provider_a_scraper import ProviderAScraper
 from ...infrastructure.scrapers.provider_b_scraper import ProviderBScraper
 from ...infrastructure.scrapers.provider_c_scraper import ProviderCScraper
+from ...infrastructure.scrapers.recipe_scraper import RecipeScraper
 from ....saas.application.classification.acriss_loader import load_acriss_specs
 from ....saas.infrastructure.classification.gemini_service import GeminiClassificationService
 
@@ -37,6 +39,7 @@ SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "provider_a": ProviderAScraper,
     "provider_b": ProviderBScraper,
     "provider_c": ProviderCScraper,
+    "centauro": RecipeScraper,
 }
 
 _PROVIDERS_CONFIG = Path(__file__).parents[4] / "providers.json"
@@ -99,7 +102,15 @@ def build_container(
                 f"Known types: {known}"
             )
         provider = BookingProvider(name=entry["name"], base_url=entry["base_url"])
-        registry[provider.name] = SCRAPER_REGISTRY[scraper_key]
+        scraper_cls = SCRAPER_REGISTRY[scraper_key]
+        if scraper_cls is RecipeScraper:
+            prov_id = catalog_ids[entry["name"]][0]
+            scraper_cls = functools.partial(
+                RecipeScraper,
+                provider_id=prov_id,
+                session_factory=session_factory,
+            )
+        registry[provider.name] = scraper_cls
         provider_configs[provider.name] = provider
 
     factory = ScraperFactory(
