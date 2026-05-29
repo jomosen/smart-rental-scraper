@@ -205,7 +205,7 @@ class RecipeScraper(BaseScraper):
                 f"run_recipe failed at phase={result.failed_phase!r}: {result.error}"
             )
 
-        if not result.vehicles:
+        if not result.dom_vehicles:
             logger.warning("[%s] run_recipe returned 0 vehicles", provider_name)
 
         self._last_result = result
