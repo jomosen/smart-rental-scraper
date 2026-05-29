@@ -1066,3 +1066,65 @@ en producción.
 **Closure.** 172 tests verdes. Ninguna referencia a `CanonicalVehicleType`,
 `canonical_vehicle_type`, `taxonomy_loader`, `seed_taxonomy` ni `taxonomy.yaml`
 en `src/` ni `tests/`. Hito Cleanup cerrado.
+
+---
+
+## Flecos pendientes (para D4 o posterior)
+
+- D4-A — Extracción de centauro inestable entre búsquedas. Algunos
+  grupos (notablemente Grupo A, A1, B) aparecen en unas pickup_date y no
+  en otras. La fase 3 extrae sobre una sola representative_date y pierde
+  grupos visibles en otras. Probable causa: disponibilidad real del 
+  provider varía por fecha, no es bug puro de extracción.
+
+- D4-B — SeasonAnalyzer mezcla grupos en la detección de zonas. Hoy
+  agrega price_points a nivel provider sin filtrar por segmento, lo que 
+  mide ruido (cambios de grupo) en lugar de señal (cambios de
+  temporada). Centauro detecta 1 sola zona pese a tener saltos de +13% 
+  semana a semana en el mismo grupo. Fix propuesto: reordenar fase 2 
+  (clasificar ACRISS antes de analizar) y que el analyzer use el código
+  ACRISS más representativo como grupo guía.
+
+- D4-C — example_models en RecipeScraper pasa solo el model individual
+  del car, no una lista representativa del segmento. Eso degrada la
+  clasificación de Gemini, que ve un solo modelo en lugar de varios
+  ejemplos. Mejora: agregar todos los model vistos en la misma página
+  para el mismo external_code.
+
+- D4-D — Prompt de Gemini limitado para vehículos premium y eléctricos.
+  Grupos con Audi, Mustang Mach-E, MG ZS y similares quedan en
+  pending_review (confidence 0.6). Ampliar el prompt o los ejemplos del
+  ClassificationService para cubrir códigos ACRISS premium (P/R/S/L) y
+  fuel E/C/H.
+
+- D4-E — failed_phase="cookies" sigue acoplado a "form". Cuando el
+  banner de cookies bloquea el formulario, se reporta como failed_phase
+  ="form" en lugar de "cookies", lo cual induce a diagnosticar en el
+  sitio equivocado. Separar la fase en scrape_engine.
+
+- D4-F — availability_note sigue presente en el recipe writer pese a
+  haber sido decidido como prescindible. Genera 16 mismatches cosméticos
+  en cada validación. Quitar del modelo de extracción y del recipe.
+
+- D4-G — widget_opener del campo de hora ejecuta una cascada de ~6
+  intentos antes de abrir con teclado, lo que añade ~8s por campo. Es
+  cosmético (no rompe nada) pero contribuye al tiempo total. Optimizar
+  la cascada para detectar antes que el campo solo se abre con teclado.
+
+- D4-H — El check_recipe_health no distingue "recipe obsoleto" de "fallo
+  de timing transitorio". Un único refine_dates que falla por
+  intermitencia marca el run completo como BROKEN aunque el recipe siga
+  siendo válido. Fix: marcar BROKEN solo si X de Y búsquedas fallan
+  consecutivas, o ignorar fallos individuales cuando otras búsquedas del
+  mismo run han ido bien.
+
+- D4-I — Doble abstracción de browser en RecipeScraper. El adaptador
+  ignora el IBrowserDriver inyectado y arranca su propia BrowserSession
+  (deuda asumida como opción A en D2). Unificar bajo IBrowserDriver
+  (opción B) cuando se quiera eliminar la doble abstracción.
+
+- D4-J — rate_filter desactivado para recipe-scrapers. Cuando un
+  recipe-provider exponga múltiples tarifas, hay que reactivar el filtro
+  con la lógica correcta — probablemente vía flag en provider_rates o
+  un campo nuevo en Recipe que indique cómo identificar la rate buscada
+  dentro del HTML extraído.

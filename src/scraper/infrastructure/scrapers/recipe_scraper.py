@@ -250,19 +250,11 @@ class RecipeScraper(BaseScraper):
                 provider_name=criteria.provider_name,
                 errors=["_extract_results called before _submit_form"],
             )
-        logger.info(
-            "[RecipeScraper._extract_results] vehicles=%d, dom_vehicles=%d",
-            len(self._last_result.vehicles or []),
-            len(self._last_result.dom_vehicles or []),
-        )
-
-        vehicles = getattr(self._last_result, "dom_vehicles", None) or self._last_result.vehicles
         cars = [
             _map_vehicle(vr, criteria)
-            for vr in vehicles
+            for vr in self._last_result.dom_vehicles
             if vr.price_final is not None
         ]
-        logger.info("[RecipeScraper._extract_results] returning cars=%d", len(cars))
         return BookingResult(provider_name=criteria.provider_name, cars=cars)
 
     def _load_recipe(self):
