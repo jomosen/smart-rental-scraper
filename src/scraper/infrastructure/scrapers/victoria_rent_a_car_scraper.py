@@ -34,8 +34,8 @@ def _parse_int(text: str) -> Optional[int]:
         return None
 
 
-class ProviderBScraper(BaseScraper):
-    """Concrete scraper for Provider B."""
+class VictoriaRentACarScraper(BaseScraper):
+    """Concrete scraper for Victoria Rent a Car."""
 
     def __init__(self, driver: IBrowserDriver, provider: Optional[BookingProvider] = None) -> None:
         super().__init__(driver=driver, provider=provider)

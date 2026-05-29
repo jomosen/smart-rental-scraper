@@ -31,7 +31,7 @@ _COLUMNS_DETAIL = {
 
 _PICKUP_DATE = date(2026, 6, 15)
 _DURATION = 7
-_PROVIDERS = ("provider_a", "provider_b", "provider_c")
+_PROVIDERS = ("provider_a", "victoria_rent_a_car", "solcar")
 
 
 def _require_engine():

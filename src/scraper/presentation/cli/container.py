@@ -27,8 +27,8 @@ from ...application.smart_scraping.season_probe import SeasonProbe
 from ...application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
 from ...infrastructure.playwright.playwright_driver import PlaywrightDriver
 from ...infrastructure.scrapers.provider_a_scraper import ProviderAScraper
-from ...infrastructure.scrapers.provider_b_scraper import ProviderBScraper
-from ...infrastructure.scrapers.provider_c_scraper import ProviderCScraper
+from ...infrastructure.scrapers.victoria_rent_a_car_scraper import VictoriaRentACarScraper
+from ...infrastructure.scrapers.solcar_scraper import SolcarScraper
 from ...infrastructure.scrapers.recipe_scraper import RecipeScraper
 from ....saas.application.classification.acriss_loader import load_acriss_specs
 from ....saas.infrastructure.classification.gemini_service import GeminiClassificationService
@@ -47,8 +47,8 @@ from ....saas.infrastructure.persistence.models.catalog import (
 # Add one line here when creating a new scraper class.
 SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "provider_a": ProviderAScraper,
-    "provider_b": ProviderBScraper,
-    "provider_c": ProviderCScraper,
+    "victoria_rent_a_car": VictoriaRentACarScraper,
+    "solcar": SolcarScraper,
     "centauro": RecipeScraper,
 }
 

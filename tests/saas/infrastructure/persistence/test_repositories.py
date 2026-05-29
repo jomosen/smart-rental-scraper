@@ -162,7 +162,7 @@ class TestProviderRepository:
         p = Provider(
             code="broken_one",
             display_name="Broken",
-            scraper_key="provider_b",
+            scraper_key="broken_scraper",
             default_currency="USD",
             status="broken",
         )

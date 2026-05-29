@@ -42,8 +42,8 @@ def _parse_luggage(text: str) -> Optional[int]:
     return None
 
 
-class ProviderCScraper(BaseScraper):
-    """Concrete scraper for Provider C."""
+class SolcarScraper(BaseScraper):
+    """Concrete scraper for Solcar."""
 
     def __init__(self, driver: IBrowserDriver, provider: Optional[BookingProvider] = None) -> None:
         super().__init__(driver=driver, provider=provider)

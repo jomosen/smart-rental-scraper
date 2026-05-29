@@ -1,4 +1,4 @@
-"""Unit tests for provider_c_scraper parsing helpers.
+"""Unit tests for solcar_scraper parsing helpers.
 
 These tests exercise only the pure functions (_parse_seats, _parse_luggage)
 and the full _extract_results HTML parsing path via BeautifulSoup — no browser
@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 from bs4 import BeautifulSoup
 
-from src.scraper.infrastructure.scrapers.provider_c_scraper import (
+from src.scraper.infrastructure.scrapers.solcar_scraper import (
     _parse_luggage,
     _parse_seats,
 )

@@ -12,7 +12,7 @@ PoC stage, validated. Next phase: evolve into a multi-tenant SaaS pricing engine
 
 - **Architectural vision for the SaaS evolution lives in `docs/ROADMAP_ARCHITECTURE.md`.** Read it before proposing any structural change (multi-tenancy, API surface, persistence, deployment).
 - **Database schema and data-model decisions live in `docs/DATA_MODEL.md`.** This is the source of truth for tables, relationships, indexes, and modeling decisions. Do not change the schema without updating that document first.
-- The committed codebase **never names real providers**. Use `provider_a`, `provider_b`, `provider_c`, `centauro` only. Real names and URLs live in the `providers` DB table (never committed).
+- Provider names are now real in the codebase: `provider_a`, `victoria_rent_a_car`, `solcar`, `centauro`. Real URLs live in the `providers` DB table (never in source). Do not hardcode credentials or scraping internals specific to a provider in commit messages.
 
 ---
 
@@ -68,11 +68,10 @@ Database migrations live in `migrations/` at repo root and are managed by Alembi
 
 When the user asks to add a new provider scraper:
 
-1. Create `src/scraper/infrastructure/scrapers/provider_X_scraper.py` inheriting from `BaseScraper`.
+1. Create `src/scraper/infrastructure/scrapers/<provider_name>_scraper.py` inheriting from `BaseScraper`.
 2. Implement the Template Method hooks defined by `BaseScraper` (`_submit_form`, `_refine_form`, `_parse_results`, etc. — read `BaseScraper` first, do not assume the hook names).
-3. Register it in `SCRAPER_REGISTRY` inside `src/scraper/presentation/cli/container.py` with a new key (`provider_d`, `provider_e`…).
+3. Register it in `SCRAPER_REGISTRY` inside `src/scraper/presentation/cli/container.py` with the provider's `scraper_key`.
 4. Insert a row into `providers` (with `scraper_key` matching the registry key and `base_url` set) plus rows in `provider_locations` and `provider_rates` into the local DB. No `providers.json` — the DB is the source of truth.
-5. **Never** hardcode the real provider name in source files, commit messages, or comments. Use the generic key.
 
 For recipe-based providers (zero-code): run `run_build_recipe.py` — it calls `ProviderProvisioningService.ensure()` which handles DB setup and saves the recipe atomically.
 
@@ -141,7 +140,7 @@ Postgres and query those tables directly.
 - **Synthetic data is no longer persisted.** `ResultExpander` has been removed. Synthetic prices are derived on read from `homogeneous_zones` via a future `PriceQueryService` (not yet implemented). Anything that tries to persist `is_synthetic=True` observations is a bug.
 - **`.env` vs `.env.example` drift.** When a hito modifies `.env.example` (adding new variables), the user's local `.env` is NOT updated automatically. Tests will skip or fail with confusing errors until the user manually syncs the missing variables from `.env.example` to `.env`. When adding new environment variables, explicitly remind the user to sync their `.env` file.
 - **Postgres init scripts only run on database creation.** Files in `deploy/postgres/init/` (mounted to `/docker-entrypoint-initdb.d/`) are executed only when Postgres initializes a new data directory. To apply changes to those scripts, the user must run `docker compose down -v` (note the `-v` flag, which deletes the volume) followed by `docker compose up -d postgres`. The `-v` flag is critical and easy to forget. Migrations have to be re-applied afterwards.
-- **`base_url` for custom scrapers must be set in DB after migration.** The `j2k3l4m5n6o7` migration adds `providers.base_url` and seeds centauro automatically. For other providers, run: `UPDATE providers SET base_url = 'https://...' WHERE code = '<code>';`. Without this, `ProviderBScraper`/`ProviderCScraper` will navigate to an empty URL on launch.
+- **`base_url` for custom scrapers must be set in DB after migration.** The `j2k3l4m5n6o7` migration adds `providers.base_url` and seeds centauro automatically. For victoria_rent_a_car and solcar, the D2.6 migration updates their rows. Without `base_url` set, `VictoriaRentACarScraper`/`SolcarScraper` will navigate to an empty URL on launch.
 
 ---
 

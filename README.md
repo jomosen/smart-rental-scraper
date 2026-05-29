@@ -6,7 +6,7 @@ Rent-a-car competitor price monitoring system.
 
 The scraper extracts rates across a date range and rental durations from one or more rent-a-car providers. It uses a smart probing strategy that minimises browser sessions by detecting price seasons and only scraping the unique representative dates of each season, rather than every day in the period.
 
-Provider identities live in the `providers` DB table (never in committed source). The codebase refers to scrapers generically as `provider_a`, `provider_b`, `provider_c`, `centauro`. No real provider name appears in code or commits.
+Provider identities and URLs live in the `providers` DB table. Active scrapers: `provider_a`, `victoria_rent_a_car`, `solcar`, `centauro`.
 
 ---
 
