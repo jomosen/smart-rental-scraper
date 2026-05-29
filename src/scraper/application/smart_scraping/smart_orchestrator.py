@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -19,6 +20,7 @@ from ....shared.domain.models.season import HomogeneousZone
 from ..filters.rate_filter import RateFilter
 from ..models.search_request import SearchRequest
 from ..services.session_runner import run_session
+from ...domain.models.season_internals import PricePoint
 from .price_point_extractor import PricePointExtractor
 
 # SaaS persistence — accepted cross-boundary dependency for MVP ingestion layer.
@@ -139,11 +141,24 @@ class SmartScraperOrchestrator:
             # ── PHASE 2: Analysis ─────────────────────────────────────────
             logger.info("[%s] Phase 2 — Zone analysis", self._provider_code)
             price_points = self._extractor.extract(probe_searches, probe_results)
-            provider_zones = self._analyzer.detect_zones_provider_level(
-                price_points, start, end,
-            )
+
+            guide_group = self._select_guide_group(price_points)
+            if guide_group is None:
+                provider_zones = self._analyzer.detect_zones_provider_level(
+                    price_points, start, end,
+                )
+            else:
+                provider_zones = self._analyzer.detect_zones(
+                    price_points, start, end, guide_group,
+                )
+                logger.info(
+                    "[%s] Guide group for zone detection: %r (%d probe dates)",
+                    self._provider_code, guide_group,
+                    self._count_dates_for_group(price_points, guide_group),
+                )
+            provider_zones = self._reassign_representatives(provider_zones, price_points)
             logger.info(
-                "[%s] Detected %d provider-level zone(s)",
+                "[%s] Detected %d zone(s)",
                 self._provider_code, len(provider_zones),
             )
 
@@ -220,6 +235,63 @@ class SmartScraperOrchestrator:
             )
             self._mark_run_finished(run_id, "failed", error=str(exc))
             raise
+
+    # ------------------------------------------------------------------
+    # Guide-group selection and representative-date reassignment
+    # ------------------------------------------------------------------
+
+    def _select_guide_group(self, price_points: List[PricePoint]) -> Optional[str]:
+        """Pick the car_group present on the most distinct probe dates.
+
+        The guide group is the most reliable season thermometer: the group
+        the provider shows most consistently across the period.
+        Ties are broken by total number of price points (more data = more reliable).
+        Returns None when price_points is empty.
+        """
+        dates_by_group: dict[str, set] = defaultdict(set)
+        count_by_group: dict[str, int] = defaultdict(int)
+        for p in price_points:
+            dates_by_group[p.car_group].add(p.pickup_date)
+            count_by_group[p.car_group] += 1
+        if not dates_by_group:
+            return None
+        return max(
+            dates_by_group,
+            key=lambda g: (len(dates_by_group[g]), count_by_group[g]),
+        )
+
+    def _count_dates_for_group(self, price_points: List[PricePoint], group: str) -> int:
+        return len({p.pickup_date for p in price_points if p.car_group == group})
+
+    def _reassign_representatives(
+        self,
+        zones: List[HomogeneousZone],
+        price_points: List[PricePoint],
+    ) -> List[HomogeneousZone]:
+        """Set each zone's representative_date to the probe date within the zone
+        that saw the most distinct car groups.
+
+        Falls back to the existing representative_date when no probe date falls
+        inside the zone (e.g. a zone produced from the fallback single-zone path).
+        Ties in group count are broken by the later probe date (more inventory).
+        """
+        groups_by_date: dict[date, set] = defaultdict(set)
+        for p in price_points:
+            groups_by_date[p.pickup_date].add(p.car_group)
+
+        updated: List[HomogeneousZone] = []
+        for z in zones:
+            candidates = [
+                (d, len(groups))
+                for d, groups in groups_by_date.items()
+                if z.start_date <= d <= z.end_date
+            ]
+            if candidates:
+                best_date = max(candidates, key=lambda c: (c[1], c[0]))[0]
+                updated.append(replace(z, representative_date=best_date))
+            else:
+                updated.append(z)
+        return updated
 
     # ------------------------------------------------------------------
     # Classification (probe phase)
