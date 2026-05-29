@@ -1,7 +1,7 @@
-"""Unit tests for victoria_rent_a_car_scraper parsing helpers."""
+"""Unit tests for victoria_scraper parsing helpers."""
 import pytest
 
-from src.scraper.infrastructure.scrapers.victoria_rent_a_car_scraper import _parse_int
+from src.scraper.infrastructure.scrapers.victoria_scraper import _parse_int
 
 
 class TestParseInt:

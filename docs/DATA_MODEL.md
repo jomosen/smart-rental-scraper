@@ -420,7 +420,7 @@ acriss_codes
 
 providers
   id PK
-  code                                -- 'provider_a', 'victoria_rent_a_car', 'solcar', 'centauro', ...
+  code                                -- 'provider_a', 'victoria', 'solcar', 'centauro', ...
   display_name
   scraper_key                         -- maps to SCRAPER_REGISTRY
   default_currency CHAR(3) NOT NULL
