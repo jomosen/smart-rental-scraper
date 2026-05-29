@@ -111,7 +111,7 @@ async def main() -> None:
                 location_repo=ProviderLocationRepository(session),
                 rate_repo=ProviderRateRepository(session),
             )
-            prov = provisioning_svc.ensure(provider_key, targets)
+            prov = provisioning_svc.ensure(provider_key, targets, base_url=url)
 
             # 2. Build recipe from discovery result and save to DB
             repo = ProviderRecipeRepository(session)

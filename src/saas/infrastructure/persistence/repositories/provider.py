@@ -21,8 +21,9 @@ class ProviderRepository:
         display_name: str,
         scraper_key: str,
         currency: str = "EUR",
+        base_url: str = "",
     ) -> Provider:
-        """Get existing provider by code or create it. Updates display_name if changed."""
+        """Get existing provider by code or create it. Updates display_name/base_url if changed."""
         provider = self.get_by_code(code)
         if provider is None:
             provider = Provider(
@@ -30,13 +31,21 @@ class ProviderRepository:
                 display_name=display_name,
                 scraper_key=scraper_key,
                 default_currency=currency,
+                base_url=base_url,
                 status="active",
             )
             self._s.add(provider)
             self._s.flush()
-        elif provider.display_name != display_name:
-            provider.display_name = display_name
-            self._s.flush()
+        else:
+            dirty = False
+            if provider.display_name != display_name:
+                provider.display_name = display_name
+                dirty = True
+            if base_url and provider.base_url != base_url:
+                provider.base_url = base_url
+                dirty = True
+            if dirty:
+                self._s.flush()
         return provider
 
     def list_active(self) -> list[Provider]:

@@ -48,17 +48,25 @@ class ProviderProvisioningService:
         self._location_repo = location_repo
         self._rate_repo = rate_repo
 
-    def ensure(self, provider_key: str, targets: dict) -> ProvisioningResult:
+    def ensure(
+        self,
+        provider_key: str,
+        targets: dict,
+        base_url: str = "",
+    ) -> ProvisioningResult:
         """Idempotently create/get provider + location + rate rows.
 
         provider_key — e.g. "centauro"; becomes providers.code
         targets      — scrape targets dict; targets["location"] drives location_code
+        base_url     — entry URL for the provider's booking site; stored in DB
+                       and used by the pipeline when base_url is set in providers.
         """
         provider = self._provider_repo.get_or_create(
             code=provider_key,
             display_name=provider_key.capitalize(),
             scraper_key=provider_key,
             currency="EUR",
+            base_url=base_url,
         )
 
         location_name = targets["location"]

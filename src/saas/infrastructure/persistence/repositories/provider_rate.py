@@ -20,6 +20,18 @@ class ProviderRateRepository:
             )
         )
 
+    def list_for_provider(self, provider_id: int) -> list[ProviderRate]:
+        return list(
+            self._s.scalars(
+                select(ProviderRate)
+                .where(
+                    ProviderRate.provider_id == provider_id,
+                    ProviderRate.active.is_(True),
+                )
+                .order_by(ProviderRate.rate_code)
+            )
+        )
+
     def get_or_create(
         self,
         provider_id: int,

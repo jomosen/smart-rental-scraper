@@ -46,7 +46,10 @@ class ProviderLocationRepository:
         return list(
             self._s.scalars(
                 select(ProviderLocation)
-                .where(ProviderLocation.provider_id == provider_id)
+                .where(
+                    ProviderLocation.provider_id == provider_id,
+                    ProviderLocation.active.is_(True),
+                )
                 .order_by(ProviderLocation.location_code)
             )
         )

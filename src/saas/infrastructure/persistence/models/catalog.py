@@ -76,6 +76,7 @@ class Provider(Base):
     scraper_key: Mapped[str] = mapped_column(String(64), nullable=False)
     default_currency: Mapped[str] = mapped_column(CHAR(3), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )

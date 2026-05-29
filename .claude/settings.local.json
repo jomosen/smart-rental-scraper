@@ -9,7 +9,11 @@
       "Bash(python -m alembic revision -m \"create tenant tables with RLS\")",
       "Bash(python -m alembic upgrade head)",
       "Bash(python -c ' *)",
-      "Bash(python -m alembic current)"
+      "Bash(python -m alembic current)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(python -m pytest tests/saas/infrastructure/persistence/test_repositories.py::TestProviderVehicleCategoryRepository::test_get_by_external_code_found -q)",
+      "Bash(alembic upgrade *)",
+      "Bash(python -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import os; url=os.environ.get\\('SUPER_DATABASE_URL',''\\); import sqlalchemy as sa; e=sa.create_engine\\(url\\); conn=e.connect\\(\\); r=conn.execute\\(sa.text\\(\\\\\"SELECT indexname, indexdef FROM pg_indexes WHERE tablename='provider_vehicle_categories' ORDER BY indexname\\\\\"\\)\\); [print\\(row\\) for row in r]; conn.close\\(\\)\")"
     ]
   }
 }

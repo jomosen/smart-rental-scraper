@@ -139,7 +139,7 @@ When a new milestone starts, append a section at the end. Don't rewrite past ent
 **Goal.** Make the scraper persist its results to the database via the Milestone-3 repositories. Eliminate the CSV/JSON exporters definitively. End the milestone with the scraper running end-to-end against real providers and writing to Postgres.
 
 **What was built.**
-- `CatalogSyncService` (`src/saas/application/catalog_sync.py`): on every run, ensures `providers.json` entries exist as `(provider, provider_location, provider_rate)` rows in the catalog. Idempotent. Uses `super_session` since this is bootstrap operation.
+- `CatalogSyncService` (`src/saas/application/catalog_sync.py`): ensures entries from a list of provider dicts exist as `(provider, provider_location, provider_rate)` rows in the catalog. Idempotent. Originally called at startup from `providers.json`; the call was later removed (D2.5) since the pipeline now reads from the DB directly. The class is retained for future sync sources (admin UI etc.).
 - The orchestrator (`SmartScraperOrchestrator`) was modified to:
   - Sync the catalog at the start of every run.
   - For each provider entry: create a `scrape_run`, run probe → analyse → persist zones (replace) → extract → persist observations (insert-if-changed) → mark the run finished. Failures on one provider don't abort the whole orchestrator run.

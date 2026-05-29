@@ -6,7 +6,7 @@ Rent-a-car competitor price monitoring system.
 
 The scraper extracts rates across a date range and rental durations from one or more rent-a-car providers. It uses a smart probing strategy that minimises browser sessions by detecting price seasons and only scraping the unique representative dates of each season, rather than every day in the period.
 
-Provider identities are kept in `providers.json` (gitignored). The committed codebase refers to scrapers generically as `provider_a`, `provider_b`, `provider_c`. No real provider name appears in code or commits.
+Provider identities live in the `providers` DB table (never in committed source). The codebase refers to scrapers generically as `provider_a`, `provider_b`, `provider_c`, `centauro`. No real provider name appears in code or commits.
 
 ---
 
@@ -42,33 +42,36 @@ Operational guidance for working on the repo (including with Claude Code) lives 
 
 ## Providers configuration
 
-Copy `providers.json.example` to `providers.json` and fill in the entries. The file is gitignored.
+Providers live entirely in the database — there is no `providers.json` file to maintain.
 
-```json
-[
-  {
-    "name": "Display name shown in logs and DB",
-    "scraper": "provider_a",
-    "base_url": "https://...",
-    "location_id": "ALC",
-    "location_name": "Pickup office display name",
-    "rate_name": "Rate name to filter on",
-    "enabled": true
-  }
-]
+The pipeline reads the `providers` table (rows with `status='active'`) on each startup. For every active provider it also reads its active `provider_locations` and `provider_rates` rows and creates one `SmartScraperOrchestrator` per `(provider, location, rate)` tuple.
+
+### Adding a custom scraper provider
+
+1. Insert a row into `providers` with `status='active'`, the correct `scraper_key`, and `base_url` set to the provider's booking-site URL.
+2. Insert at least one row into `provider_locations` (the pickup office) and one into `provider_rates` (the rate name to filter on) for that provider.
+3. Register the scraper class in `SCRAPER_REGISTRY` inside `container.py` using the same `scraper_key`.
+
+```sql
+INSERT INTO providers (code, display_name, scraper_key, default_currency, base_url, status)
+VALUES ('my_provider', 'My Provider', 'provider_d', 'EUR', 'https://...', 'active');
+
+INSERT INTO provider_locations (provider_id, location_code, location_name, active)
+VALUES (<id>, 'ALC', 'Alicante Airport', true);
+
+INSERT INTO provider_rates (provider_id, rate_code, rate_name, active)
+VALUES (<id>, 'standard', 'Standard Rate', true);
 ```
 
-| Field | Description |
-|---|---|
-| `name` | Display name. Persisted to `providers.display_name` on first scrape. |
-| `scraper` | Scraper key. One of `provider_a`, `provider_b`, `provider_c`. Maps to the registry in `container.py`. |
-| `base_url` | Entry-point URL for that provider. |
-| `location_id` | Internal location identifier expected by the provider. |
-| `location_name` | Pickup office display name. |
-| `rate_name` | Rate name to filter on. Must match what the scraper returns. |
-| `enabled` | Set to `false` to skip this provider without removing it. |
+### Adding a recipe-based provider (zero-code)
 
-The catalog (`providers`, `provider_locations`, `provider_rates`) is auto-created in the database on the first scrape via `CatalogSyncService`. There is no manual seeding step.
+Run the builder discovery script to create the provider row and recipe in one step:
+
+```bash
+python experiments/scraper_builder/run_build_recipe.py --provider-key my_provider --location Alicante
+```
+
+No DB inserts or code changes needed — the script calls `ProviderProvisioningService.ensure()` which is idempotent.
 
 ---
 
@@ -171,9 +174,7 @@ playwright install chromium
 # 6. Apply database migrations
 alembic upgrade head
 
-# 7. Configure providers
-cp providers.json.example providers.json
-# Edit providers.json with real values (gitignored)
+# 7. Insert providers into the DB (see "Providers configuration" above)
 ```
 
 ### Running the scraper
@@ -182,7 +183,7 @@ cp providers.json.example providers.json
 python -m src.scraper.presentation.cli.main
 ```
 
-The scraper requires Postgres to be running and migrations to be applied. It auto-creates the catalog rows from `providers.json` on first run.
+The scraper requires Postgres to be running, migrations applied, and at least one active provider in the DB.
 
 ### Inspecting results
 
@@ -252,12 +253,14 @@ The integration tests use real Postgres with rollback-based isolation; they don'
 
 ---
 
-## Adding a new scraper
+## Adding a new custom scraper
 
 1. Create `src/scraper/infrastructure/scrapers/provider_X_scraper.py` inheriting from `BaseScraper`. Read `BaseScraper` first; do not assume hook names.
 2. Register it in `SCRAPER_REGISTRY` inside `src/scraper/presentation/cli/container.py` with a key (`provider_d`, `provider_e`…).
-3. Add the corresponding entry shape to `providers.json.example`.
+3. Insert a `providers` row (with `scraper_key` matching the registry key) plus `provider_locations` and `provider_rates` rows into the local DB.
 4. Never hardcode the real provider name in source files, commit messages, or comments. Use the generic key.
+
+For recipe-based providers (zero custom code), use `run_build_recipe.py` instead — it handles the DB setup automatically.
 
 ---
 

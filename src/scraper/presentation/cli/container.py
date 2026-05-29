@@ -9,7 +9,7 @@ ready-to-use AppContainer — it does not know how anything is constructed.
 from __future__ import annotations
 
 import functools
-import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -32,8 +32,18 @@ from ...infrastructure.scrapers.provider_c_scraper import ProviderCScraper
 from ...infrastructure.scrapers.recipe_scraper import RecipeScraper
 from ....saas.application.classification.acriss_loader import load_acriss_specs
 from ....saas.infrastructure.classification.gemini_service import GeminiClassificationService
+from ....saas.infrastructure.persistence.repositories import (
+    ProviderLocationRepository,
+    ProviderRateRepository,
+    ProviderRepository,
+)
+from ....saas.infrastructure.persistence.models.catalog import (
+    Provider as ProviderRow,
+    ProviderLocation as ProviderLocationRow,
+    ProviderRate as ProviderRateRow,
+)
 
-# Maps the "scraper" key in providers.json to its concrete class.
+# Maps providers.scraper_key to the concrete scraper class.
 # Add one line here when creating a new scraper class.
 SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "provider_a": ProviderAScraper,
@@ -41,8 +51,6 @@ SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "provider_c": ProviderCScraper,
     "centauro": RecipeScraper,
 }
-
-_PROVIDERS_CONFIG = Path(__file__).parents[4] / "providers.json"
 
 # (provider, pickup_location, dropoff_location, orchestrator)
 OrchestratorEntry = Tuple[BookingProvider, Location, Location, SmartScraperOrchestrator]
@@ -57,61 +65,89 @@ class AppContainer:
     period_end: datetime
 
 
-def load_providers_raw(config_path: Path = _PROVIDERS_CONFIG) -> list[dict]:
-    """Return the raw list of provider entries from providers.json."""
-    with open(config_path, encoding="utf-8") as f:
-        return json.load(f)
+# ── Catalog loading ────────────────────────────────────────────────────────────
 
+CatalogEntry = Tuple[ProviderRow, ProviderLocationRow, ProviderRateRow]
+
+
+def load_catalog_from_db(session_factory: Callable) -> list[CatalogEntry]:
+    """Return all active (provider, location, rate) triples from the DB.
+
+    Uses a super_session (BYPASSRLS) since the catalog tables are global and
+    not tenant-scoped.  Providers with no active locations or no active rates
+    are silently skipped (nothing to scrape for them).
+    """
+    with session_factory() as session:
+        provider_repo = ProviderRepository(session)
+        location_repo = ProviderLocationRepository(session)
+        rate_repo = ProviderRateRepository(session)
+
+        entries: list[CatalogEntry] = []
+        for provider in provider_repo.list_active():
+            locations = location_repo.list_for_provider(provider.id)
+            rates = rate_repo.list_for_provider(provider.id)
+            for location in locations:
+                for rate in rates:
+                    entries.append((provider, location, rate))
+        return entries
+
+
+# ── Container builder ──────────────────────────────────────────────────────────
 
 def build_container(
     pickup_hour: int,
     period_start: datetime,
     period_end: datetime,
-    catalog_ids: dict[str, tuple[int, int, int]],
     session_factory: Callable,
 ) -> AppContainer:
     """
     Constructs and wires all application and infrastructure objects.
 
-    catalog_ids: mapping of entry['name'] → (provider_id, location_id, rate_id),
-                 returned by CatalogSyncService.sync_from_providers_json().
+    Reads the provider catalog directly from the DB (providers table,
+    status='active').  No providers.json required.
+
     session_factory: callable returning a context manager that yields a Session
                      (e.g. ``functools.partial(super_session, engine)``).
     """
-    import os
     threshold = float(os.environ.get("SEASON_PRICE_THRESHOLD", "0.05"))
 
     yaml_path = Path(__file__).resolve().parents[4] / "acriss_codes.yaml"
     acriss_specs = load_acriss_specs(yaml_path)
-    classification_service = GeminiClassificationService(
-        acriss_types=acriss_specs,
-    )
+    classification_service = GeminiClassificationService(acriss_types=acriss_specs)
 
-    entries = load_providers_raw()
-    registry: dict[str, type[IBookingScraper]] = {}
+    catalog = load_catalog_from_db(session_factory)
+    if not catalog:
+        raise RuntimeError(
+            "No active providers found in the database. "
+            "Insert rows into the providers table (status='active') "
+            "with the correct scraper_key, location, and rate."
+        )
+
+    registry: dict[str, object] = {}
     provider_configs: dict[str, BookingProvider] = {}
 
-    for entry in entries:
-        if not entry.get("enabled", True):
-            continue
-        scraper_key = entry["scraper"]
+    for provider_row, _location_row, _rate_row in catalog:
+        if provider_row.display_name in registry:
+            continue  # already registered (multiple locations/rates share one factory entry)
+        scraper_key = provider_row.scraper_key
         if scraper_key not in SCRAPER_REGISTRY:
             known = ", ".join(SCRAPER_REGISTRY)
             raise ValueError(
-                f"Unknown scraper type '{scraper_key}' in providers.json. "
-                f"Known types: {known}"
+                f"Provider '{provider_row.code}' has scraper_key='{scraper_key}' "
+                f"which is not in SCRAPER_REGISTRY. Known keys: {known}"
             )
-        provider = BookingProvider(name=entry["name"], base_url=entry["base_url"])
-        scraper_cls = SCRAPER_REGISTRY[scraper_key]
+        scraper_cls: object = SCRAPER_REGISTRY[scraper_key]
         if scraper_cls is RecipeScraper:
-            prov_id = catalog_ids[entry["name"]][0]
             scraper_cls = functools.partial(
                 RecipeScraper,
-                provider_id=prov_id,
+                provider_id=provider_row.id,
                 session_factory=session_factory,
             )
-        registry[provider.name] = scraper_cls
-        provider_configs[provider.name] = provider
+        registry[provider_row.display_name] = scraper_cls
+        provider_configs[provider_row.display_name] = BookingProvider(
+            name=provider_row.display_name,
+            base_url=provider_row.base_url or "",
+        )
 
     factory = ScraperFactory(
         registry=registry,
@@ -120,33 +156,31 @@ def build_container(
     )
 
     orchestrators: List[OrchestratorEntry] = []
-    for entry in entries:
-        if not entry.get("enabled", True):
-            continue
-
-        provider = BookingProvider(name=entry["name"], base_url=entry["base_url"])
-        location = Location(
-            canonical_id=entry["location_id"],
-            display_name=entry["location_name"],
+    for provider_row, location_row, rate_row in catalog:
+        provider = BookingProvider(
+            name=provider_row.display_name,
+            base_url=provider_row.base_url or "",
         )
-        rate_name = entry["rate_name"]
-        provider_id, location_id, rate_id = catalog_ids[entry["name"]]
+        location = Location(
+            canonical_id=location_row.location_code,
+            display_name=location_row.location_name,
+        )
 
         orch = SmartScraperOrchestrator(
             factory=factory,
             probe=SeasonProbe(),
             analyzer=SeasonAnalyzer(price_change_threshold=threshold, representative="first"),
             plan_builder=SearchPlanBuilder(),
-            extractor=PricePointExtractor(rate_name=rate_name),
+            extractor=PricePointExtractor(rate_name=rate_row.rate_name),
             session_factory=session_factory,
-            provider_id=provider_id,
-            provider_location_id=location_id,
-            provider_rate_id=rate_id,
+            provider_id=provider_row.id,
+            provider_location_id=location_row.id,
+            provider_rate_id=rate_row.id,
             classification_service=classification_service,
-            provider_code=entry["scraper"],
-            location_code=entry["location_id"],
-            rate_code=rate_name,
-            rate_filter=RateFilter(rate_names=[rate_name]),
+            provider_code=provider_row.scraper_key,
+            location_code=location_row.location_code,
+            rate_code=rate_row.rate_code,
+            rate_filter=RateFilter(rate_names=[rate_row.rate_name]),
             pickup_hour=pickup_hour,
         )
         orchestrators.append((provider, location, location, orch))

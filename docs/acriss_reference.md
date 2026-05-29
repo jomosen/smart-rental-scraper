@@ -10,15 +10,22 @@ vehicles. Every code is exactly 4 characters, one per dimension:
 
 Example: CFAR = Compact SUV, Automatic, Combustion + Air
 
+This reference is derived from the official ACRISS Expanded Matrix and Car
+Type Definitions (https://acriss.org/car-codes/expanded-matrix/).
+
 ---
 
 ### POSITION 1 — CATEGORY (size/tier)
 
 ACRISS uses pairs of letters to distinguish mainstream tier vs "Elite" tier
-within each size class. "Elite" means a premium-brand vehicle of the same size
-as its mainstream counterpart (e.g. Audi A1 is Elite of Compact size).
+within each size class. "Elite" identifies a category of vehicle that is
+superior to another of equal body size — the difference can be price,
+engine size, performance, fixtures, features, or any combination of these.
 
-Mainstream / Elite pairs (Elite = premium-brand version of same size):
+In practice, Elite usually means premium-brand (e.g. BMW, Audi, Mercedes,
+Lexus, Volvo) of equivalent size to its mainstream counterpart.
+
+Mainstream / Elite pairs:
 
   M = Mini              N = Mini Elite          (rare, tiny city cars)
   E = Economy           H = Economy Elite       (sub-compact, ~3.5-3.9m)
@@ -33,136 +40,208 @@ Mainstream / Elite pairs (Elite = premium-brand version of same size):
 
 KEY INSIGHT about Elite:
 - "Elite" is NOT about being more luxurious within a brand.
-- "Elite" identifies a premium-brand vehicle of equivalent SIZE to its
-  mainstream counterpart.
-- Example: A VW Polo (mainstream compact, 4.05m) = C.
-  Audi A1 (premium-brand compact, 4.03m) = D (Compact Elite).
-- Example: Mercedes GLA (premium-brand compact SUV, 4.41m) = D
-  (Compact Elite). The VW T-Roc (mainstream compact SUV, 4.23m) = C.
-- Example: Mercedes GLC (premium-brand mid-large SUV, 4.66m) = R
-  (Standard Elite). The Ford Kuga (mainstream mid SUV, 4.62m) = I or S.
+- "Elite" identifies a premium-brand or higher-spec vehicle of equivalent
+  SIZE to its mainstream counterpart.
+- VW Polo (mainstream compact, 4.05m) = C ; Audi A1 (premium-brand
+  compact, 4.03m) = D (Compact Elite).
+- Mercedes GLA (premium-brand compact SUV, 4.41m) = D (Compact Elite);
+  VW T-Roc (mainstream compact SUV, 4.23m) = C.
+- Mercedes GLC (premium-brand mid-large SUV, 4.66m) = R (Standard Elite);
+  Ford Kuga (mainstream mid SUV, 4.62m) = I or S.
 
-PASSENGER VAN special category encoding (1st char varies by seat count):
+REFERENCE MODELS BY CATEGORY (from ACRISS Spanish Selling Guide, European
+fleet):
 
-  IV = 6+ seats         JV = Elite 6+ seats or 5+2
-  SV = 7+ seats         RV = Elite 7+ seats
-  FV = 7+ seats + space GV = Elite 7+ seats + space
-  PV = 8+ seats         UV = Elite 8+ seats
-  LV = 9+ seats         WV = Elite 9+ seats
-  XV = 12+ seats        OV = 15+ seats
+  Mini (M):              Fiat 500 (MBMR/MBMH if hybrid)
+  Mini Elite EV (N):     Honda e (NBAE)
+  Economy (E):           Peugeot 208 (ECMR)
+  Economy Elite (H):     Audi A1 (HDMR)
+  Compact (C):           Ford Focus (CDMR)
+  Compact Elite (D):     Mercedes A-Class, GLA, GLB (DDMR, DFAR)
+  Intermediate (I):      Hyundai Ioniq EV, VW Tiguan (IDAE, IFAR)
+  Intermediate Elite (J):Mercedes CLA, BMW Serie 2 Gran Tourer (JDAR, JMAR)
+  Standard (S):          Peugeot 508, VW Passat (SDMR, SDAR)
+  Standard Elite (R):    Mercedes GLC, Audi Q4 e-tron (RFAR, RFAE)
+  Fullsize (F):          Skoda Superb (FDAR)
+  Fullsize Elite (G):    Alfa Romeo Stelvio (GFAR)
+  Premium (P):           Mercedes C-Class (PDAR)
+  Premium Elite (U):     BMW i4 (UDAE)
+  Luxury (L):            Audi A6 (LDAR)
+  Luxury Elite (W):      Audi A7 (WDAR)
+  Special (X):           Mercedes S-Class, Range Rover Vogue (XDAR, XFAR)
 
-So a Mercedes Vito Tourer 9 plazas = WV (premium-brand 9+ seats van) +
-A (automatic) + R (combustion) = WVAR.
-A Renault Trafic Passenger 9 plazas = LV (mainstream 9+ seats) +
-M (manual) + R (combustion) = LVMR.
+PASSENGER VAN SPECIAL CATEGORY ENCODING (1st character varies by seat count
+when 2nd character is V):
+
+  IV = 6+ seats              JV = Elite 6+ seats or 5+2 seats
+  SV = 7+ seats              RV = Elite 7+ seats
+  FV = 7+ seats + more space GV = Elite 7+ seats + more space
+  PV = 8+ seats              UV = Elite 8+ seats
+  LV = 9+ seats              WV = Elite 9+ seats
+  XV = 12+ seats             OV = 15+ seats
+
+Examples:
+- Mercedes Vito Tourer 9 plazas = WV (Elite 9+ seats) + A (auto) +
+  R (combustion) = WVAR.
+- Renault Trafic Passenger 9 plazas = LV (mainstream 9+) + M (manual) +
+  R (combustion) = LVMR.
+- BMW Serie 2 Gran Tourer (5+2 seats, Elite brand) → could be JV when
+  encoded as van-passenger, but its body type is M (Monospace, 5 seats
+  + extra headroom + 2 jump seats), so JMAR is the typical code.
 
 ---
 
 ### POSITION 2 — BODY TYPE
 
-  B = 2-3 door (small hatchback or 2-door)
-  C = 2/4 door
-  D = 4-5 door (standard sedan/hatchback) — the most common
-  W = Wagon/Estate (kombi/estate body)
-  V = Passenger Van (multi-row passenger transport)
-  L = Limousine/Sedan (in 2018, expanded to include sedan cars)
-  S = Sport
-  T = Convertible / Cabrio
-  F = SUV (sport utility vehicle, real SUV body)
-  J = Open-air All Terrain (jeep-style)
-  X = Special
+Official definitions (ACRISS Expanded Matrix, Dec 2019, updated 2025):
+
+  B = 2-3 Door car
+  C = 2-4 Door car
+  D = 4-5 Door car (the most common — standard sedan or hatchback)
+  W = Wagon/Estate (estate derivative of a C or D-type car)
+  V = Passenger Van (multi-passenger vehicle with 6+ seats; combined with
+      van-passenger coding above)
+  L = Limousine/Sedan (specially extended luxury cars OR sedan in markets
+      where "Limousine" means sedan; expanded since 2018)
+  S = Sport (sports car with more powerful engine)
+  T = Convertible (cars with open roof, usually 4 seats)
+  F = SUV (sport utility vehicle; family vehicle usually with 4WD or
+      on/off-road capability — but not guaranteed; can also be FWD)
+  J = Convertible SUV (SUV with open roof)
+  X = Special (doesn't fit other groups)
   P = Pick-up single/extended cab 2 door
   Q = Pick-up double cab 4 door
-  Z = Special Offer
-  E = Coupe (2-door coupe)
-  M = Monospace / MPV (people-carrier, NOT van)
-  R = Recreational Vehicle
-  H = Motor Home
-  Y = 2-Wheel Vehicle (motorcycle / scooter)
-  N = Roadster
-  G = Crossover (urban SUV, soft-roader)
-  K = Commercial Van/Truck (cargo, NOT passenger)
+  Z = Special Offer / promotional vehicle
+  E = Coupe (two-door sporty car, usually with two small rear seats)
+  M = Monospace (5-seat multi-purpose vehicle with extra headroom)
+  R = Recreational vehicle (substantial motorhome with living space)
+  H = Motorhome (smaller recreational vehicle; campervan)
+  Y = 2-Wheel Vehicle (motorcycle, scooter, moped)
+  N = Roadster (two-door, two-seat sports car with open roof; distinct
+      from T which has 4 seats)
+  G = Crossover (CUV built on unibody car platform, combines SUV features
+      with passenger car character; typically WITHOUT 4WD capability)
+  K = Commercial Van/Truck (cargo or goods transport)
 
-KEY DISTINCTIONS:
-- F (SUV) vs G (Crossover): F is a real SUV body (Tiguan, Tucson).
-  G is an urban crossover with raised driving position but soft body
-  (Captur, T-Roc, Kona).
-- V (Passenger Van) vs M (MPV): V is a true van with tall roof and
-  passenger-focused seats (Mercedes Vito Tourer, Renault Trafic Passenger).
-  M is a monospace/MPV (people-carrier with car-like proportions, e.g.
-  BMW Serie 2 Gran Tourer, Mercedes Clase B).
-- V (Passenger Van) vs K (Commercial Van): V is for passengers; K is cargo.
-- D (4-5 door) vs W (Wagon): D is hatchback/sedan; W is estate body.
-- D vs E (Coupe): E is 2-door coupe (sport, performance positioning).
-- Y (2-Wheeler): use only for motorcycles and scooters.
+KEY DISTINCTIONS that matter for our market:
+
+- F (SUV) vs G (Crossover): F is a proper SUV body (Tiguan, Tucson, X3,
+  GLC, RAV4). G is an urban crossover with raised driving position but
+  unibody construction, FWD-typical (Captur, T-Roc, Kona, Puma, Kamiq).
+  When in doubt, F is "more truck-like", G is "more car-like".
+
+- V (Passenger Van) vs M (Monospace): V is a true van body with tall roof
+  and 6+ passenger-focused seats (Mercedes Vito Tourer, Renault Trafic
+  Passenger, Ford Tourneo). M is a monospace / people-carrier with 5
+  seats (or 5+2) and extra headroom but still car-like (BMW Serie 2
+  Gran Tourer, Mercedes Clase B, VW Touran in some configurations).
+
+- V (Passenger Van) vs K (Commercial Van): V is for passengers (Vito
+  Tourer); K is for cargo (Vito Cargo, Transit Cargo).
+
+- D (4-5 door) vs W (Wagon): D is hatchback or sedan; W is estate body
+  (raised rear roofline, wagon styling).
+
+- D vs E (Coupe): D is 4-5 door; E is 2-door coupe (sport, performance
+  positioning, usually with small rear seats).
+
+- N (Roadster) vs T (Convertible): N is 2-seat 2-door open-top sports
+  car (Mazda MX-5, Porsche Boxster, BMW Z4); T is 4-seat convertible
+  with open roof (Mini Cabrio, Audi A3 Cabrio, Mustang Convertible).
+
+- J (Convertible SUV) is specifically a SUV with an open roof
+  (Range Rover Evoque Convertible, Suzuki Vitara Cabrio in some markets);
+  NOT a "Jeep-style" off-roader (those go in F).
+
+- R (Recreational) vs H (Motorhome): R is the more substantial motorhome
+  with full living space (Fiat Ducato Camper, larger campers); H is the
+  smaller campervan (VW California Beach, Ford Transit Custom Nugget).
+  Note: H = smaller, R = larger. This may seem counter-intuitive.
+
+- Y (2-Wheeler): use only for motorcycles, scooters, mopeds.
 
 ---
 
 ### POSITION 3 — TRANSMISSION / DRIVE
 
 Manual options:
-  M = Manual (FWD or RWD, no 4WD)
+  M = Manual Unspecified Drive (FWD or RWD, no 4WD)
   N = Manual 4WD
   C = Manual AWD
 
 Auto options:
-  A = Auto (FWD or RWD, no 4WD)
+  A = Auto Unspecified Drive
   B = Auto 4WD
   D = Auto AWD
 
 Electric:
   E = Electric
 
-KEY RULE for our market:
-- Most rental cars use M or A. 4WD/AWD codes (N, C, B, D) are reserved
-  for vehicles where 4x4/AWD is the defining feature (real off-roaders,
-  premium-brand AWD SUVs marketed as such).
-- A Mercedes GLC 4Matic Coupe might be A (auto, as the default) or D
-  (auto AWD) depending on how the provider lists it. If the provider
-  explicitly says "4Matic" or "AWD", use D. Otherwise default to A.
+Autonomous (added 2025, not yet relevant in our market):
+  Q = Level 3 Conditional Automation
+  H = Level 4 High Automation
+  F = Level 5 Full Automation
+
+KEY RULES for our market:
+- Most rental cars use M (manual) or A (auto unspecified). 4WD/AWD codes
+  (N, C, B, D) are reserved for vehicles where 4x4/AWD is the defining
+  feature (real off-roaders, premium-brand AWD SUVs marketed as such).
+- A Mercedes GLC 4Matic Coupe might be A (auto, the default) or D (auto
+  AWD) depending on how the provider lists it. If the provider explicitly
+  says "4Matic" or "AWD", use D. Otherwise default to A.
 - Same applies to manual 4WD: use N only if the vehicle is sold as a
   real off-roader (Jeep Wrangler, Toyota Land Cruiser); otherwise M.
+- Autonomous codes (Q/H/F) are not yet present in our market. Ignore
+  unless explicitly indicated.
 
 ---
 
 ### POSITION 4 — FUEL / AIR
 
-Default (combustion, regular):
-  R = Unspecified Fuel/Power Combustion Engine + Air conditioning
-  N = Same but no air conditioning (rare in our market)
+Default (combustion):
+  R = Unspecified Fuel/Power with Air conditioning
+  N = Unspecified Fuel/Power without Air (rare in our market)
 
 Diesel:
-  D = Diesel + Air
-  Q = Diesel no air
+  D = Diesel with Air
+  Q = Diesel no Air
 
 Petrol explicit:
-  V = Petrol + Air
-  Z = Petrol no air
+  V = Petrol with Air
+  Z = Petrol no Air
 
-Alternative fuels:
-  H = Hybrid + Air
-  I = Hybrid Plug-in + Air
-  E = Electric + Air
-  C = Electric (without specifying air)
-
-  L = LPG/Compressed Gas + Air
+Alternative fuels (electric and hybrid INCLUDE air conditioning by default;
+the air specification is omitted in these codes):
+  H = Hybrid (HEV / MHEV)
+  I = Hybrid Plug-in (PHEV)
+  E = Electric Vehicle (BEV) — typically longer range
+  C = Electric Vehicle (BEV) — typically shorter range
+  L = LPG/Compressed Gas with Air
   S = LPG/Compressed Gas no Air
-  A = Hydrogen + Air
+  A = Hydrogen with Air
   B = Hydrogen no Air
-  M = Multi Fuel/Power + Air
+  M = Multi Fuel/Power with Air
   F = Multi Fuel/Power no Air
-  U = Ethanol + Air
+  U = Ethanol with Air
   X = Ethanol no Air
 
-KEY RULE for our market:
+IMPORTANT — change since 2020-2022:
+- For Electric (E, C) and Hybrid (H, I), air conditioning is INCLUDED by
+  default. There is no "no air" version. The fuel codes for these are
+  used to distinguish between PHEV vs MHEV and longer/shorter range EVs.
+- This is a change from earlier ACRISS versions, which had "+ Air"
+  suffixes on H, E, etc.
+
+KEY RULES for our market:
 - DEFAULT to R (Combustion + Air) when fuel is not explicitly mentioned.
-  This is the ACRISS default for rentals.
-- Use H (Hybrid + Air) only if the provider explicitly says "Hybrid",
-  "Híbrido", or the model name explicitly indicates hybrid (e.g. "Fiat
-  Panda Hybrid", "Kia XCeed Hybrid", "Toyota Yaris Hybrid").
-- Use I (Plug-in Hybrid) only if "Plug-in" or "PHEV" is mentioned.
+  This is the ACRISS default for rental cars.
+- Use H (Hybrid) only if the provider explicitly says "Hybrid", "Híbrido",
+  or the model name explicitly indicates hybrid (e.g. "Fiat Panda Hybrid",
+  "Kia XCeed Hybrid", "Toyota Yaris Hybrid").
+- Use I (Plug-in Hybrid) only if "Plug-in", "PHEV", or "enchufable" is
+  mentioned.
 - Use E or C (Electric) only if the vehicle is fully electric (Tesla,
-  EVs, etc.).
+  Honda e, BMW i4, etc.). When in doubt between E and C, default to E.
 - Do not infer fuel from brand alone (e.g. Toyota does not always mean
   hybrid). Look at the actual model name and provider listing.
 
@@ -198,9 +277,10 @@ KEY RULE for our market:
        N (Mini Elite) > M ; H > E ; D > C ; J > I ; R > S ;
        G > F ; U > P ; W > L
    - If multiple models tie on category but differ in body type, prefer
-     in this order: F (SUV) > G (Crossover) > M (MPV) > V (Van) > D (sedan)
-     > W (wagon) > E (coupe) > T (convertible). When in doubt, pick the
-     body type with greater price prominence in the market.
+     in this order: F (SUV) > G (Crossover) > M (Monospace) > V (Van)
+     > D (sedan) > W (wagon) > E (coupe) > T (convertible) > N (roadster).
+     When in doubt, pick the body type with greater price prominence in
+     the market.
    - If models tie on category and body but differ in transmission, prefer
      A (Auto) > M (Manual) — automatic is usually the more expensive
      variant.
@@ -227,7 +307,26 @@ KEY RULE for our market:
    and `pending_review = true`. This is rare; rule 4 should usually
    resolve mixed groups.
 
-6. Confidence calibration:
+6. **NOTE ON `external_code` from the provider:**
+
+   The `external_code` is the provider's internal label (e.g. "Grupo A",
+   "Grupo F1", "CDAR"). Most providers use ARBITRARY internal labels
+   that do NOT correspond to ACRISS standards. Their letters mean
+   whatever the provider decides — typically just a sequential or
+   classification scheme internal to that provider.
+
+   Strategy:
+   - If `external_code` is a valid 4-character ACRISS code (e.g. "CDAR",
+     "EDMR", "IFAR") AND matches the description of a materialized code,
+     use it as a STRONG hint with high confidence (0.95+).
+   - If `external_code` is anything else (e.g. "Grupo A", "Group 5",
+     "Category X"), IGNORE the code letters for classification. Use only
+     `example_models`, seats, transmission, and other vehicle attributes.
+
+   Do NOT infer ACRISS attributes from arbitrary internal labels. Two
+   providers using "Grupo D" may classify completely different vehicles.
+
+7. Confidence calibration:
    - 0.95+: clear match, all attributes unambiguous
    - 0.85-0.95: clear match, one attribute slightly uncertain (e.g. fuel
      not specified but defaulted to R)

@@ -6,10 +6,9 @@ from functools import partial
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.saas.application.catalog_sync import CatalogSyncService
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.session import super_session
-from src.scraper.presentation.cli.container import build_container, load_providers_raw
+from src.scraper.presentation.cli.container import build_container
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,22 +34,18 @@ async def main() -> None:
     )
     print(f"Start: {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
 
-    # ── Catalog sync: ensure providers/locations/rates exist in DB ─────
-    raw_providers = load_providers_raw()
     engine = super_engine()
     session_factory = partial(super_session, engine)
 
-    with session_factory() as s:
-        catalog_ids = CatalogSyncService(s).sync_from_providers_json(raw_providers)
-    logging.info("Catalog sync complete: %d provider(s) registered.", len(catalog_ids))
-
-    # ── Build and run ──────────────────────────────────────────────────
     container = build_container(
         pickup_hour=PICKUP_HOUR,
         period_start=PERIOD_START,
         period_end=PERIOD_END,
-        catalog_ids=catalog_ids,
         session_factory=session_factory,
+    )
+    logging.info(
+        "Catalog loaded from DB: %d orchestrator(s) scheduled.",
+        len(container.orchestrators),
     )
 
     try:
