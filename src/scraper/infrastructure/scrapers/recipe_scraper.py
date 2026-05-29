@@ -13,7 +13,6 @@ DEUDA ARQUITECTÓNICA (Option A — accepted for D2):
 from __future__ import annotations
 
 import logging
-from contextlib import AsyncExitStack
 from decimal import Decimal
 from typing import Callable, Optional
 
@@ -154,7 +153,22 @@ class RecipeScraper(BaseScraper):
         self._recipe = None              # Recipe; loaded lazily on first _submit_form
         self._last_result = None         # ScrapeResult from the most recent run
         self._session: BrowserSession | None = None   # persistent Playwright session
-        self._exit_stack = AsyncExitStack()            # owns self._session lifecycle
+        self._session_dirty: bool = False  # True → close + reopen before next submit
+
+    async def _open_session(self) -> None:
+        """Open a fresh BrowserSession and store it in self._session."""
+        bs = BrowserSession(headless=False)
+        await bs.__aenter__()
+        self._session = bs
+
+    async def _close_session(self) -> None:
+        """Close self._session if open, suppressing errors."""
+        if self._session is not None:
+            try:
+                await self._session.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._session = None
 
     async def _submit_form(self, criteria: BookingSearch) -> None:
         if self._recipe is None:
@@ -166,11 +180,15 @@ class RecipeScraper(BaseScraper):
                 "Run experiments/scraper_builder/run_build_recipe.py first."
             )
 
-        # Open browser session on first call; reuse on subsequent full submits.
+        # Dirty session (left by a failed refine or submit): close and reopen
+        # for a guaranteed-clean browser state before retrying.
+        if self._session is not None and self._session_dirty:
+            logger.info("[RecipeScraper] dirty session — closing before retry")
+            await self._close_session()
+            self._session_dirty = False
+
         if self._session is None:
-            self._session = await self._exit_stack.enter_async_context(
-                BrowserSession(headless=False)
-            )
+            await self._open_session()
 
         provider_name = self._provider.name if self._provider else "recipe_scraper"
         targets = _criteria_to_targets(criteria)
@@ -182,6 +200,7 @@ class RecipeScraper(BaseScraper):
         )
 
         if not result.success:
+            self._session_dirty = True
             raise RuntimeError(
                 f"run_recipe failed at phase={result.failed_phase!r}: {result.error}"
             )
@@ -205,15 +224,20 @@ class RecipeScraper(BaseScraper):
         provider_name = self._provider.name if self._provider else "recipe_scraper"
         log_dir = create_log_dir(provider_name, suffix="_scrape")
 
-        result = await refine_dates(
-            session=self._session,
-            recipe=self._recipe,
-            pickup_date=criteria.pickup_at.date(),
-            return_date=criteria.dropoff_at.date(),
-            log_dir=log_dir,
-        )
+        try:
+            result = await refine_dates(
+                session=self._session,
+                recipe=self._recipe,
+                pickup_date=criteria.pickup_at.date(),
+                return_date=criteria.dropoff_at.date(),
+                log_dir=log_dir,
+            )
+        except Exception:
+            self._session_dirty = True
+            raise
 
         if not result.success:
+            self._session_dirty = True
             raise RuntimeError(
                 f"refine_dates failed at phase={result.failed_phase!r}: {result.error}"
             )
@@ -247,6 +271,5 @@ class RecipeScraper(BaseScraper):
             return ProviderRecipeRepository(session).get_active_recipe(self._provider_id)
 
     async def close(self) -> None:
-        await self._exit_stack.aclose()
-        self._session = None
+        await self._close_session()
         await super().close()
