@@ -1069,6 +1069,56 @@ en `src/` ni `tests/`. Hito Cleanup cerrado.
 
 ---
 
+## Milestone D3 — ACRISS y persistencia completa con recipe-scrapers
+
+**Goal.** Que centauro (via RecipeScraper) atraviese el pipeline completo
+igual que los scrapers a medida: probe → classify (Gemini ACRISS) →
+persist PVCs → analyze zones → persist zones → extract → persist
+observations.
+
+**What was built.**
+- D1–D2.8 dejaron el flujo funcionando para centauro tras sucesivos
+  fixes (provisioning de catálogo, dom_vehicles routing, refine_url
+  deep-link, rate_filter desactivado para recipe-scrapers, dom_vehicles
+  poblado en _refine_navigate y _submit_wait_extract).
+- D3 cierra explícitamente el milestone con un test de integración que
+  cubre el flujo completo: SmartScraperOrchestrator + RecipeScraper
+  (motor mockeado) + StubClassificationService →
+  scrape_runs / provider_vehicle_categories / homogeneous_zones /
+  price_observations en BD.
+- `TestRecipeScraperPipelineFlow.test_full_pipeline_persists_four_tables`
+  en `tests/saas/application/test_orchestrator_persistence.py`:
+  - Mocks externos: `run_recipe` → `ScrapeResult` con 3 dom_vehicles;
+    `_open_session`/`_close_session` → no-ops; `_load_recipe` →
+    fake recipe con `refine_strategy="none"`; `create_log_dir` → Path.
+  - ClassificationService: StubClassificationService mapea Eco → EDMR,
+    Compact → CDMR; Premium queda pending_review=True.
+  - Assertions SQL directas verifican las 4 tablas: `scrape_runs`
+    (status success, stats_jsonb con zones e observations_inserted),
+    `provider_vehicle_categories` (3 PVCs: 2 con ACRISS, 1 pending),
+    `homogeneous_zones` (3 filas active=True, una por PVC), y
+    `price_observations` (currency EUR, price_per_day > 0, FKs correctas).
+
+**Decisiones tomadas.**
+- ACRISS clasifica a nivel de PVC, no de car individual. El batch
+  classification recibe los probe_cars (descubiertos durante el probe
+  sin filtro de rate_name) y devuelve ClassificationResult por grupo.
+- pending_review se respeta: PVCs no clasificadas siguen creándose y
+  acumulando observaciones, visibles para revisión manual del operador.
+- La sospecha "los recipes pierden grupos en algunas fechas" queda
+  registrada como fleco D4-A; no es bug del flujo D3.
+- PricePointExtractor filtra por rate_name="Test Rate" y los dom_vehicles
+  producen Rate(name="default"), por lo que price_points queda vacío y
+  el analyzer genera 1 zona fallback (periodo completo). Esto es correcto:
+  la zona se replica a los 3 PVCs generando 3 zone rows.
+
+**Cierre.** 223 tests verdes. Centauro tiene en BD una fila por cada nivel
+del flujo (scrape_run, PVCs con/sin ACRISS, zones, observations) tras un
+pipeline real. Los flecos D4-A..D4-J recogen las mejoras de calidad que
+quedan pendientes.
+
+---
+
 ## Flecos pendientes (para D4 o posterior)
 
 - D4-A — Extracción de centauro inestable entre búsquedas. Algunos
