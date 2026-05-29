@@ -183,7 +183,9 @@ def build_container(
                 probe=SeasonProbe(),
                 analyzer=SeasonAnalyzer(price_change_threshold=threshold, representative="first"),
                 plan_builder=SearchPlanBuilder(),
-                extractor=PricePointExtractor(rate_name=rate_row.rate_name),
+                extractor=PricePointExtractor(
+                    rate_name=None if is_recipe_based else rate_row.rate_name
+                ),
                 session_factory=session_factory,
                 provider_id=provider_row.id,
                 provider_location_id=location_row.id,
