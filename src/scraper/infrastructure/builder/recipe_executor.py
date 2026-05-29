@@ -240,8 +240,8 @@ async def run_recipe(
     Execute the full scrape flow using a pre-built Recipe.  Zero LLM calls.
 
     Returns a ScrapeResult with:
-      vehicles = DOM-extracted list (same field set as the LLM path)
-      dom_vehicles = [] (no second path in recipe mode)
+      dom_vehicles = DOM-extracted list (recipe mode, no LLM)
+      vehicles = [] (LLM path not used in recipe mode)
       llm_calls = 0
       cost_estimate_eur = 0.0
     """
@@ -249,7 +249,7 @@ async def run_recipe(
     scroll_rounds = 0
     scroll_final_count = 0
     has_empty_page = False
-    vehicles: list[VehicleResult] = []
+    dom_vehicles: list[VehicleResult] = []
 
     logger = SessionLogger(log_dir)
 
@@ -268,7 +268,7 @@ async def run_recipe(
             failed_phase=failed_phase,
             llm_calls=0,
             duration_s=round(_elapsed(), 2),
-            vehicles=len(vehicles),
+            dom_vehicles=len(dom_vehicles),
             scroll_rounds=scroll_rounds,
             scroll_final_count=scroll_final_count,
         )
@@ -278,8 +278,8 @@ async def run_recipe(
             success=success,
             failed_phase=failed_phase,
             error=error,
-            vehicles=vehicles,
-            dom_vehicles=[],
+            vehicles=[],
+            dom_vehicles=dom_vehicles,
             form_fields=None,
             results_structure=None,
             verification=None,
@@ -369,13 +369,13 @@ async def run_recipe(
             # ── 6. Extract — DOM only, no LLM ────────────────────────────────
             try:
                 structure = _recipe_to_results_structure(recipe)
-                vehicles = await extract_vehicles_dom(session, structure, logger)
-                logger.log("extraction_complete", count=len(vehicles))
+                dom_vehicles = await extract_vehicles_dom(session, structure, logger)
+                logger.log("extraction_complete", count=len(dom_vehicles))
             except Exception as exc:
                 logger.log("extraction_error", error=str(exc))
                 return _make_result("extraction", f"DOM extraction failed: {exc}")
 
-            if not vehicles:
+            if not dom_vehicles:
                 if has_empty_page:
                     return _make_result(None, None, success=True)
                 return _make_result("extraction",
@@ -395,7 +395,7 @@ from dataclasses import dataclass as _dataclass
 
 @_dataclass
 class _ExtractOut:
-    vehicles: list
+    dom_vehicles: list
     scroll_rounds: int
     scroll_final_count: int
     has_empty_page: bool
@@ -478,7 +478,7 @@ async def _submit_wait_extract(
 ) -> _ExtractOut:
     """Click submit, wait for results, scroll, extract.  Returns _ExtractOut.
     failed_phase is None on full success."""
-    vehicles: list[VehicleResult] = []
+    dom_vehicles: list[VehicleResult] = []
     scroll_rounds = 0
     scroll_final_count = 0
     has_empty_page = False
@@ -490,11 +490,11 @@ async def _submit_wait_extract(
         )
         logger.log("submit_clicked", selector=recipe.submit_selector, success=clicked)
         if not clicked:
-            return _ExtractOut(vehicles, 0, 0, False, "submit",
+            return _ExtractOut(dom_vehicles, 0, 0, False, "submit",
                                f"Could not click submit: {recipe.submit_selector!r}")
     except Exception as exc:
         logger.log("scrape_phase_error", phase="submit", error=str(exc))
-        return _ExtractOut(vehicles, 0, 0, False, "submit", f"Submit exception: {exc}")
+        return _ExtractOut(dom_vehicles, 0, 0, False, "submit", f"Submit exception: {exc}")
 
     try:
         wait_outcome = await wait_for_results(session, url_before, logger)
@@ -502,11 +502,11 @@ async def _submit_wait_extract(
                    signal=wait_outcome.signal, waited_ms=wait_outcome.waited_ms)
         has_empty_page = wait_outcome.signal == "empty_message"
         if not wait_outcome.ready:
-            return _ExtractOut(vehicles, 0, 0, has_empty_page, "results",
+            return _ExtractOut(dom_vehicles, 0, 0, has_empty_page, "results",
                                f"Results page did not load (signal={wait_outcome.signal})")
     except Exception as exc:
         logger.log("scrape_phase_error", phase="results", error=str(exc))
-        return _ExtractOut(vehicles, 0, 0, False, "results", f"Results wait exception: {exc}")
+        return _ExtractOut(dom_vehicles, 0, 0, False, "results", f"Results wait exception: {exc}")
 
     try:
         scroll_final_count, scroll_rounds = await ensure_all_results_loaded(session, logger)
@@ -516,14 +516,14 @@ async def _submit_wait_extract(
 
     try:
         structure = _recipe_to_results_structure(recipe)
-        vehicles = await extract_vehicles_dom(session, structure, logger)
-        logger.log("extraction_complete", count=len(vehicles))
+        dom_vehicles = await extract_vehicles_dom(session, structure, logger)
+        logger.log("extraction_complete", count=len(dom_vehicles))
     except Exception as exc:
         logger.log("extraction_error", error=str(exc))
-        return _ExtractOut(vehicles, scroll_rounds, scroll_final_count, has_empty_page,
+        return _ExtractOut(dom_vehicles, scroll_rounds, scroll_final_count, has_empty_page,
                            "extraction", f"DOM extraction failed: {exc}")
 
-    return _ExtractOut(vehicles, scroll_rounds, scroll_final_count, has_empty_page, None, None)
+    return _ExtractOut(dom_vehicles, scroll_rounds, scroll_final_count, has_empty_page, None, None)
 
 
 # ── Strategy implementations ──────────────────────────────────────────────────
@@ -542,7 +542,7 @@ async def _refine_navigate(
     """
     t0 = time.monotonic()
     logger = SessionLogger(log_dir)
-    vehicles: list[VehicleResult] = []
+    dom_vehicles: list[VehicleResult] = []
     scroll_rounds = 0
     scroll_final_count = 0
     has_empty_page = False
@@ -553,13 +553,13 @@ async def _refine_navigate(
     def _make_result(fp: str | None, err: str | None, success: bool = False) -> ScrapeResult:
         logger.log("scrape_complete", mode="refine_navigate", success=success,
                    failed_phase=fp, llm_calls=0, duration_s=round(_elapsed(), 2),
-                   vehicles=len(vehicles), scroll_rounds=scroll_rounds,
+                   dom_vehicles=len(dom_vehicles), scroll_rounds=scroll_rounds,
                    scroll_final_count=scroll_final_count)
         return ScrapeResult(
             url=session.get_url(),
             targets={"pickup_date": pickup_date, "return_date": return_date},
-            success=success, failed_phase=fp, error=err, vehicles=vehicles,
-            dom_vehicles=[], form_fields=None, results_structure=None,
+            success=success, failed_phase=fp, error=err, vehicles=[],
+            dom_vehicles=dom_vehicles, form_fields=None, results_structure=None,
             verification=None, duration_seconds=_elapsed(), cost_estimate_eur=0.0,
             llm_calls=0, scroll_rounds=scroll_rounds,
             scroll_final_count=scroll_final_count, has_empty_page=has_empty_page,
@@ -589,13 +589,13 @@ async def _refine_navigate(
         return _make_result("refine_navigate", f"Date fill exception: {exc}")
 
     out = await _submit_wait_extract(session, recipe, logger)
-    vehicles = out.vehicles
+    dom_vehicles = out.dom_vehicles
     scroll_rounds = out.scroll_rounds
     scroll_final_count = out.scroll_final_count
     has_empty_page = out.has_empty_page
     if out.failed_phase:
         return _make_result(out.failed_phase, out.error)
-    if not vehicles:
+    if not dom_vehicles:
         if has_empty_page:
             return _make_result(None, None, success=True)
         return _make_result("extraction", "DOM extraction returned no vehicles")
