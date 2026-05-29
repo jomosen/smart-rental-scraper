@@ -105,9 +105,9 @@ class PlaywrightDriver(IBrowserDriver):
             f'const el = document.querySelector("{selector}"); if (el) el.click();'
         )
 
-    async def click_and_switch_tab(self, selector: str) -> None:
+    async def click_and_switch_tab(self, selector: str, timeout: int = 30000) -> None:
         """Clicks the selector and switches focus to the new tab that opens."""
-        async with self._context.expect_page() as new_page_info:
+        async with self._context.expect_page(timeout=timeout) as new_page_info:
             await self._page.click(selector)
         new_page = await new_page_info.value
         await new_page.wait_for_load_state("domcontentloaded")

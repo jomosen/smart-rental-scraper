@@ -25,7 +25,7 @@ class IPageInteractor(ABC):
         ...
 
     @abstractmethod
-    async def click_and_switch_tab(self, selector: str) -> None:
+    async def click_and_switch_tab(self, selector: str, timeout: int = 30000) -> None:
         """Clicks the selector and switches focus to the new tab that opens."""
         ...
 

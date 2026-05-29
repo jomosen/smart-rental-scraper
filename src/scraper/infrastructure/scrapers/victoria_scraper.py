@@ -97,7 +97,14 @@ class VictoriaScraper(BaseScraper):
         await self._fill_form(criteria)
 
         await self._pause(2.0, 3.5)
-        await self._driver.click("#btnBuscar")
+        try:
+            # Try the historic behaviour: button opens results in a new tab.
+            # Short timeout so we don't wait 30 s if the site navigates in-place.
+            await self._driver.click_and_switch_tab("#btnBuscar", timeout=5000)
+        except Exception:
+            # The click already fired; site navigated in-place rather than
+            # opening a new tab.  Results are loading on the current page.
+            pass
         await self._accept_cookies_if_present()
         await self._driver.wait_for_selector("#cont_vehiculos", timeout=20000, state="attached")
 

@@ -61,7 +61,7 @@ class _NullDriver(IBrowserDriver):
     async def js_click(self, selector: str) -> None:
         pass
 
-    async def click_and_switch_tab(self, selector: str) -> None:
+    async def click_and_switch_tab(self, selector: str, timeout: int = 30000) -> None:
         pass
 
     async def scroll_to_top(self) -> None:
@@ -250,6 +250,11 @@ class RecipeScraper(BaseScraper):
                 provider_name=criteria.provider_name,
                 errors=["_extract_results called before _submit_form"],
             )
+        logger.info(
+            "[RecipeScraper._extract_results] vehicles=%d, dom_vehicles=%d",
+            len(self._last_result.vehicles or []),
+            len(self._last_result.dom_vehicles or []),
+        )
 
         vehicles = getattr(self._last_result, "dom_vehicles", None) or self._last_result.vehicles
         cars = [
@@ -257,6 +262,7 @@ class RecipeScraper(BaseScraper):
             for vr in vehicles
             if vr.price_final is not None
         ]
+        logger.info("[RecipeScraper._extract_results] returning cars=%d", len(cars))
         return BookingResult(provider_name=criteria.provider_name, cars=cars)
 
     def _load_recipe(self):
