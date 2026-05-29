@@ -4,28 +4,26 @@ Loads the active Recipe from DB (cached after first load), then delegates
 each _submit_form call to recipe_executor.run_recipe().  Zero LLM calls.
 
 DEUDA ARQUITECTÓNICA (Option A — accepted for D2):
-    RecipeScraper does NOT use the injected IBrowserDriver.  run_recipe()
-    opens its own BrowserSession (Playwright) internally.  The injected
+    RecipeScraper does NOT use the injected IBrowserDriver.  The injected
     driver is replaced with _NullDriver (no-op) so that BaseScraper's
     scrape_session() can call driver.launch() / driver.close() safely.
-    Resolving this requires refactoring run_recipe() to accept an external
-    page/context — deferred to a future iteration (Option B).
+    The real Playwright session is managed internally via BrowserSession,
+    kept alive across searches (D2.7) and closed in close().
 """
 from __future__ import annotations
 
 import logging
+from contextlib import AsyncExitStack
 from decimal import Decimal
 from typing import Callable, Optional
 
-from ...domain.interfaces.browser.interactor import IPageInteractor
-from ...domain.interfaces.browser.navigator import IPageNavigator
-from ...domain.interfaces.browser.reader import IPageReader
 from ...domain.interfaces.driver import IBrowserDriver
 from ...domain.models.booking_provider import BookingProvider
 from ....shared.domain.models.search import BookingSearch
 from ....shared.domain.models.result import BookingResult, Car, Rate
 from .base_scraper import BaseScraper
-from ..builder.recipe_executor import run_recipe
+from ..builder.browser_session import BrowserSession
+from ..builder.recipe_executor import refine_dates, run_recipe
 from ..builder.location_explorer import create_log_dir
 
 logger = logging.getLogger(__name__)
@@ -34,8 +32,8 @@ logger = logging.getLogger(__name__)
 class _NullDriver(IBrowserDriver):
     """No-op IBrowserDriver.
 
-    RecipeScraper substitutes this for the injected driver because
-    run_recipe() manages its own BrowserSession internally.  BaseScraper's
+    RecipeScraper substitutes this for the injected driver because the real
+    Playwright session is managed by BrowserSession internally.  BaseScraper's
     scrape_session() calls driver.launch() and driver.close(), both of which
     must be safe no-ops here.
     """
@@ -125,8 +123,15 @@ class RecipeScraper(BaseScraper):
     """BaseScraper adapter that executes a pre-built Recipe from the DB.
 
     Inherits BaseScraper's session loop (probe/extract reuse pattern).
-    Each _submit_form call invokes run_recipe(), which opens its own
-    BrowserSession — no browser is shared between calls (see DEUDA above).
+
+    Session lifecycle:
+      - First _submit_form: opens a BrowserSession (headless=False), stored in
+        self._session, and runs the full recipe (navigate → form → submit → extract).
+      - Subsequent calls: _refine_form changes only the dates on the results page
+        via refine_dates(), reusing the same BrowserSession.
+      - On refine failure: BaseScraper falls back to _submit_form, which reuses the
+        existing session but navigates back to recipe.url for a full reset.
+      - close(): closes the BrowserSession and the AsyncExitStack that owns it.
 
     provider_id    — DB PK of the providers row; used to fetch the recipe.
     session_factory — callable returning a context manager that yields a
@@ -142,12 +147,14 @@ class RecipeScraper(BaseScraper):
         session_factory: Optional[Callable] = None,
         pause_range: tuple[float, float] = (0.5, 1.5),
     ) -> None:
-        # Replace injected driver with no-op — see DEUDA ARQUITECTÓNICA.
+        # Replace injected driver with no-op — see module docstring.
         super().__init__(driver=_NullDriver(), provider=provider, pause_range=pause_range)
         self._provider_id = provider_id
         self._session_factory = session_factory
-        self._recipe = None          # Recipe; loaded lazily on first _submit_form
-        self._last_result = None     # ScrapeResult from the most recent run_recipe call
+        self._recipe = None              # Recipe; loaded lazily on first _submit_form
+        self._last_result = None         # ScrapeResult from the most recent run
+        self._session: BrowserSession | None = None   # persistent Playwright session
+        self._exit_stack = AsyncExitStack()            # owns self._session lifecycle
 
     async def _submit_form(self, criteria: BookingSearch) -> None:
         if self._recipe is None:
@@ -159,11 +166,20 @@ class RecipeScraper(BaseScraper):
                 "Run experiments/scraper_builder/run_build_recipe.py first."
             )
 
+        # Open browser session on first call; reuse on subsequent full submits.
+        if self._session is None:
+            self._session = await self._exit_stack.enter_async_context(
+                BrowserSession(headless=False)
+            )
+
         provider_name = self._provider.name if self._provider else "recipe_scraper"
         targets = _criteria_to_targets(criteria)
         log_dir = create_log_dir(provider_name, suffix="_scrape")
 
-        result = await run_recipe(self._recipe, targets, log_dir)
+        result = await run_recipe(
+            self._recipe, targets, log_dir,
+            session=self._session,
+        )
 
         if not result.success:
             raise RuntimeError(
@@ -175,6 +191,30 @@ class RecipeScraper(BaseScraper):
 
         self._last_result = result
 
+    async def _refine_form(self, criteria: BookingSearch) -> None:
+        if self._session is None or self._recipe is None:
+            # No live session yet — fall back to a full submit.
+            await self._submit_form(criteria)
+            return
+
+        provider_name = self._provider.name if self._provider else "recipe_scraper"
+        log_dir = create_log_dir(provider_name, suffix="_scrape")
+
+        result = await refine_dates(
+            session=self._session,
+            recipe=self._recipe,
+            pickup_date=criteria.pickup_at.date(),
+            return_date=criteria.dropoff_at.date(),
+            log_dir=log_dir,
+        )
+
+        if not result.success:
+            raise RuntimeError(
+                f"refine_dates failed at phase={result.failed_phase!r}: {result.error}"
+            )
+
+        self._last_result = result
+
     async def _extract_results(self, criteria: BookingSearch) -> BookingResult:
         if self._last_result is None:
             return BookingResult(
@@ -182,9 +222,10 @@ class RecipeScraper(BaseScraper):
                 errors=["_extract_results called before _submit_form"],
             )
 
+        vehicles = getattr(self._last_result, "dom_vehicles", None) or self._last_result.vehicles
         cars = [
             _map_vehicle(vr, criteria)
-            for vr in self._last_result.vehicles
+            for vr in vehicles
             if vr.price_final is not None
         ]
         return BookingResult(provider_name=criteria.provider_name, cars=cars)
@@ -201,4 +242,6 @@ class RecipeScraper(BaseScraper):
             return ProviderRecipeRepository(session).get_active_recipe(self._provider_id)
 
     async def close(self) -> None:
+        await self._exit_stack.aclose()
+        self._session = None
         await super().close()

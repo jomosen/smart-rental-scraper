@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
@@ -214,13 +215,26 @@ async def _fill_recipe_fields(
         await _dismiss(session)
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
+# ── Session context helper ────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def _session_ctx(external: BrowserSession | None, headless: bool):
+    """Yield *external* unchanged if provided; otherwise open a new BrowserSession."""
+    if external is not None:
+        yield external
+    else:
+        async with BrowserSession(headless=headless) as s:
+            yield s
+
+
+# ── Public entry points ───────────────────────────────────────────────────────
 
 async def run_recipe(
     recipe: Recipe,
     targets: dict,
     log_dir: Path,
     headless: bool = True,
+    session: BrowserSession | None = None,
 ) -> ScrapeResult:
     """
     Execute the full scrape flow using a pre-built Recipe.  Zero LLM calls.
@@ -278,7 +292,7 @@ async def run_recipe(
         )
 
     try:
-        async with BrowserSession(headless=headless) as session:
+        async with _session_ctx(session, headless) as session:
 
             # ── 1. Navigate ───────────────────────────────────────────────────
             logger.log("navigate", url=recipe.url)
@@ -372,3 +386,162 @@ async def run_recipe(
     except Exception as exc:
         logger.log("scrape_unexpected_error", error=str(exc))
         return _make_result(None, f"Unexpected error: {exc}")
+
+
+async def refine_dates(
+    session: BrowserSession,
+    recipe: Recipe,
+    pickup_date: date,
+    return_date: date,
+    log_dir: Path,
+) -> ScrapeResult:
+    """
+    Change only the pickup/return dates on the current page and re-extract.
+
+    Assumes the browser is already on the results page from a previous submit.
+    Does NOT navigate, close cookies, fill location, or fill time.
+    Uses the calendar selectors already stored in the recipe.
+
+    failed_phase values:
+      "refine_dates" — calendar could not be opened or date not selected
+      "submit"       — submit click failed
+      "results"      — results page did not load
+      "extraction"   — DOM extraction failed or returned no vehicles
+    """
+    t0 = time.monotonic()
+    scroll_rounds = 0
+    scroll_final_count = 0
+    has_empty_page = False
+    vehicles: list[VehicleResult] = []
+
+    logger = SessionLogger(log_dir)
+
+    def _elapsed() -> float:
+        return time.monotonic() - t0
+
+    def _make_result(
+        failed_phase: str | None,
+        error: str | None,
+        success: bool = False,
+    ) -> ScrapeResult:
+        logger.log(
+            "scrape_complete",
+            mode="refine_dates",
+            success=success,
+            failed_phase=failed_phase,
+            llm_calls=0,
+            duration_s=round(_elapsed(), 2),
+            vehicles=len(vehicles),
+            scroll_rounds=scroll_rounds,
+            scroll_final_count=scroll_final_count,
+        )
+        return ScrapeResult(
+            url=session.get_url(),
+            targets={"pickup_date": pickup_date, "return_date": return_date},
+            success=success,
+            failed_phase=failed_phase,
+            error=error,
+            vehicles=vehicles,
+            dom_vehicles=[],
+            form_fields=None,
+            results_structure=None,
+            verification=None,
+            duration_seconds=_elapsed(),
+            cost_estimate_eur=0.0,
+            llm_calls=0,
+            scroll_rounds=scroll_rounds,
+            scroll_final_count=scroll_final_count,
+            has_empty_page=has_empty_page,
+        )
+
+    # ── Fill only dates ───────────────────────────────────────────────────────
+    try:
+        date_targets = {"pickup_date": pickup_date, "return_date": return_date}
+        for fname in ("pickup_date", "return_date"):
+            rf = recipe.form_fields.get(fname)
+            if rf is None:
+                logger.log("refine_dates_field_missing", name=fname)
+                continue
+            if rf.strategy == "range_calendar_autofill":
+                logger.log("refine_dates_field_skip", name=fname,
+                           strategy="range_calendar_autofill")
+                continue
+            dw = _make_date_widget_info(rf)
+            try:
+                date_filler = get_date_filler(dw)
+            except UnsupportedDateWidgetError as exc:
+                raise RuntimeError(
+                    f"Unsupported date widget for {fname}: {exc}"
+                ) from exc
+            ifield = _make_identified_field(rf)
+            result = await date_filler.fill(session, ifield, dw, date_targets[fname], logger)
+            logger.log("refine_dates_fill_done", name=fname,
+                       success=result.success, error=result.error)
+            if not result.success:
+                raise RuntimeError(f"Date fill failed for {fname}: {result.error}")
+            await _dismiss(session)
+    except Exception as exc:
+        logger.log("scrape_phase_error", phase="refine_dates", error=str(exc))
+        return _make_result("refine_dates", f"Date fill exception: {exc}")
+
+    # ── Submit ────────────────────────────────────────────────────────────────
+    url_before = session.get_url()
+    try:
+        clicked = await session.click_selector(
+            recipe.submit_selector,
+            recipe.submit_selector_type,
+        )
+        logger.log("submit_clicked", selector=recipe.submit_selector, success=clicked)
+        if not clicked:
+            return _make_result(
+                "submit",
+                f"Could not click submit: {recipe.submit_selector!r}",
+            )
+    except Exception as exc:
+        logger.log("scrape_phase_error", phase="submit", error=str(exc))
+        return _make_result("submit", f"Submit exception: {exc}")
+
+    # ── Wait for results ──────────────────────────────────────────────────────
+    try:
+        wait_outcome = await wait_for_results(session, url_before, logger)
+        logger.log(
+            "results_waited",
+            ready=wait_outcome.ready,
+            signal=wait_outcome.signal,
+            waited_ms=wait_outcome.waited_ms,
+        )
+        has_empty_page = wait_outcome.signal == "empty_message"
+        if not wait_outcome.ready:
+            return _make_result(
+                "results",
+                f"Results page did not load (signal={wait_outcome.signal})",
+            )
+    except Exception as exc:
+        logger.log("scrape_phase_error", phase="results", error=str(exc))
+        return _make_result("results", f"Results wait exception: {exc}")
+
+    # ── Scroll-to-complete (non-fatal) ────────────────────────────────────────
+    try:
+        scroll_final_count, scroll_rounds = await ensure_all_results_loaded(
+            session, logger
+        )
+        logger.log("scroll_summary",
+                   rounds=scroll_rounds, final_count=scroll_final_count)
+    except Exception as exc:
+        logger.log("scroll_error", error=str(exc))
+
+    # ── Extract — DOM only ────────────────────────────────────────────────────
+    try:
+        structure = _recipe_to_results_structure(recipe)
+        vehicles = await extract_vehicles_dom(session, structure, logger)
+        logger.log("extraction_complete", count=len(vehicles))
+    except Exception as exc:
+        logger.log("extraction_error", error=str(exc))
+        return _make_result("extraction", f"DOM extraction failed: {exc}")
+
+    if not vehicles:
+        if has_empty_page:
+            return _make_result(None, None, success=True)
+        return _make_result("extraction", "DOM extraction returned no vehicles")
+
+    return _make_result(None, None, success=True)
