@@ -162,20 +162,22 @@ class SmartScraperOrchestrator:
                 self._provider_code, len(provider_zones),
             )
 
-            # Collect unique probe cars and compute mean 7-day price per group
+            # Collect unique probe cars and compute mean price-per-day per group.
+            # price_per_day derived as total/duration for consistency with persistence.
             probe_cars: Dict[str, Car] = {}
             group_daily_prices: Dict[str, List[float]] = {}
             group_currency: Dict[str, str] = {}
-            for result in probe_results:
+            for probe_search, result in zip(probe_searches, probe_results):
                 if not result or not result.cars:
                     continue
+                probe_dur = probe_search.rental_days
                 for car in result.cars:
                     if car.group not in probe_cars:
                         probe_cars[car.group] = car
                     for rate in car.rates:
-                        if rate.daily_price:
+                        if rate.total and probe_dur:
                             group_daily_prices.setdefault(car.group, []).append(
-                                float(rate.daily_price)
+                                float(rate.total / probe_dur)
                             )
                             if car.group not in group_currency and rate.currency:
                                 group_currency[car.group] = rate.currency
@@ -489,7 +491,7 @@ class SmartScraperOrchestrator:
                             scrape_run_id=run_id,
                             pickup_date=pickup_date,
                             duration_days=duration_days,
-                            price_per_day=rate.daily_price,
+                            price_per_day=rate.total / duration_days,
                             total_price=rate.total,
                             currency=rate.currency,
                             observed_at=observed_at,
