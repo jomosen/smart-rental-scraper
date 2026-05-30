@@ -71,6 +71,57 @@ acriss_codes:
       - "Kia Picanto Auto"
       - "Hyundai i10 Auto"
 
+  - code: EDAE
+    display_name: Económico Eléctrico
+    description: >
+      Sub-compact city car, battery electric (BEV), automatic transmission
+      (BEV is always automatic). Economy tier, mainstream brand. Urban
+      zero-emission option at the smallest rental tier.
+    criteria:
+      - "Sub-compact/economy body"
+      - "Battery electric (BEV)"
+      - "Automatic transmission (BEV always auto)"
+      - "Mainstream economy brand"
+    examples:
+      - "Peugeot e-208"
+      - "VW ID.3"
+      - "MINI Electric"
+      - "Fiat 500e"
+      - "Renault Zoe"
+
+  # ──────────────────────────────────────────────────────────────
+  # ECONOMY CONVERTIBLE — Sub-compact cabriolets
+  # ──────────────────────────────────────────────────────────────
+
+  - code: ETMR
+    display_name: Descapotable Económico Manual
+    description: >
+      Economy-size convertible (cabriolet/cabrio), manual transmission,
+      combustion engine. Sub-compact footprint with soft or hard folding top.
+      Leisure-oriented rental; same size tier as EDMR but convertible body.
+    criteria:
+      - "Convertible/cabrio body (soft or hard top)"
+      - "Economy/sub-compact size"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Fiat 500C (manual)"
+      - "MINI Cabrio (manual base)"
+
+  - code: ETAR
+    display_name: Descapotable Económico Automático
+    description: >
+      Economy-size convertible (cabriolet/cabrio), automatic transmission,
+      combustion engine. Same body and size as ETMR but automatic gearbox.
+    criteria:
+      - "Convertible/cabrio body (soft or hard top)"
+      - "Economy/sub-compact size"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Fiat 500C (auto)"
+      - "MINI Cabrio (auto)"
+
   # ──────────────────────────────────────────────────────────────
   # COMPACT — Compact passenger cars (4.0-4.3m)
   # ──────────────────────────────────────────────────────────────
@@ -169,6 +220,24 @@ acriss_codes:
       - "Toyota Yaris Cross Hybrid"
       - "Hyundai Kona Hybrid"
 
+  - code: CFAE
+    display_name: SUV Compacto Eléctrico
+    description: >
+      Compact SUV/crossover, battery electric (BEV), automatic transmission
+      (BEV is always automatic). Mainstream brand. Zero-emission compact SUV.
+      F=SUV/4WD body; 3rd position A=automatic (mandated by BEV drivetrain);
+      4th position E=electric.
+    criteria:
+      - "Compact SUV/crossover body"
+      - "Battery electric (BEV)"
+      - "Automatic transmission (BEV always auto)"
+      - "Mainstream brand"
+    examples:
+      - "Ford Mustang Mach-E"
+      - "Hyundai Kona Electric"
+      - "VW ID.4"
+      - "Kia Niro EV"
+
   # ──────────────────────────────────────────────────────────────
   # COMPACT MPV — Compact people-carrier
   # ──────────────────────────────────────────────────────────────
@@ -192,6 +261,31 @@ acriss_codes:
       - "Citroën Berlingo Passenger"
       - "Renault Kangoo Passenger"
       - "VW Caddy Passenger"
+
+  - code: CMAR
+    display_name: Monovolumen Compacto Automático
+    description: >
+      Compact MPV (people-carrier), automatic transmission, combustion engine.
+      Tall roof, squared silhouette, maximizes cabin space. Car-derived
+      monovolume with car-like platform (low floor, car dynamics).
+      DISTINCT FROM SVAR (passenger van): CMAR is a car-platform MPV
+      (VW Touran, Renault Scenic type) — NOT a commercial-derived van
+      (Tourneo Connect, Spacetourer). Choose CMAR when the vehicle is clearly
+      a monovolume car, not a van body. This distinction prevents the
+      Touran-as-van misclassification: VW Touran is CMAR, not SVAR.
+    criteria:
+      - "MPV/people-carrier body (NOT van, NOT SUV)"
+      - "Car-derived monovolume (low floor, car-like ride — NOT commercial-derived)"
+      - "5-7 seats typical"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Mainstream brand"
+      - "Distinct from SVAR (van): MPV has car platform, lower step-in height, car-like dynamics"
+    examples:
+      - "VW Touran"
+      - "Citroën C4 SpaceTourer"
+      - "BMW Serie 2 Gran Tourer (mainstream variants)"
+      - "Renault Scenic"
 
   # ──────────────────────────────────────────────────────────────
   # INTERMEDIATE — Mid-size cars (4.3-4.6m)
@@ -282,6 +376,23 @@ acriss_codes:
   # ──────────────────────────────────────────────────────────────
   # COMPACT ELITE — Premium-brand compact (used as PREMIUM_COMPACT)
   # ──────────────────────────────────────────────────────────────
+
+  - code: DFMR
+    display_name: SUV Compacto Premium Manual
+    description: >
+      Compact premium-brand SUV, manual transmission, combustion engine.
+      Length 4.3-4.6m. Premium brand (Mercedes, BMW, Audi, Volvo). Manual
+      twin of DFAR: same size and brand tier, different gearbox.
+    criteria:
+      - "Compact-to-mid premium SUV (length 4.3-4.6m)"
+      - "Premium brand (Mercedes, BMW, Audi, Volvo, Lexus)"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Premium-brand size 'Elite' equivalent of compact"
+    examples:
+      - "Audi Q2 (manual)"
+      - "BMW X1 (manual)"
+      - "Mercedes GLA (manual)"
 
   - code: DFAR
     display_name: SUV Compacto Premium
