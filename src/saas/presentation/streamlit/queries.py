@@ -385,9 +385,10 @@ def fetch_pvc_details(
 # ---------------------------------------------------------------------------
 
 _TARIFF_COLUMNS = [
-    "acriss_code", "display_name", "example_models",
-    "start_date", "end_date",
-    "duration_days", "price_per_day", "total_price", "has_pending_review",
+    "acriss_code", "acriss_display_name",
+    "external_code", "example_models", "pending_review",
+    "start_date", "end_date", "representative_date",
+    "duration_days", "price_per_day", "total_price",
 ]
 
 DURATION_BRACKET = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
@@ -422,14 +423,15 @@ def _fetch_tariff_table_impl(
                    po.total_price
             FROM   price_observations po
             JOIN   providers p ON p.id = po.provider_id
-            WHERE  p.code             = :provider_code
-              AND  po.duration_days   = ANY(:durations)
+            WHERE  p.code           = :provider_code
+              AND  po.duration_days = ANY(:durations)
             ORDER  BY po.provider_vehicle_category_id, po.pickup_date, po.duration_days,
                       po.observed_at DESC
         ),
         zones AS (
             SELECT pvc.acriss_code,
-                   ac.display_name,
+                   ac.display_name  AS acriss_display_name,
+                   pvc.external_code,
                    pvc.example_models,
                    pvc.pending_review,
                    hz.start_date,
@@ -446,40 +448,23 @@ def _fetch_tariff_table_impl(
               AND  p.code          = :provider_code
               {acriss_clause}
               {pending_clause}
-        ),
-        joined AS (
-            SELECT z.acriss_code,
-                   z.display_name,
-                   z.example_models,
-                   z.start_date,
-                   z.end_date,
-                   lo.duration_days,
-                   lo.price_per_day,
-                   lo.total_price,
-                   BOOL_OR(z.pending_review) OVER (
-                       PARTITION BY z.acriss_code, z.start_date, z.end_date
-                   ) AS has_pending_review,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY z.acriss_code, z.start_date, z.end_date, lo.duration_days
-                       ORDER BY lo.price_per_day ASC
-                   ) AS rn
-            FROM   zones z
-            JOIN   latest_obs lo
-                       ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
-                      AND lo.pickup_date = z.representative_date
         )
-        SELECT acriss_code,
-               display_name,
-               example_models,
-               start_date,
-               end_date,
-               duration_days,
-               price_per_day,
-               total_price,
-               has_pending_review
-        FROM   joined
-        WHERE  rn = 1
-        ORDER  BY acriss_code, start_date, duration_days
+        SELECT z.acriss_code,
+               z.acriss_display_name,
+               z.external_code,
+               z.example_models,
+               z.pending_review,
+               z.start_date,
+               z.end_date,
+               z.representative_date,
+               lo.duration_days,
+               lo.price_per_day,
+               lo.total_price
+        FROM   zones z
+        JOIN   latest_obs lo
+                   ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
+                  AND lo.pickup_date = z.representative_date
+        ORDER  BY z.acriss_code, z.external_code, z.start_date, lo.duration_days
     """)
 
     with engine.connect() as conn:

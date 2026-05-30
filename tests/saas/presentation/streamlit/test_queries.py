@@ -221,9 +221,10 @@ class TestFetchPvcDetails:
 # ---------------------------------------------------------------------------
 
 _COLUMNS_TARIFF = {
-    "acriss_code", "display_name", "example_models",
-    "start_date", "end_date",
-    "duration_days", "price_per_day", "total_price", "has_pending_review",
+    "acriss_code", "acriss_display_name",
+    "external_code", "example_models", "pending_review",
+    "start_date", "end_date", "representative_date",
+    "duration_days", "price_per_day", "total_price",
 }
 
 _TARIFF_PROVIDER = "tariff_test_sc"
@@ -357,28 +358,29 @@ class TestFetchTariffTable:
         assert df.empty
         assert set(df.columns) >= _COLUMNS_TARIFF
 
-    def test_two_pvcs_same_acriss_min_price_aggregation(self, engine, tariff_fixtures):
-        """Two PVCs share EDMR; 7d ppd are 20 (ECO) and 30 (ECO2) — query picks 20."""
+    def test_two_pvcs_same_acriss_both_rows_returned(self, engine, tariff_fixtures):
+        """Two PVCs share EDMR; both must appear as separate rows — no aggregation collapse."""
         from src.saas.presentation.streamlit.queries import _fetch_tariff_table_impl
 
         df = _fetch_tariff_table_impl(engine, _TARIFF_PROVIDER, durations=(7,))
         edmr = df[df["acriss_code"] == "EDMR"]
 
-        assert not edmr.empty
-        assert float(edmr.iloc[0]["price_per_day"]) == pytest.approx(20.0)
+        assert len(edmr) == 2
+        assert set(edmr["external_code"].unique()) == {"ECO", "ECO2"}
+        ppd = dict(zip(edmr["external_code"], edmr["price_per_day"].astype(float)))
+        assert ppd["ECO"] == pytest.approx(20.0)
+        assert ppd["ECO2"] == pytest.approx(30.0)
 
-    def test_coherent_total_price_paired_with_min_per_day(self, engine, tariff_fixtures):
-        """ECO (ppd=20, total=200) beats ECO2 (ppd=30, total=150) on price_per_day.
-        total_price must be ECO's 200, not the cross-row minimum of 150."""
+    def test_pending_review_per_row_not_aggregated(self, engine, tariff_fixtures):
+        """pending_review is per-row (not BOOL_OR): ECO is False, CMP is True."""
         from src.saas.presentation.streamlit.queries import _fetch_tariff_table_impl
 
         df = _fetch_tariff_table_impl(engine, _TARIFF_PROVIDER, durations=(7,))
-        edmr = df[df["acriss_code"] == "EDMR"]
+        eco_row = df[df["external_code"] == "ECO"].iloc[0]
+        cmp_row = df[df["external_code"] == "CMP"].iloc[0]
 
-        assert not edmr.empty
-        row = edmr.iloc[0]
-        assert float(row["price_per_day"]) == pytest.approx(20.0)
-        assert float(row["total_price"]) == pytest.approx(200.0)
+        assert eco_row["pending_review"] == False
+        assert cmp_row["pending_review"] == True
 
     def test_exclude_pending_review_hides_pending_category(self, engine, tariff_fixtures):
         """CDMR is pending=True; excluding pending must drop it from the result."""
