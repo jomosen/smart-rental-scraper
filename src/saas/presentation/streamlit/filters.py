@@ -62,7 +62,7 @@ def render_sidebar_filters() -> Filters:
 
         # ── Categorías ACRISS ─────────────────────────────────────────────
         codes_with_names = get_acriss_codes_with_display_names()
-        code_to_label = {code: f"{code} — {name}" for code, name in codes_with_names}
+        code_to_label = {code: f"{name} — {code}" for code, name in codes_with_names}
         all_codes = [code for code, _ in codes_with_names]
         selected_codes = st.multiselect(
             "Categorías ACRISS",

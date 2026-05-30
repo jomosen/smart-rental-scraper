@@ -33,3 +33,8 @@ class BookingResult:
     cars: List[Car] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     is_synthetic: bool = False
+    # True when the provider explicitly reported "no prices available"
+    # (e.g. a modal or empty-page message), as opposed to a scraping error.
+    # Only confirmed-empty results count for the probe truncation threshold;
+    # scraping errors (exceptions / timeouts) are treated as recoverable.
+    is_confirmed_empty: bool = False

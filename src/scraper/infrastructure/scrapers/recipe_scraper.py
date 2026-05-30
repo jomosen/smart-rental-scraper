@@ -255,7 +255,11 @@ class RecipeScraper(BaseScraper):
             for vr in self._last_result.dom_vehicles
             if vr.price_final is not None
         ]
-        return BookingResult(provider_name=criteria.provider_name, cars=cars)
+        return BookingResult(
+            provider_name=criteria.provider_name,
+            cars=cars,
+            is_confirmed_empty=self._last_result.has_empty_page,
+        )
 
     def _load_recipe(self):
         """Fetch the active Recipe from DB synchronously. Returns None if absent."""

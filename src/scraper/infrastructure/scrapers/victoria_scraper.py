@@ -34,6 +34,65 @@ def _parse_int(text: str) -> Optional[int]:
         return None
 
 
+_NO_PRICES_MSG = "No ha sido posible encontrar una lista de precios"
+
+
+def _parse_victoria_html(html: str, provider_name: str) -> BookingResult:
+    """Parse Victoria's results page HTML and return a BookingResult.
+
+    Returns is_confirmed_empty=True when the provider shows its #msgbox modal
+    with the no-availability message, without attempting to parse vehicle cards.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    msgbox = soup.find("div", id="msgbox")
+    if msgbox and _NO_PRICES_MSG in msgbox.get_text():
+        return BookingResult(provider_name=provider_name, is_confirmed_empty=True)
+
+    cars = []
+    item: Tag
+    for item in soup.select("div.package-template.ficha"):
+        model_el = item.select_one("span.nombregrupo")
+        group_el = item.select_one("span.grupo")
+        package_el = item.select_one(".package-header h5")
+        daily_el = item.select_one("div.package-price div strong.victoriacarscolor-text")
+        total_el = item.select_one("strong.discount-prize") or item.select_one("strong.precio_tot")
+        seats_el = item.select_one(".icono_container.persona .valor")
+        luggage_el = item.select_one(".icono_container.maleta .valor")
+
+        model = model_el.get_text(strip=True) if model_el else "Desconocido"
+        group = group_el.get_text(strip=True) if group_el else ""
+        package_name = package_el.get_text(strip=True) if package_el else ""
+        daily_price = _parse_price(daily_el.get_text()) if daily_el else Decimal(0)
+        total = _parse_price(total_el.get_text()) if total_el else Decimal(0)
+        seats = _parse_int(seats_el.get_text(strip=True)) if seats_el else None
+        luggage = _parse_int(luggage_el.get_text(strip=True)) if luggage_el else None
+        if item.select_one(".icono_container.manual"):
+            transmission = "manual"
+        elif item.select_one(".icono_container.automatico"):
+            transmission = "automatic"
+        else:
+            transmission = None
+
+        cars.append(Car(
+            model=model,
+            group=group,
+            description="",
+            example_models=model,
+            seats=seats,
+            luggage=luggage,
+            transmission=transmission,
+            rates=[Rate(
+                name=package_name,
+                currency="EUR",
+                total=total,
+                daily_price=daily_price,
+            )],
+        ))
+
+    return BookingResult(provider_name=provider_name, cars=cars)
+
+
 class VictoriaScraper(BaseScraper):
     """Concrete scraper for Victoria."""
 
@@ -79,8 +138,26 @@ class VictoriaScraper(BaseScraper):
         except Exception:
             pass
 
+    async def _close_msgbox_if_open(self) -> None:
+        """Closes the Victoria #msgbox modal if it is currently open.
+
+        The modal's Materialize lean-overlay intercepts pointer events and
+        blocks the #btnVolverBuscar click on the next refine. Clicking the
+        Aceptar button dismisses both the modal and the overlay.
+        """
+        try:
+            if not await self._driver.element_exists("#msgbox.open"):
+                return
+            await self._driver.click("#msgbox .modal-close")
+            await self._driver.wait_for_selector(".lean-overlay", timeout=3000, state="hidden")
+        except Exception:
+            pass
+
     async def _refine_form(self, criteria: BookingSearch) -> None:
         """Returns to the form via btnVolverBuscar, fills and submits without opening a new tab."""
+        # Dismiss any residual modal/overlay left by a previous confirmed-empty
+        # result before attempting the #btnVolverBuscar click.
+        await self._close_msgbox_if_open()
         await self._driver.scroll_to_top()
         await self._pause(1.0, 2.0)
         await self._driver.click("#btnVolverBuscar")
@@ -110,47 +187,8 @@ class VictoriaScraper(BaseScraper):
 
     async def _extract_results(self, criteria: BookingSearch) -> BookingResult:
         html = await self._driver.get_page_source()
-        soup = BeautifulSoup(html, "html.parser")
-
-        cars = []
-        item: Tag
-        for item in soup.select("div.package-template.ficha"):
-            model_el = item.select_one("span.nombregrupo")
-            group_el = item.select_one("span.grupo")
-            package_el = item.select_one(".package-header h5")
-            daily_el = item.select_one("div.package-price div strong.victoriacarscolor-text")
-            total_el = item.select_one("strong.discount-prize") or item.select_one("strong.precio_tot")
-            seats_el = item.select_one(".icono_container.persona .valor")
-            luggage_el = item.select_one(".icono_container.maleta .valor")
-
-            model = model_el.get_text(strip=True) if model_el else "Desconocido"
-            group = group_el.get_text(strip=True) if group_el else ""
-            package_name = package_el.get_text(strip=True) if package_el else ""
-            daily_price = _parse_price(daily_el.get_text()) if daily_el else Decimal(0)
-            total = _parse_price(total_el.get_text()) if total_el else Decimal(0)
-            seats = _parse_int(seats_el.get_text(strip=True)) if seats_el else None
-            luggage = _parse_int(luggage_el.get_text(strip=True)) if luggage_el else None
-            if item.select_one(".icono_container.manual"):
-                transmission = "manual"
-            elif item.select_one(".icono_container.automatico"):
-                transmission = "automatic"
-            else:
-                transmission = None
-
-            cars.append(Car(
-                model=model,
-                group=group,
-                description="",
-                example_models=model,
-                seats=seats,
-                luggage=luggage,
-                transmission=transmission,
-                rates=[Rate(
-                    name=package_name,
-                    currency="EUR",
-                    total=total,
-                    daily_price=daily_price,
-                )],
-            ))
-
-        return BookingResult(provider_name=criteria.provider_name, cars=cars)
+        result = _parse_victoria_html(html, criteria.provider_name)
+        if result.is_confirmed_empty:
+            # Close the modal so the overlay does not block the next refine click.
+            await self._close_msgbox_if_open()
+        return result

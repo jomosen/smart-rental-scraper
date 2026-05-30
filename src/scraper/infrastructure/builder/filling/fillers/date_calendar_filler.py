@@ -25,6 +25,26 @@ _DE = {"januar":1,"februar":2,"märz":3,"april":4,"mai":5,"juni":6,
 
 _ALL_LOCALE_DICTS = (_ES, _FR, _PT, _IT, _DE)
 
+# Class-name fragments that mark a day cell as non-selectable.
+# "neighboringmonth" matches react-calendar's `--neighboringMonth` suffix,
+# which appears on overflow days from the adjacent month panel in double-view
+# range calendars — clicking them would select the wrong month.
+_EXCLUDED_CLASS_KEYWORDS = (
+    "disabled", "unavailable", "blocked", "outside", "neighboringmonth",
+)
+
+
+def _is_day_cell_excluded(
+    aria_disabled: str, disabled_attr: str | None, class_attr: str
+) -> bool:
+    """Return True when a day cell must not be clicked."""
+    if aria_disabled.lower() == "true":
+        return True
+    if disabled_attr is not None:
+        return True
+    class_lower = class_attr.lower()
+    return any(kw in class_lower for kw in _EXCLUDED_CLASS_KEYWORDS)
+
 
 def _parse_month_year(label: str) -> tuple[int, int] | None:
     """Return (year, month) from a calendar header label, or None if unparseable."""
@@ -235,14 +255,7 @@ class DateCalendarFiller(DateFiller):
             disabled_attr = await cell.get_attribute("disabled")
             class_attr = (await cell.get_attribute("class")) or ""
 
-            is_disabled = (
-                aria_disabled.lower() == "true"
-                or disabled_attr is not None
-                or any(
-                    kw in class_attr.lower()
-                    for kw in ("disabled", "unavailable", "blocked", "outside")
-                )
-            )
+            is_disabled = _is_day_cell_excluded(aria_disabled, disabled_attr, class_attr)
             if is_disabled:
                 logger.log("date_calendar_day_skipped",
                            day=day_str, index=i, reason="disabled",

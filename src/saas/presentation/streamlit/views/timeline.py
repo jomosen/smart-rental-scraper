@@ -19,7 +19,7 @@ def render_timeline(filters: Filters) -> None:
         st.info("No hay categorías ACRISS con datos en la base de datos.")
         return
 
-    code_to_label = {code: f"{code} — {name}" for code, name in codes_with_names}
+    code_to_label = {code: f"{name} — {code}" for code, name in codes_with_names}
     available_codes = [code for code, _ in codes_with_names]
     selected_code = st.selectbox(
         "Categoría ACRISS a visualizar",

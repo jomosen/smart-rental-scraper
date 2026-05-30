@@ -143,7 +143,7 @@ def _build_tariff_html(zone_df: pd.DataFrame, durations: list[int]) -> str:
         rows.append(
             f"<tr class='acriss-header'>"
             f"<td colspan='{n_cols}'>"
-            f"{badge}{_html.escape(code)} — {display_name}"
+            f"{badge}{display_name} — {_html.escape(code)}"
             f"</td></tr>"
         )
 
@@ -157,7 +157,24 @@ def _build_tariff_html(zone_df: pd.DataFrame, durations: list[int]) -> str:
         for ext_code in groups_sorted:
             group_df = code_df[code_df["external_code"] == ext_code]
             models_raw = group_df["example_models"].iloc[0]
-            models_text = _html.escape(str(models_raw) if pd.notna(models_raw) else "")
+            scraped_tx = group_df["transmission"].iloc[0]
+            acriss_tx = group_df["acriss_transmission"].iloc[0]
+            if pd.notna(scraped_tx) and scraped_tx:
+                transmission_label = (
+                    " (Manual)" if str(scraped_tx).lower().startswith("m")
+                    else " (Automático)"
+                )
+            elif pd.notna(acriss_tx) and acriss_tx:
+                transmission_label = (
+                    " (Manual)" if str(acriss_tx).upper().startswith("M")
+                    else " (Automático)"
+                )
+            else:
+                transmission_label = ""
+            models_text = (
+                _html.escape(str(models_raw) if pd.notna(models_raw) else "")
+                + _html.escape(transmission_label)
+            )
             pending = bool(group_df["pending_review"].iloc[0])
             g_badge = "🔍 " if pending else ""
 

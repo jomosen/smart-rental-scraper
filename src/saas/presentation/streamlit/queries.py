@@ -386,7 +386,7 @@ def fetch_pvc_details(
 
 _TARIFF_COLUMNS = [
     "acriss_code", "acriss_display_name",
-    "external_code", "example_models", "pending_review",
+    "external_code", "example_models", "transmission", "acriss_transmission", "pending_review",
     "start_date", "end_date", "representative_date",
     "duration_days", "price_per_day", "total_price",
 ]
@@ -433,6 +433,8 @@ def _fetch_tariff_table_impl(
                    ac.display_name  AS acriss_display_name,
                    pvc.external_code,
                    pvc.example_models,
+                   pvc.transmission,
+                   pvc.acriss_transmission,
                    pvc.pending_review,
                    hz.start_date,
                    hz.end_date,
@@ -453,6 +455,8 @@ def _fetch_tariff_table_impl(
                z.acriss_display_name,
                z.external_code,
                z.example_models,
+               z.transmission,
+               z.acriss_transmission,
                z.pending_review,
                z.start_date,
                z.end_date,

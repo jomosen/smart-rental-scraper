@@ -99,7 +99,7 @@ def render_overview(filters: Filters) -> None:
 
     available_codes = sorted(df["acriss_code"].unique().tolist())
     code_to_label = {
-        code: f"{code} — {name}"
+        code: f"{name} — {code}"
         for code, name in get_acriss_codes_with_display_names()
     }
     selected_code = st.selectbox(

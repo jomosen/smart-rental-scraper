@@ -152,8 +152,15 @@ async def _fill_recipe_fields(
     Fill each form field using data from the recipe.  No LLM.
 
     Fields are processed in order: location → pickup_date → return_date →
-    pickup_time → return_time.  Fields with strategy="range_calendar_autofill"
-    are skipped — the range calendar already set them during pickup_date fill.
+    pickup_time → return_time.
+
+    Range-calendar providers (return_date.strategy='range_calendar_autofill'):
+      - pickup_date is filled without dismissing so the calendar stays open.
+      - return_date is filled explicitly reusing pickup_date's DateWidgetInfo
+        (same calendar container), with return_date's own selector passed as
+        the field so the filler can reopen if the calendar closed.
+    This mirrors _fill_date_fields (used by refine_dates) to ensure the correct
+    return_date is set regardless of the calendar's default autofill offset.
     """
     pickup_date: date = targets["pickup_date"]
     return_date: date = targets["return_date"]
@@ -166,6 +173,11 @@ async def _fill_recipe_fields(
     }
     _DATE_FIELDS = frozenset({"pickup_date", "return_date"})
 
+    _return_rf = recipe.form_fields.get("return_date")
+    _is_range_calendar = (
+        _return_rf is not None and _return_rf.strategy == "range_calendar_autofill"
+    )
+
     for fname in ("pickup_location", "pickup_date", "return_date",
                   "pickup_time", "return_time"):
         rf = recipe.form_fields.get(fname)
@@ -173,24 +185,30 @@ async def _fill_recipe_fields(
             logger.log("recipe_field_missing", name=fname)
             continue
 
-        # Range calendar auto-set — the pickup_date filler already set this
-        if rf.strategy == "range_calendar_autofill":
-            logger.log("recipe_field_skip", name=fname,
-                       strategy="range_calendar_autofill")
-            continue
-
         target_value = field_targets[fname]
         ifield = _make_identified_field(rf)
         logger.log("recipe_field_fill_start", name=fname, widget_type=rf.widget_type)
 
         if fname in _DATE_FIELDS:
+            # For return_date on a range calendar: reuse pickup_date's
+            # DateWidgetInfo (same calendar container/nav selectors) so the
+            # filler detects the already-open calendar and skips the open-click.
+            if fname == "return_date" and _is_range_calendar:
+                pickup_rf = recipe.form_fields.get("pickup_date")
+                calendar_dw = (
+                    _make_date_widget_info(pickup_rf)
+                    if pickup_rf is not None
+                    else _make_date_widget_info(rf)
+                )
+            else:
+                calendar_dw = _make_date_widget_info(rf)
+
             try:
-                dw = _make_date_widget_info(rf)
-                date_filler = get_date_filler(dw)
+                date_filler = get_date_filler(calendar_dw)
             except UnsupportedDateWidgetError as exc:
                 raise RuntimeError(f"Unsupported date widget for {fname}: {exc}") from exc
 
-            result = await date_filler.fill(session, ifield, dw, target_value, logger)
+            result = await date_filler.fill(session, ifield, calendar_dw, target_value, logger)
             logger.log("recipe_field_fill_done", name=fname, success=result.success,
                        error=result.error)
             if not result.success:
@@ -212,7 +230,12 @@ async def _fill_recipe_fields(
             if not result.success:
                 raise RuntimeError(f"Fill failed for {fname}: {result.error}")
 
-        await _dismiss(session)
+        # Keep the range calendar open after pickup_date so return_date can
+        # reuse the already-open calendar and skip the open-click.
+        if fname == "pickup_date" and _is_range_calendar:
+            pass
+        else:
+            await _dismiss(session)
 
 
 # ── Session context helper ────────────────────────────────────────────────────

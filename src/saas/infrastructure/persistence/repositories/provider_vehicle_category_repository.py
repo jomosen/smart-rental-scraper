@@ -60,6 +60,7 @@ class ProviderVehicleCategoryRepository:
         seats: Optional[int],
         luggage: Optional[int],
         classification: ClassificationResult,
+        transmission: Optional[str] = None,
     ) -> ProviderVehicleCategory:
         """Find or create a PVC, apply the given ACRISS classification, and update attributes.
 
@@ -94,6 +95,7 @@ class ProviderVehicleCategoryRepository:
                 example_models=example_models,
                 seats=seats,
                 luggage=luggage,
+                transmission=transmission,
                 attributes_hash=row_hash,
                 active=True,
                 first_seen_at=now,
@@ -107,6 +109,8 @@ class ProviderVehicleCategoryRepository:
             pvc.luggage = luggage
             if external_name is not None:
                 pvc.external_name = external_name
+            if transmission is not None:
+                pvc.transmission = transmission
 
         self._apply_classification(pvc, classification, is_new)
         self._s.flush()

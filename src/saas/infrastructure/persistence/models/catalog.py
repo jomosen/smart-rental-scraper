@@ -174,6 +174,7 @@ class ProviderVehicleCategory(Base):
     example_models: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     seats: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     luggage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    transmission: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     # Documentary metadata (nullable — not all providers expose codes)
     external_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     external_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

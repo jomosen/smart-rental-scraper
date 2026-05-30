@@ -138,6 +138,17 @@ class SmartScraperOrchestrator:
                               for s in probe_searches]
             probe_results = await self._run_session(probe_requests)
 
+            probe_orig_count = len(probe_searches)
+            probe_searches, probe_results, probe_truncated_at = (
+                self._truncate_trailing_empties(probe_searches, probe_results)
+            )
+            if probe_truncated_at is not None:
+                removed = probe_orig_count - len(probe_searches)
+                logger.info(
+                    "[%s] Probe truncated at %s — %d consecutive confirmed-empty probe(s) removed",
+                    self._provider_code, probe_truncated_at, removed,
+                )
+
             # ── PHASE 2: Analysis ─────────────────────────────────────────
             logger.info("[%s] Phase 2 — Zone analysis", self._provider_code)
             price_points = self._extractor.extract(probe_searches, probe_results)
@@ -208,12 +219,19 @@ class SmartScraperOrchestrator:
             )
 
             elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            self._mark_run_finished(run_id, "success", {
+            stats: dict = {
                 "zones": zones_count,
                 "observations_inserted": inserted,
                 "observations_skipped": skipped,
                 "elapsed_seconds": round(elapsed, 1),
-            })
+            }
+            if probe_truncated_at is not None:
+                removed = probe_orig_count - len(probe_searches)
+                stats["probe_truncated_at"] = probe_truncated_at.isoformat()
+                stats["probe_truncated_reason"] = (
+                    f"{removed} consecutive confirmed-empty probes"
+                )
+            self._mark_run_finished(run_id, "success", stats)
             logger.info(
                 "[%s/%s/%s] run_id=%d — done in %.1fs | zones=%d inserted=%d skipped=%d",
                 self._provider_code, self._location_code, self._rate_code,
@@ -380,6 +398,7 @@ class SmartScraperOrchestrator:
                     seats=car.seats,
                     luggage=car.luggage,
                     classification=classification,
+                    transmission=car.transmission,
                 )
 
     def _persist_zones(
@@ -481,6 +500,7 @@ class SmartScraperOrchestrator:
                         seats=car.seats,
                         luggage=car.luggage,
                         classification=classification,
+                        transmission=car.transmission,
                     )
                     for rate in car.rates:
                         did_insert = obs_repo.insert_if_changed(
@@ -512,6 +532,38 @@ class SmartScraperOrchestrator:
     ) -> None:
         with self._session_factory() as s:
             ScrapeRunRepository(s).mark_finished(run_id, status, stats, error)
+
+    @staticmethod
+    def _truncate_trailing_empties(
+        searches: List[BookingSearch],
+        results: List[Optional[BookingResult]],
+        threshold: int = 3,
+    ) -> tuple[List[BookingSearch], List[Optional[BookingResult]], Optional[date]]:
+        """Remove a trailing run of confirmed-empty probes that exceeds *threshold*.
+
+        Only ``is_confirmed_empty=True`` results count toward the streak.
+        A ``None`` result (scraping error) or a result with ``is_confirmed_empty=False``
+        RESETS the count — errors are recoverable and must not trigger a cut.
+
+        Returns (effective_searches, effective_results, first_empty_date | None).
+        ``first_empty_date`` is None when no truncation occurred.
+        """
+        streak = 0
+        for r in reversed(results):
+            if r is not None and r.is_confirmed_empty:
+                streak += 1
+            else:
+                break
+
+        if streak < threshold:
+            return list(searches), list(results), None
+
+        cutoff = len(results) - streak
+        return (
+            list(searches[:cutoff]),
+            list(results[:cutoff]),
+            searches[cutoff].pickup_at.date(),
+        )
 
     async def _run_session(self, requests: List[SearchRequest]) -> List[BookingResult]:
         return await run_session(self._factory, requests)

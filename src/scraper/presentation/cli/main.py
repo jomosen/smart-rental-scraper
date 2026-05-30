@@ -42,7 +42,7 @@ _handler.setFormatter(_ColorFormatter(
 logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 # --- Scraping period ---
-PERIOD_DAYS = 90
+PERIOD_DAYS = 300 
 PERIOD_OFFSET_DAYS = 2
 PICKUP_HOUR = 10
 

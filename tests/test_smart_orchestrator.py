@@ -1,4 +1,4 @@
-"""Unit tests for SmartScraperOrchestrator's pure analysis helpers.
+"""Unit tests for SmartScraperOrchestrator's pure analysis helpers and truncation logic.
 
 Only _select_guide_group, _count_dates_for_group, and _reassign_representatives
 are exercised here — no DB, no browser, no async.  The integration test at the
@@ -6,7 +6,7 @@ end checks that a centauro-like probe pattern produces multiple zones end-to-end
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -14,6 +14,8 @@ import pytest
 
 from src.scraper.application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
 from src.scraper.domain.models.season_internals import PricePoint
+from src.shared.domain.models.result import BookingResult
+from src.shared.domain.models.search import BookingSearch, Location
 from src.shared.domain.models.season import HomogeneousZone
 
 
@@ -184,3 +186,99 @@ class TestGuideGroupIntegration:
             points, date(2026, 6, 1), date(2026, 9, 28), guide,
         )
         assert len(zones) >= 2
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _truncate_trailing_empties
+# ──────────────────────────────────────────────────────────────────────────────
+
+_LOC = Location(canonical_id="ALC", display_name="Alicante Airport")
+
+
+def _search(d: date) -> BookingSearch:
+    dt = datetime(d.year, d.month, d.day, 10, 0)
+    dropoff = d + timedelta(days=7)
+    return BookingSearch(
+        provider_name="victoria",
+        pickup_location=_LOC,
+        dropoff_location=_LOC,
+        pickup_at=dt,
+        dropoff_at=datetime(dropoff.year, dropoff.month, dropoff.day, 10, 0),
+    )
+
+
+def _searches(n: int, start: date = date(2026, 6, 1)) -> list:
+    return [_search(start + timedelta(days=i * 7)) for i in range(n)]
+
+
+def _empty() -> BookingResult:
+    return BookingResult(provider_name="victoria", is_confirmed_empty=True)
+
+
+def _ok() -> BookingResult:
+    return BookingResult(provider_name="victoria")
+
+
+class TestTruncateTrailingEmpties:
+    orch = _make_orchestrator()
+
+    def _run(self, results, searches=None):
+        if searches is None:
+            searches = _searches(len(results))
+        return self.orch._truncate_trailing_empties(searches, results)
+
+    def test_three_trailing_empties_truncated(self):
+        results = [_ok(), _ok(), _empty(), _empty(), _empty()]
+        s, r, cut = self._run(results)
+        assert cut == date(2026, 6, 1) + timedelta(days=14)   # index 2
+        assert len(s) == 2
+        assert len(r) == 2
+
+    def test_two_trailing_empties_not_truncated(self):
+        results = [_ok(), _ok(), _empty(), _empty()]
+        s, r, cut = self._run(results)
+        assert cut is None
+        assert len(r) == 4
+
+    def test_no_empties_not_truncated(self):
+        results = [_ok(), _ok(), _ok()]
+        s, r, cut = self._run(results)
+        assert cut is None
+        assert len(r) == 3
+
+    def test_empty_in_middle_then_data_not_truncated(self):
+        """Empties followed by data must not trigger truncation (streak resets)."""
+        results = [_ok(), _empty(), _empty(), _empty(), _ok()]
+        s, r, cut = self._run(results)
+        assert cut is None
+        assert len(r) == 5
+
+    def test_error_result_none_resets_streak(self):
+        """A None result inside the trailing empty run breaks the streak → no cut."""
+        # Walking backward: _empty, _empty → streak=2; None → BREAK. streak < 3.
+        results = [_ok(), _empty(), None, _empty(), _empty()]
+        s, r, cut = self._run(results)
+        assert cut is None
+
+    def test_all_empty_truncated_from_start(self):
+        """All confirmed-empty: full truncation leaves empty lists."""
+        results = [_empty(), _empty(), _empty(), _empty()]
+        s, r, cut = self._run(results)
+        assert cut == date(2026, 6, 1)
+        assert len(s) == 0
+        assert len(r) == 0
+
+    def test_truncated_at_date_is_first_empty_in_streak(self):
+        results = [_ok(), _ok(), _ok(), _empty(), _empty(), _empty()]
+        searches = _searches(6)
+        s, r, cut = self.orch._truncate_trailing_empties(searches, results)
+        assert cut == searches[3].pickup_at.date()  # index 3
+
+    def test_returns_are_independent_lists(self):
+        """Returned lists must not alias the originals."""
+        results = [_ok(), _ok()]
+        searches = [_search(date(2026, 6, 1 + i * 7)) for i in range(2)]
+        s_orig = list(searches)
+        s, r, _ = self.orch._truncate_trailing_empties(searches, results)
+        s.append(None)
+        assert len(searches) == len(s_orig)  # original not mutated

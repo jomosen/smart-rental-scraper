@@ -42,10 +42,11 @@ class VehicleAttributes:
 class ClassificationResult:
     """Outcome of an ACRISS classification attempt.
 
-    All four `acriss_*` attributes are None when `pending_review` is True,
-    meaning the LLM could not confidently assign a code.  `confidence` is
-    the highest confidence achieved (still below threshold) so operators
-    can prioritise manual review.
+    The four `acriss_*` attributes are None ONLY when no valid code could be
+    assigned — i.e. the LLM returned null or an out-of-catalog (hallucinated)
+    code. A `pending_review=True` result normally STILL carries a best-guess
+    code: pending_review flags low confidence (< 0.85) or a mixed group, not
+    the absence of a code. `confidence` is the LLM's self-reported certainty.
     """
     acriss_category: str | None      # ACRISS position 1: vehicle category (E, C, I, …)
     acriss_body_type: str | None     # ACRISS position 2: body type (D, G, M, V, …)
