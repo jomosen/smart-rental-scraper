@@ -160,7 +160,8 @@ class TestEscalatesToPro:
 # ---------------------------------------------------------------------------
 
 class TestBothBelowThreshold:
-    def test_pending_review_with_max_confidence(self):
+    def test_pending_review_with_best_code_and_max_confidence(self):
+        """Both Flash and Pro below threshold: Pro's valid code is preserved with pending_review."""
         svc = _make_service()
         vehicles = [_vehicle()]
         flash_return = [_result("EDMR", 0.60)]
@@ -170,7 +171,8 @@ class TestBothBelowThreshold:
              patch.object(svc, "_call_pro_batch", return_value=pro_return):
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].acriss_category is None
+        assert results[0].acriss_category == "C"   # Pro's CGAR preserved
+        assert results[0].acriss_body_type == "G"
         assert results[0].pending_review is True
         assert results[0].confidence == pytest.approx(0.70)
 
@@ -200,7 +202,8 @@ class TestFlashFails:
 # ---------------------------------------------------------------------------
 
 class TestProFallbackFails:
-    def test_pending_review_with_flash_confidence_when_pro_raises(self):
+    def test_pending_review_with_flash_code_preserved_when_pro_raises(self):
+        """Pro raises: Flash's valid code is preserved (not nulled) with pending_review."""
         svc = _make_service()
         vehicles = [_vehicle()]
         flash_return = [_result("EDMR", 0.70)]
@@ -209,7 +212,8 @@ class TestProFallbackFails:
              patch.object(svc, "_call_pro_batch", side_effect=RuntimeError("rate limit")):
             results = svc.classify_provider_batch(_PROVIDER_CODE, vehicles)
 
-        assert results[0].acriss_category is None
+        assert results[0].acriss_category == "E"   # EDMR preserved from Flash
+        assert results[0].acriss_body_type == "D"
         assert results[0].pending_review is True
         assert results[0].confidence == pytest.approx(0.70)
 
@@ -388,6 +392,16 @@ class TestBuildBatchPromptSections:
 
         assert vehicles_pos < reminder_pos < output_pos
 
+    def test_prompt_uses_best_guess_wording(self):
+        """Prompt must instruct best-guess over null; no 'null if no fit' instruction."""
+        svc = _make_service()
+        prompt = svc._build_batch_prompt(_PROVIDER_CODE, [_vehicle()])
+
+        assert "best guess" in prompt
+        assert "pending_review is ALWAYS preferred over null" in prompt
+        assert "null and pending_review=true" not in prompt
+        assert "confidence < 0.70" not in prompt
+
 
 # ---------------------------------------------------------------------------
 # Test — _parse_llm_item post-LLM validation
@@ -449,18 +463,22 @@ class TestParseLlmItem:
         assert result.acriss_fuel == "R"
         assert result.pending_review is False
 
-    def test_low_confidence_produces_pending_review(self):
+    def test_low_confidence_code_preserved_with_pending_review(self):
+        """A valid catalog code with low confidence is kept; only pending_review flips to True."""
         svc = _make_service()
         item = {
             "acriss_code": "EDMR",
-            "confidence": 0.65,
+            "confidence": 0.60,
             "reasoning": "Very uncertain",
             "pending_review": False,
         }
         result = svc._parse_llm_item(item)
-        assert result.acriss_category is None
+        assert result.acriss_category == "E"
+        assert result.acriss_body_type == "D"
+        assert result.acriss_transmission == "M"
+        assert result.acriss_fuel == "R"
         assert result.pending_review is True
-        assert result.confidence == pytest.approx(0.65)
+        assert result.confidence == pytest.approx(0.60)
 
     def test_null_code_produces_pending_review(self):
         svc = _make_service()

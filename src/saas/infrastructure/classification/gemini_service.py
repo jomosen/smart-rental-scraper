@@ -25,7 +25,6 @@ from src.saas.application.classification.dtos import (
 from src.saas.application.classification.service import ClassificationService
 
 _CONFIDENCE_THRESHOLD = 0.85
-_LOW_CONFIDENCE_THRESHOLD = 0.70  # below this → immediate pending_review, no Pro escalation
 _FLASH_MODEL = "gemini-2.5-flash"
 _PRO_MODEL = "gemini-2.5-pro"
 _REFERENCE_PATH = Path(__file__).parents[4] / "docs" / "acriss_reference.md"
@@ -181,10 +180,10 @@ class GeminiClassificationService(ClassificationService):
                 r
                 if r.pending_review or r.confidence >= _CONFIDENCE_THRESHOLD
                 else ClassificationResult(
-                    acriss_category=None,
-                    acriss_body_type=None,
-                    acriss_transmission=None,
-                    acriss_fuel=None,
+                    acriss_category=r.acriss_category,
+                    acriss_body_type=r.acriss_body_type,
+                    acriss_transmission=r.acriss_transmission,
+                    acriss_fuel=r.acriss_fuel,
                     confidence=r.confidence,
                     pending_review=True,
                     rationale=(
@@ -206,11 +205,13 @@ class GeminiClassificationService(ClassificationService):
             elif pro_r.confidence >= _CONFIDENCE_THRESHOLD:
                 final.append(pro_r)
             else:
+                # Both below threshold: keep best-guess code (Pro preferred if it has one)
+                best = pro_r if pro_r.acriss_category is not None else flash_r
                 final.append(ClassificationResult(
-                    acriss_category=None,
-                    acriss_body_type=None,
-                    acriss_transmission=None,
-                    acriss_fuel=None,
+                    acriss_category=best.acriss_category,
+                    acriss_body_type=best.acriss_body_type,
+                    acriss_transmission=best.acriss_transmission,
+                    acriss_fuel=best.acriss_fuel,
                     confidence=max(flash_r.confidence, pro_r.confidence),
                     pending_review=True,
                     rationale=(
@@ -305,25 +306,15 @@ class GeminiClassificationService(ClassificationService):
                 rationale=rationale,
             )
 
-        if confidence < _LOW_CONFIDENCE_THRESHOLD:
-            return ClassificationResult(
-                acriss_category=None,
-                acriss_body_type=None,
-                acriss_transmission=None,
-                acriss_fuel=None,
-                confidence=confidence,
-                pending_review=True,
-                rationale=rationale,
-            )
-
-        # Derive attrs from the validated code — corrects any inconsistency in LLM attrs
+        # Code is valid and in the catalog. Always keep it; confidence decides pending_review.
+        # Attrs derived from the code chars — corrects any inconsistency in LLM-returned attrs.
         return ClassificationResult(
             acriss_category=acriss_code[0],
             acriss_body_type=acriss_code[1],
             acriss_transmission=acriss_code[2],
             acriss_fuel=acriss_code[3],
             confidence=confidence,
-            pending_review=False,
+            pending_review=confidence < _CONFIDENCE_THRESHOLD,
             rationale=rationale,
         )
 
@@ -443,14 +434,14 @@ class GeminiClassificationService(ClassificationService):
     def _build_output_format_section(self, n_vehicles: int) -> str:
         example = (
             '  {\n'
-            '    "acriss_code": "CFAR",       // 4-char code, or null if pending_review\n'
+            '    "acriss_code": "CFAR",       // 4-char code, or null only if truly unclassifiable\n'
             '    "acriss_category": "C",       // Position 1 of the code\n'
             '    "acriss_body_type": "F",      // Position 2\n'
             '    "acriss_transmission": "A",   // Position 3\n'
             '    "acriss_fuel": "R",           // Position 4\n'
             '    "confidence": 0.95,           // 0.0 to 1.0\n'
             '    "reasoning": "...",           // 1-3 sentences explaining the choice\n'
-            '    "pending_review": false       // true if no materialized code fits well\n'
+            '    "pending_review": false       // true if uncertain or mixed group\n'
             '  }'
         )
         return (
@@ -460,7 +451,11 @@ class GeminiClassificationService(ClassificationService):
             "Rules:\n"
             "- acriss_code MUST be one of the materialized codes listed above. "
             "Do not invent codes not in the list.\n"
-            "- If no materialized code fits well, set acriss_code=null and pending_review=true.\n"
+            "- ALWAYS assign the closest materialized code as your best guess. "
+            "Only set acriss_code=null if the vehicle is genuinely unclassifiable "
+            "(e.g. not a car, corrupt data, or no listed code is even remotely applicable).\n"
+            "- If uncertain which code fits best, assign the closest one and set "
+            "pending_review=true with a confidence reflecting your uncertainty. "
+            "A best-guess code with pending_review is ALWAYS preferred over null.\n"
             "- The 4 attributes must match exactly the 4 characters of acriss_code.\n"
-            "- Set pending_review=true if confidence < 0.70.\n"
         )
