@@ -1,4 +1,4 @@
-"""Unit tests for BaseScraper.scrape_session should_stop callback.
+"""Unit tests for BaseScraper.scrape_session should_stop callback and macro-pause.
 
 No browser launched — driver methods are mocked with AsyncMock.
 asyncio.run() is used instead of pytest-asyncio to keep the test setup simple.
@@ -6,7 +6,7 @@ asyncio.run() is used instead of pytest-asyncio to keep the test setup simple.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.scraper.infrastructure.scrapers.base_scraper import BaseScraper
 from src.scraper.application.models.search_request import SearchRequest
@@ -106,3 +106,92 @@ class TestScrapeSessionShouldStop:
         reqs = [_make_req() for _ in range(5)]
         out = asyncio.run(scraper.scrape_session(reqs, should_stop=lambda r: True))
         assert len(out) == 1
+
+
+# ---------------------------------------------------------------------------
+# Macro-pause tests
+# ---------------------------------------------------------------------------
+
+import src.scraper.infrastructure.scrapers.base_scraper as _bs_module
+
+
+class TestMacroPause:
+    """Verify the anti-detection macro-pause logic in scrape_session."""
+
+    def _run(self, n: int = 3, **patch_consts) -> tuple[list, list]:
+        """Run _FakeScraper with n ok results, patching module constants.
+
+        Returns (results, sleep_calls) where sleep_calls are the positional
+        args of each asyncio.sleep invocation (excludes driver.launch/close).
+        """
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(secs: float) -> None:
+            sleep_calls.append(secs)
+
+        scraper = _FakeScraper([_ok()] * n)
+        reqs = [_make_req() for _ in range(n)]
+
+        patches = {k: patch.object(_bs_module, k, v) for k, v in patch_consts.items()}
+        with patch("asyncio.sleep", side_effect=_fake_sleep):
+            with __import__("contextlib").ExitStack() as stack:
+                for p in patches.values():
+                    stack.enter_context(p)
+                out = asyncio.run(scraper.scrape_session(reqs))
+        return out, sleep_calls
+
+    def test_disabled_when_duration_zero(self):
+        """Setting both duration tunables to 0 suppresses all macro-pauses."""
+        out, sleeps = self._run(
+            n=5,
+            _BREAK_DURATION_LOW=0.0,
+            _BREAK_DURATION_HIGH=0.0,
+            _BREAK_EVERY_MIN_LOW=0.0,
+            _BREAK_EVERY_MIN_HIGH=0.0,
+        )
+        assert len(out) == 5
+        assert sleeps == [], f"Expected no macro-pauses but got: {sleeps}"
+
+    def test_pause_fires_when_elapsed_exceeds_threshold(self):
+        """With interval=0, next_break_at=0 so the first completed search triggers a pause."""
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(secs: float) -> None:
+            sleep_calls.append(secs)
+
+        scraper = _FakeScraper([_ok()] * 3)
+        reqs = [_make_req() for _ in range(3)]
+
+        with patch.object(_bs_module, "_BREAK_EVERY_MIN_LOW", 0.0), \
+             patch.object(_bs_module, "_BREAK_EVERY_MIN_HIGH", 0.0), \
+             patch.object(_bs_module, "_BREAK_DURATION_LOW", 5.0), \
+             patch.object(_bs_module, "_BREAK_DURATION_HIGH", 5.0), \
+             patch("asyncio.sleep", side_effect=_fake_sleep):
+            out = asyncio.run(scraper.scrape_session(reqs))
+
+        assert len(out) == 3
+        # With next_break_at=0, each search triggers a 5s pause (3 searches → 3 pauses)
+        assert len(sleep_calls) == 3
+        assert all(s == 5.0 for s in sleep_calls)
+
+    def test_should_stop_takes_priority_over_pause(self):
+        """Early stop via should_stop does not trigger a macro-pause afterward."""
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(secs: float) -> None:
+            sleep_calls.append(secs)
+
+        scraper = _FakeScraper([_ok()] * 5)
+        reqs = [_make_req() for _ in range(5)]
+
+        with patch.object(_bs_module, "_BREAK_EVERY_MIN_LOW", 0.0), \
+             patch.object(_bs_module, "_BREAK_EVERY_MIN_HIGH", 0.0), \
+             patch.object(_bs_module, "_BREAK_DURATION_LOW", 5.0), \
+             patch.object(_bs_module, "_BREAK_DURATION_HIGH", 5.0), \
+             patch("asyncio.sleep", side_effect=_fake_sleep):
+            # Stop on the very first result — the pause block must not execute
+            out = asyncio.run(scraper.scrape_session(reqs, should_stop=lambda r: True))
+
+        assert len(out) == 1
+        # No macro-pause should fire because break comes before the pause block
+        assert sleep_calls == [], f"Unexpected sleeps after early stop: {sleep_calls}"

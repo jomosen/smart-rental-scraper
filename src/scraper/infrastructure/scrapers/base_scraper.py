@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import random
+import time as _time
 from abc import abstractmethod
 from typing import Callable, List, Optional
 
@@ -12,6 +14,13 @@ from ....shared.domain.models.result import BookingResult
 from ...application.models.search_request import SearchRequest
 
 logger = logging.getLogger(__name__)
+
+# Anti-detection macro-pause tunables (overridable via .env).
+# Set ANTIBOT_BREAK_DURATION_LOW=0 to disable entirely.
+_BREAK_EVERY_MIN_LOW  = float(os.getenv("ANTIBOT_BREAK_EVERY_MIN_LOW",  "5"))
+_BREAK_EVERY_MIN_HIGH = float(os.getenv("ANTIBOT_BREAK_EVERY_MIN_HIGH", "10"))
+_BREAK_DURATION_LOW   = float(os.getenv("ANTIBOT_BREAK_DURATION_LOW",   "20"))
+_BREAK_DURATION_HIGH  = float(os.getenv("ANTIBOT_BREAK_DURATION_HIGH",  "40"))
 
 
 class BaseScraper(IBookingScraper):
@@ -50,6 +59,8 @@ class BaseScraper(IBookingScraper):
         """
         results = []
         needs_full_submit = True
+        session_start = _time.monotonic()
+        next_break_at = random.uniform(_BREAK_EVERY_MIN_LOW, _BREAK_EVERY_MIN_HIGH) * 60
         try:
             await self._driver.launch(headless=False)
             for ri, req in enumerate(requests):
@@ -126,6 +137,19 @@ class BaseScraper(IBookingScraper):
                         provider_name, ri + 1, len(requests),
                     )
                     break
+                if _BREAK_DURATION_LOW > 0 or _BREAK_DURATION_HIGH > 0:
+                    elapsed = _time.monotonic() - session_start
+                    if elapsed >= next_break_at:
+                        duration = random.uniform(_BREAK_DURATION_LOW, _BREAK_DURATION_HIGH)
+                        logger.info(
+                            "[%s] Anti-bot pause %.0fs after %.1fmin of session",
+                            provider_name, duration, elapsed / 60,
+                        )
+                        await asyncio.sleep(duration)
+                        next_break_at = (
+                            (_time.monotonic() - session_start)
+                            + random.uniform(_BREAK_EVERY_MIN_LOW, _BREAK_EVERY_MIN_HIGH) * 60
+                        )
         finally:
             await self.close()
         return results

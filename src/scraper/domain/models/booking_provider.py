@@ -11,3 +11,4 @@ class BookingProvider:
     """
     name: str
     base_url: str
+    code: str = ""

@@ -1,8 +1,14 @@
+import argparse
 import asyncio
 import logging
 import sys
 from datetime import datetime, timedelta
 from functools import partial
+
+# Ensure the console handles the full Unicode range (em-dashes, arrows, etc.)
+# used in log messages. No-op on terminals already configured for UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -51,11 +57,25 @@ PERIOD_START = _now + timedelta(days=PERIOD_OFFSET_DAYS)
 PERIOD_END   = _now + timedelta(days=PERIOD_DAYS + PERIOD_OFFSET_DAYS)
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Smart Rental Scraper")
+    parser.add_argument(
+        "--provider",
+        nargs="+",
+        metavar="CODE",
+        help="Run only for the given provider code(s), e.g. --provider victoria solcar",
+    )
+    return parser.parse_args()
+
+
 async def main() -> None:
+    args = _parse_args()
+    provider_filter: set[str] | None = set(args.provider) if args.provider else None
+
     start_time = datetime.now()
     print(
         f"--- Smart Rental Scraper "
-        f"({PERIOD_START.strftime('%d/%m/%Y')} → {PERIOD_END.strftime('%d/%m/%Y')}) ---"
+        f"({PERIOD_START.strftime('%d/%m/%Y')} -> {PERIOD_END.strftime('%d/%m/%Y')}) ---"
     )
     print(f"Start: {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -68,15 +88,24 @@ async def main() -> None:
         period_end=PERIOD_END,
         session_factory=session_factory,
     )
+
+    entries = container.orchestrators
+    if provider_filter is not None:
+        entries = [e for e in entries if e[0].code in provider_filter]
+        found = {e[0].code for e in entries}
+        missing = provider_filter - found
+        if missing:
+            logging.warning("Unknown or inactive provider(s): %s", ", ".join(sorted(missing)))
+
     logging.info(
         "Catalog loaded from DB: %d orchestrator(s) scheduled.",
-        len(container.orchestrators),
+        len(entries),
     )
 
     try:
         results = await asyncio.gather(*[
             orch.run(provider, pickup, dropoff, PERIOD_START, PERIOD_END)
-            for provider, pickup, dropoff, orch in container.orchestrators
+            for provider, pickup, dropoff, orch in entries
         ], return_exceptions=True)
 
         total_zones = total_inserted = total_skipped = 0

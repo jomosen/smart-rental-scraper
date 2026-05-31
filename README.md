@@ -133,6 +133,10 @@ The full list is in `.env.example`. The most relevant groups:
 |---|---|
 | `SEASON_PRICE_THRESHOLD` | Minimum relative price change to detect a season boundary (`SeasonAnalyzer`). Default `0.05`. |
 | `PRICE_CHANGE_THRESHOLD` | Minimum relative variation for `insert_if_changed` to insert a new observation. Default `0.005`. |
+| `ANTIBOT_BREAK_EVERY_MIN_LOW` | Lower bound (minutes) for the random interval between anti-detection macro-pauses. Default `5`. |
+| `ANTIBOT_BREAK_EVERY_MIN_HIGH` | Upper bound (minutes) for the random interval between macro-pauses. Default `10`. |
+| `ANTIBOT_BREAK_DURATION_LOW` | Lower bound (seconds) for each macro-pause. Default `20`. Set to `0` to disable entirely. |
+| `ANTIBOT_BREAK_DURATION_HIGH` | Upper bound (seconds) for each macro-pause. Default `40`. |
 | `POSTGRES_*` | Postgres credentials and host for the docker-compose stack (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT`). |
 | `DATABASE_URL` | Legacy connection URL using the superuser. Kept for compatibility. |
 | `ADMIN_DATABASE_URL` | Used by Alembic. Connects as `smart_rental_admin` (table owner). |

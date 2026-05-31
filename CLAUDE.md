@@ -112,7 +112,7 @@ Each run creates a `scrape_runs` row on start (`ScrapeRunRepository.create`) and
 ## Configuration
 
 - **Per-provider config** → `providers` DB table (status='active'). Add a new provider by inserting rows into `providers`, `provider_locations`, and `provider_rates`. For recipe-based providers, `run_build_recipe.py` does this automatically.
-- **Global runtime tunables** → `.env`. This includes scraping thresholds (`SEASON_PRICE_THRESHOLD`, `PRICE_CHANGE_THRESHOLD`) and the database connection URLs (`ADMIN_DATABASE_URL`, `APP_DATABASE_URL`, `SUPER_DATABASE_URL`, plus `POSTGRES_*` for the docker-compose stack). See `.env.example` for the full list.
+- **Global runtime tunables** → `.env`. This includes scraping thresholds (`SEASON_PRICE_THRESHOLD`, `PRICE_CHANGE_THRESHOLD`), anti-detection macro-pause settings (`ANTIBOT_BREAK_EVERY_MIN_LOW/HIGH`, `ANTIBOT_BREAK_DURATION_LOW/HIGH` — set `ANTIBOT_BREAK_DURATION_LOW=0` to disable), and the database connection URLs (`ADMIN_DATABASE_URL`, `APP_DATABASE_URL`, `SUPER_DATABASE_URL`, plus `POSTGRES_*` for the docker-compose stack). See `.env.example` for the full list.
 - **Pipeline constants** (period length, pickup hour, spot-check count) → top of `src/scraper/presentation/cli/main.py`.
 
 When adding a new tunable, decide deliberately which of the three layers it belongs to and document it in the README config tables.

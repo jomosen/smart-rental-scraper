@@ -28,6 +28,7 @@ from ...application.smart_scraping.smart_orchestrator import SmartScraperOrchest
 from ...infrastructure.playwright.playwright_driver import PlaywrightDriver
 from ...infrastructure.scrapers.provider_a_scraper import ProviderAScraper
 from ...infrastructure.scrapers.victoria_scraper import VictoriaScraper
+from ...infrastructure.scrapers.victoria_url_scraper import VictoriaUrlScraper
 from ...infrastructure.scrapers.solcar_scraper import SolcarScraper
 from ...infrastructure.scrapers.recipe_scraper import RecipeScraper
 from ....saas.application.classification.acriss_loader import load_acriss_specs
@@ -47,7 +48,8 @@ from ....saas.infrastructure.persistence.models.catalog import (
 # Add one line here when creating a new scraper class.
 SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "provider_a": ProviderAScraper,
-    "victoria": VictoriaScraper,
+    "victoria":      VictoriaUrlScraper,
+    "victoria_form": VictoriaScraper,
     "solcar": SolcarScraper,
     "centauro": RecipeScraper,
 }
@@ -161,6 +163,7 @@ def build_container(
             provider = BookingProvider(
                 name=provider_row.display_name,
                 base_url=provider_row.base_url or "",
+                code=provider_row.code,
             )
             location = Location(
                 canonical_id=location_row.location_code,

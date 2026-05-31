@@ -63,6 +63,11 @@ class SolcarScraper(BaseScraper):
         await self._driver.navigate(self._build_url(criteria))
         await self._driver.wait_for_selector(".vehiculo-item", timeout=15000)
 
+    async def _refine_form(self, criteria: BookingSearch) -> None:
+        await self._pause(2.0, 5.0)
+        await self._driver.navigate(self._build_url(criteria))
+        await self._driver.wait_for_selector(".vehiculo-item", timeout=15000)
+
     async def _extract_results(self, criteria: BookingSearch) -> BookingResult:
         await self._driver.wait_for_load_state("networkidle")
         html = await self._driver.get_page_source()
