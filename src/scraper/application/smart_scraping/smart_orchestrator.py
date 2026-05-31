@@ -39,6 +39,7 @@ from ....saas.infrastructure.persistence.repositories import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
+_PROBE_STOP_THRESHOLD = 3
 
 
 @dataclass
@@ -136,31 +137,39 @@ class SmartScraperOrchestrator:
             )
             probe_requests = [SearchRequest(search=s, rate_filter=self._rate_filter)
                               for s in probe_searches]
-            probe_results = await self._run_session(probe_requests)
-
-            probe_orig_count = len(probe_searches)
-            probe_searches, probe_results, probe_truncated_at = (
-                self._truncate_trailing_empties(probe_searches, probe_results)
+            probe_results = await self._run_session(
+                probe_requests, should_stop=self._make_probe_stopper()
             )
-            if probe_truncated_at is not None:
-                removed = probe_orig_count - len(probe_searches)
+            n_executed = next(
+                (i for i, r in enumerate(probe_results) if r is None),
+                len(probe_results),
+            )
+            probe_truncated = n_executed < len(probe_requests)
+            if probe_truncated:
                 logger.info(
-                    "[%s] Probe truncated at %s — %d consecutive confirmed-empty probe(s) removed",
-                    self._provider_code, probe_truncated_at, removed,
+                    "[%s] Probe stopped early after %d/%d searches (%d consecutive confirmed-empty)",
+                    self._provider_code, n_executed, len(probe_requests), _PROBE_STOP_THRESHOLD,
                 )
 
             # ── PHASE 2: Analysis ─────────────────────────────────────────
             logger.info("[%s] Phase 2 — Zone analysis", self._provider_code)
             price_points = self._extractor.extract(probe_searches, probe_results)
 
+            # When the probe stopped early, limit zone detection to the range
+            # actually covered so the last zone doesn't extend to the period end.
+            if probe_truncated and price_points:
+                effective_end = max(p.pickup_date for p in price_points)
+            else:
+                effective_end = end
+
             guide_group = self._select_guide_group(price_points)
             if guide_group is None:
                 provider_zones = self._analyzer.detect_zones_provider_level(
-                    price_points, start, end,
+                    price_points, start, effective_end,
                 )
             else:
                 provider_zones = self._analyzer.detect_zones(
-                    price_points, start, end, guide_group,
+                    price_points, start, effective_end, guide_group,
                 )
                 logger.info(
                     "[%s] Guide group for zone detection: %r (%d probe dates)",
@@ -225,11 +234,11 @@ class SmartScraperOrchestrator:
                 "observations_skipped": skipped,
                 "elapsed_seconds": round(elapsed, 1),
             }
-            if probe_truncated_at is not None:
-                removed = probe_orig_count - len(probe_searches)
-                stats["probe_truncated_at"] = probe_truncated_at.isoformat()
+            if probe_truncated:
+                stats["probe_truncated"] = True
+                stats["probe_truncated_after_search"] = n_executed
                 stats["probe_truncated_reason"] = (
-                    f"{removed} consecutive confirmed-empty probes"
+                    f"{_PROBE_STOP_THRESHOLD} consecutive confirmed-empty probes"
                 )
             self._mark_run_finished(run_id, "success", stats)
             logger.info(
@@ -565,5 +574,29 @@ class SmartScraperOrchestrator:
             searches[cutoff].pickup_at.date(),
         )
 
-    async def _run_session(self, requests: List[SearchRequest]) -> List[BookingResult]:
-        return await run_session(self._factory, requests)
+    def _make_probe_stopper(
+        self, threshold: int = _PROBE_STOP_THRESHOLD
+    ) -> Callable[[BookingResult], bool]:
+        """Return a stateful should_stop callback for scrape_session.
+
+        Counts consecutive is_confirmed_empty results; fires when the streak
+        reaches threshold. Cars or errors (None / no is_confirmed_empty) reset
+        the streak — errors are recoverable and must not trigger a cut.
+        """
+        state = {"streak": 0}
+
+        def should_stop(result: BookingResult) -> bool:
+            if result is not None and result.is_confirmed_empty:
+                state["streak"] += 1
+            else:
+                state["streak"] = 0
+            return state["streak"] >= threshold
+
+        return should_stop
+
+    async def _run_session(
+        self,
+        requests: List[SearchRequest],
+        should_stop: Optional[Callable[[BookingResult], bool]] = None,
+    ) -> List[Optional[BookingResult]]:
+        return await run_session(self._factory, requests, should_stop=should_stop)

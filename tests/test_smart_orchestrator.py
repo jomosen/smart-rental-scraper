@@ -282,3 +282,52 @@ class TestTruncateTrailingEmpties:
         s, r, _ = self.orch._truncate_trailing_empties(searches, results)
         s.append(None)
         assert len(searches) == len(s_orig)  # original not mutated
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _make_probe_stopper
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestMakeProbeStopperTests:
+    def _stopper(self, threshold: int = 3):
+        return _make_orchestrator()._make_probe_stopper(threshold)
+
+    def test_three_consecutive_empties_fires(self):
+        stop = self._stopper()
+        assert stop(_empty()) is False  # streak 1
+        assert stop(_empty()) is False  # streak 2
+        assert stop(_empty()) is True   # streak 3 → fire
+
+    def test_cars_reset_streak(self):
+        stop = self._stopper()
+        assert stop(_empty()) is False
+        assert stop(_empty()) is False
+        assert stop(_ok()) is False     # streak resets
+        assert stop(_empty()) is False
+        assert stop(_empty()) is False
+        assert stop(_empty()) is True   # fresh streak of 3
+
+    def test_none_resets_streak(self):
+        stop = self._stopper()
+        assert stop(_empty()) is False
+        assert stop(_empty()) is False
+        assert stop(None) is False      # error/None resets streak
+        assert stop(_empty()) is False
+        assert stop(_empty()) is False
+        assert stop(_empty()) is True   # fresh streak of 3
+
+    def test_two_consecutive_not_enough(self):
+        stop = self._stopper()
+        assert stop(_empty()) is False
+        assert stop(_empty()) is False
+        assert stop(_ok()) is False     # never fires with only 2 in a row
+
+    def test_custom_threshold(self):
+        stop = self._stopper(threshold=2)
+        assert stop(_empty()) is False
+        assert stop(_empty()) is True
+
+    def test_non_empty_result_never_fires(self):
+        stop = self._stopper()
+        for _ in range(10):
+            assert stop(_ok()) is False

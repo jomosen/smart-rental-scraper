@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 from abc import abstractmethod
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from ...domain.interfaces.scraper import IBookingScraper
 from ...domain.interfaces.driver import IBrowserDriver
@@ -32,7 +32,11 @@ class BaseScraper(IBookingScraper):
         self._provider: Optional[BookingProvider] = provider
         self._pause_range = pause_range
 
-    async def scrape_session(self, requests: List[SearchRequest]) -> List[BookingResult]:
+    async def scrape_session(
+        self,
+        requests: List[SearchRequest],
+        should_stop: Optional[Callable[[BookingResult], bool]] = None,
+    ) -> List[BookingResult]:
         """
         Executes multiple searches reusing the same browser session.
 
@@ -40,6 +44,9 @@ class BaseScraper(IBookingScraper):
         the fallback_searches in order (intra-session, without closing the browser).
         The first successful search uses _submit_form; subsequent ones use _refine_form.
         After any failure, the next action uses _submit_form to recover the session.
+
+        If should_stop is provided it is called after each result; returning True
+        breaks the loop early — the triggering result is still included in results.
         """
         results = []
         needs_full_submit = True
@@ -113,6 +120,12 @@ class BaseScraper(IBookingScraper):
                             errors=["All attempts failed"],
                         )
                 results.append(result)
+                if should_stop is not None and should_stop(result):
+                    logger.info(
+                        "[%s] Probe stopped early at search %d/%d",
+                        provider_name, ri + 1, len(requests),
+                    )
+                    break
         finally:
             await self.close()
         return results
