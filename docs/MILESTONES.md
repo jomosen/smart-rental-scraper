@@ -1178,3 +1178,120 @@ quedan pendientes.
   con la lógica correcta — probablemente vía flag en provider_rates o
   un campo nuevo en Recipe que indique cómo identificar la rate buscada
   dentro del HTML extraído.
+
+---
+
+## Milestone D4.x — Cadena de fixes de datos, clasificación y anti-detección
+
+**Goal.** Cerrar la cadena de bugs de datos destapada al integrar el scraper en
+el producto (extracción, calendario, clasificación), ampliar el catálogo ACRISS
+a la realidad de los proveedores, y añadir las primeras defensas de eficiencia
+(corte de probe) y anti-detección (macro-pausa).
+
+**What was built / fixed.**
+
+- **Extracción first-only (Centauro/RecipeScraper).** PricePointExtractor emitía
+  un price_point solo por el primer coche; ahora emite uno por cada coche.
+  Además, container.py construye el extractor con rate_name=None para scrapers
+  recipe-based (RecipeScraper emite Rate(name="default"), no el rate_name del
+  catálogo, que filtraba todo → 1 zona fallback). Resultado: de "1 zona plana,
+  faltan grupos" a "12 zonas, 23 grupos" en Centauro.
+
+- **Grupo guía + representative inteligente.** _select_guide_group elige el
+  car_group presente en más fechas del probe; _reassign_representatives pone la
+  representative_date en la fecha con más grupos disponibles. Robustece la
+  detección de zonas cuando la disponibilidad varía por fecha.
+
+- **€/día derivado del total.** smart_orchestrator deriva price_per_day =
+  total / duration_days (antes usaba rate.daily_price, incoherente — Solcar
+  mostraba "74€/día · 89€ total" a 1 día). El total es la fuente de verdad;
+  €/día se deriva, nunca al revés. Rate.daily_price ya no se persiste.
+
+- **Calendario de rango: cruce de mes.** Centauro usa react-calendar en modo
+  doble panel; el día "1" del mes siguiente aparece como celda --neighboringMonth
+  al final del panel anterior, y filter(has_text="1").nth(0) lo cogía →
+  rango de ~30 días en vez de 1 → precio inflado ~20x etiquetado como "1d".
+  Fix en date_calendar_filler.py: excluir celdas --neighboringMonth (función
+  pura _is_day_cell_excluded). 19 tests nuevos. Validado: sin precios disparados
+  en ningún cruce de mes en runs de 300 días.
+
+- **Catálogo ACRISS: 26 → 32 códigos.** Añadidos DFMR (SUV premium compacto
+  manual), CFAE (SUV eléctrico), EDAE (económico eléctrico), ETMR/ETAR
+  (descapotable económico manual/auto), CMAR (MPV compacto auto, explícitamente
+  distinto de SVAR furgoneta). Causa: grupos reales sin código adecuado; Gemini
+  los forzaba al más cercano o a NULL. Reseed idempotente. Los grupos mixtos de
+  Solcar (Tiguan+T-Roc→IFAR pending) ya clasificaban bien (regla de grupo mixto),
+  no requirieron códigos nuevos.
+
+- **D4-D: clasificación nunca NULL si hay código válido.** _parse_llm_item ya no
+  tira a NULL por baja confianza; conserva el código (mejor apuesta) con
+  pending_review=True si confidence < 0.85. NULL solo si no hay código o es
+  inventado. Prompt en modo best-guess. (El docstring de dtos.py se actualizó
+  para reflejarlo — antes mentía diciendo "atributos None cuando pending".)
+
+- **Victoria: detección de "sin precios" + cierre de modal.** Victoria muestra
+  un modal Materialize #msgbox cuando no hay tarifas; su lean-overlay bloqueaba
+  el #btnVolverBuscar del refine siguiente → timeout 30s. Fix: _parse_victoria_html
+  detecta #msgbox → BookingResult(is_confirmed_empty=True); _close_msgbox_if_open
+  cierra el modal y libera el overlay, llamado tanto tras detectarlo como
+  defensivamente al inicio de _refine_form. Eliminó los timeouts.
+
+- **Corte del probe por tramos vacíos (Opción B — callback should_stop).**
+  scrape_session acepta should_stop(result) opcional; el orchestrator pasa un
+  stopper SOLO para el probe que corta tras 3 tramos is_confirmed_empty
+  consecutivos (errores/coches resetean la racha). La extracción nunca corta.
+  Per-proveedor. Registrado en stats_jsonb. El probe deja de recorrer fechas sin
+  tarifas: la última zona termina donde acaban los datos reales, no en el final
+  del periodo. Validado en Victoria (paraba en marzo, ahora corta antes).
+
+- **Macro-pausa anti-detección.** Pausa larga aleatoria (20-40s) cada intervalo
+  aleatorio (5-10 min) entre búsquedas completas en scrape_session, heredada por
+  los tres scrapers. Reduce la firma de cadencia constante ante WAFs/Cloudflare,
+  sobre el stealth + IP residencial + micro-jitter ya existentes. Configurable
+  en .env, apagable (off en tests), cede prioridad a should_stop.
+
+**Decisiones tomadas.**
+
+- **El total es la fuente de verdad; €/día se deriva.** Nunca reconstruir el
+  total desde €/día.
+- **No materializar códigos ACRISS especulativos.** Solo los que muestran
+  proveedores reales; pending_review es la red para los futuros.
+- **Catálogo ampliado primero, lógica (D4-D) después, reclasificar una vez al
+  final** con ambos aplicados, para aislar la causa si algo sale raro.
+- **Corte del probe vía callback (Opción B), no recorte a posteriori (Opción A).**
+  La A no paraba el probe (solo recortaba zonas tras ejecutarlo entero); el
+  objetivo era ahorrar la ejecución de tramos vacíos, no solo descartarlos. El
+  criterio vive en el orchestrator (aplicación); scrape_session solo ejecuta el
+  callback (infraestructura), sin saber por qué para.
+- **is_confirmed_empty distingue vacío-confirmado de error.** Solo el vacío
+  confirmado cuenta para el corte; un error/timeout resetea la racha
+  (conservador: ante fallo dudoso, no cortar).
+- **Anti-detección preventiva justificada por asimetría de coste.** Volar bajo
+  radar es barato; recuperarse de un bloqueo Cloudflare es carísimo (semanas, o
+  pérdida del proveedor). Excepción consciente a "no optimizar preventivamente".
+
+**Lección transversal (recurrente, crítica).** Varias veces en la sesión un
+agente concluyó "es el proveedor, no es bug nuestro" y el dato real del usuario
+(verificación manual) lo desmintió. "El extractor lee bien el número" ≠ "el
+número es correcto". SIEMPRE pedir el dato real (trace, aria-label crudo,
+verificación visual, conteo) antes de diagnosticar. Comparar manzanas con
+manzanas (web=coches vs vista=categorías ACRISS agregadas; representative_date ≠
+fecha mirada en web).
+
+**Deferred.**
+
+- **Macro-pausa: keep-alive tras pausa.** Solo si se observa deslogueo de sesión
+  tras una pausa larga. No preventivo.
+- **Precios 1d de Victoria** (~100-130€/día para económico vs ~33€ a 7d):
+  probable recargo real de día suelto, verificar.
+- **Rate.daily_price**: ya no se persiste; considerar eliminarlo del modelo.
+- **Anti-detección fase 2** (cuando haya señal de bloqueo): patrón de navegación
+  más humano, rotación de proxies. Trigger: captchas/bans observados.
+- Resto de flecos D4 (modal cosmético Centauro, D4-E/G/H/I, particiones
+  automáticas de price_observations) siguen pendientes.
+
+**Closure.** Re-scrape de 300 días con todo aplicado: Centauro 12 zonas / 23
+grupos / 1838 obs / 0 disparados en cruces de mes; Solcar 1470 obs sin timeouts;
+Victoria sin timeouts del overlay y con corte del probe funcionando (zonas
+recortadas a donde acaban las tarifas). Clasificación sin NULL con el catálogo
+de 32 códigos. Tests verdes.
