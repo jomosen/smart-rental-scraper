@@ -35,6 +35,21 @@ The product organizes vehicles in three layers, each with a distinct role:
 
 - `tenant_vehicle_groups` — **optional, per-tenant taxonomy**. A tenant may declare its own naming for vehicle groups (e.g. "Compactos", "Familiares") and map them onto ACRISS codes via `tenant_vehicle_group_mappings`. This layer is **opt-in**: a tenant that uses ACRISS codes directly does not need to configure anything.
 
+**The interlingua mapping flow (current model).**
+
+The mapping path at query time is always:
+
+```
+tenant_vehicle_group
+    → tenant_vehicle_group_mappings.acriss_code
+        → provider_vehicle_categories WHERE acriss_code matches
+            → price_observations
+```
+
+There is **no direct tenant group ↔ provider group mapping**. ACRISS is the interlingua through which both sides are resolved independently: the provider's catalog is classified into ACRISS at scrape time; the tenant's groups are mapped to ACRISS codes at configuration time; the two are joined at query time. This means a tenant group definition is **provider-agnostic** — once a tenant declares "Compactos → {CDAR, CFAR}", that definition applies uniformly across any provider subscribed, regardless of what the provider calls its groups internally.
+
+The join is implemented in `PriceQueryService._resolve_mappings()` (`src/saas/application/price_query/service.py`): it goes from `tenant_vehicle_group_id` → `acriss_code` (via `TenantVehicleGroupMapping`) → `[pvc_id, …]` (via `ProviderVehicleCategory WHERE acriss_code = ?`). This is the single authoritative traversal. No other code path connects tenant groups to provider data.
+
 **Why three layers and not two.**
 
 The earlier model had only two layers (`provider_vehicle_groups` and `client_vehicle_groups`), connected by a per-tenant mapping. That model assumed `provider.external_code` was a stable identifier of a vehicle group. In practice, that assumption breaks: some providers do not expose group codes in their public results at all; some have stopped doing so after a website modernization; the model representatives shown for a group may rotate over time even when the underlying group is stable. Building product identity on `external_code` left the system fragile and unable to onboard providers that don't expose codes.
@@ -640,8 +655,8 @@ GROUP BY acriss_code, start_date, end_date, duration_days, currency;
 ```
 
 The application layer then:
-- Translates `canonical_type_id` to the tenant's label if applicable (via `tenant_vehicle_group_mappings`).
-- If the tenant maps multiple canonicals to a single tenant_vehicle_group, applies a second-level aggregation (default: `min` again) across canonicals.
+- Translates `acriss_code` to the tenant's label if applicable (via `tenant_vehicle_group_mappings`).
+- If the tenant maps multiple ACRISS codes to a single tenant_vehicle_group, applies a second-level aggregation (default: `min` again) across them.
 - Returns Format A directly, or expands to Format B if explicitly requested.
 
 ### Volume reasoning
@@ -672,6 +687,34 @@ The main index on `price_observations` is unchanged from the earlier design:
 ## Part 4 — Deliberately deferred
 
 These are concerns identified during design that the current model does **not** address, with explicit re-evaluation triggers.
+
+### PricingRule: canonical_type_id → acriss_code (ORM/migration debt, scheduled)
+
+The `pricing_rules` and `pricing_outputs` tables were created by migration
+`80486ab5bff3_create_tenant_tables_with_rls.py` using a pre-ACRISS column
+`canonical_type_id INTEGER` that referenced the now-deprecated custom taxonomy.
+The pseudo-DDL in Part 2 of this document already specifies the correct target
+schema (`acriss_code VARCHAR(4) FK → acriss_codes.code`), but the actual ORM
+models (`PricingRule` and `PricingOutput` in
+`src/saas/infrastructure/persistence/models/tenant.py`) still carry
+`canonical_type_id: Mapped[int]`. No repository exists yet for either model.
+
+**Gap to close:**
+
+1. Alembic migration: rename/replace `canonical_type_id` with
+   `acriss_code VARCHAR(4) NOT NULL FK → acriss_codes.code` on both tables.
+2. ORM update: replace `canonical_type_id: Mapped[int]` with
+   `acriss_code: Mapped[str] = mapped_column(String(4), ForeignKey(...))`.
+3. Repository: create `PricingRuleRepository` (at minimum: `create`, `get_active`,
+   `get_history_for_code`).
+4. Tenant isolation test: verify that `pricing_rules` RLS isolates across tenants.
+
+**Trigger / scheduled.** This debt is saldada in the "Tarifa cruzada y
+persistencia de configuración de pricing" milestone. Until then, `pricing_rules`
+and `pricing_outputs` are structurally present in the DB but not used by any
+application code.
+
+---
 
 ### Authentication provider choice
 

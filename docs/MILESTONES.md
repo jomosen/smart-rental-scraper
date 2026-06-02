@@ -1295,3 +1295,110 @@ grupos / 1838 obs / 0 disparados en cruces de mes; Solcar 1470 obs sin timeouts;
 Victoria sin timeouts del overlay y con corte del probe funcionando (zonas
 recortadas a donde acaban las tarifas). Clasificación sin NULL con el catálogo
 de 32 códigos. Tests verdes.
+
+### Próximo bloque — Health monitor / observabilidad de ingesta (capacidad 5 del MVP)
+
+**Qué es.** La capacidad (5) "Observabilidad de la ingesta" del ROADMAP_ARCHITECTURE.md:
+saber cuándo un scraper (custom o recipe) falla o se degrada y requiere atención,
+antes de tomar decisiones de pricing con datos viejos.
+
+**PREGUNTA ABIERTA A RESOLVER PRIMERO (define el diseño):**
+¿El RecipeScraper se auto-regenera cuando el recipe se rompe, o solo DETECTA la
+rotura? Vimos detección (has_empty_page, check_recipe_health en scraper_engine.py)
+pero NO se confirmó que exista disparo automático de re-generación del recipe vía
+builder. Sospecha: detecta pero NO se regenera solo (requiere lanzar el builder a
+mano). Confirmar con:
+`Select-String -Path "src/scraper/**/*.py" -Pattern "check_recipe_health|regenerate|rebuild|recipe.*broken|invalidate|re-?generat" -Context 2,4`
+- Si NO se auto-regenera → "recipe roto" = alerta de MÁXIMA urgencia (ingesta parada
+  hasta regeneración manual).
+- Si SÍ → alerta menos urgente ("roto, regenerándose, vigila que lo consiga").
+
+**Diseño por niveles (no construir todo de golpe):**
+- Nivel 1 (casi hecho): cada run deja registro completo en scrape_runs (status,
+  stats_jsonb, error, volumen, duración) + structured logging JSON a stdout.
+  Verificar qué registra hoy y pulir. Punto de partida:
+  `Select-String -Path "src/scraper/**/*.py" -Pattern "scrape_run|mark_finished|stats_jsonb|logger\.(error|warning)" -Context 1,2`
+- Nivel 2 (lo nuevo): componente/endpoint que compute salud AGREGADA en el tiempo:
+  tasa de éxito por proveedor (últimas 24h/N runs), último run OK, staleness por
+  tupla (vía price_observation_heartbeats.last_checked_at), volumen vs histórico.
+  El /admin/health del roadmap. Empezar como query/script, no dashboard.
+- Nivel 3 (al final): alertas cuando una señal cruza umbral (Sentry para errores;
+  email/log/webhook para degradaciones).
+
+**Señales que debe vigilar (= los bugs que cazamos a mano esta sesión):**
+- Run(s) fallido(s) — alarma si varios CONSECUTIVOS (uno aislado puede ser timeout).
+- Tasa de éxito por proveedor cayendo.
+- Staleness: sin observaciones nuevas en X días (rota aunque el run "no falle").
+- Recipe roto (recipe scrapers): distinguir has_empty_page legítimo (sin precios)
+  de breakage (recipe no encuentra elementos).
+- Caída de volumen: run que producía 1800 obs ahora produce 200 sin fallar
+  (= la "pérdida de grupos" de Centauro de esta sesión).
+- Anomalías de datos (avanzado/fase 2): precios disparados (bug calendario),
+  €/día incoherente.
+
+**Distinción custom vs recipe en las alertas:**
+- Custom (Victoria/Solcar): se rompen por cambio de selector/estructura → alerta
+  "requiere fix de código del scraper".
+- Recipe (Centauro): rotura del recipe → alerta según auto-regeneración (ver
+  pregunta abierta arriba).
+
+**Justificación:** un health monitor con estas señales habría detectado
+automáticamente el bug del calendario, la pérdida de grupos y el €/día incoherente
+que esta sesión cazó a mano. Convierte diagnóstico manual en alerta automática.
+
+**Encaje:** probablemente parte natural de la API read-only (candidato 5A), donde
+vive el /admin/health. Milestone propio, arrancar fresco.
+
+---
+
+## Milestone D5 — Tarifa cruzada y persistencia de configuración de pricing
+
+**Estado:** abierto (objetivo definido, sin implementación iniciada).
+
+**Objetivo.** Dar al operador una vista que cruce hasta 3 proveedores por código
+ACRISS en una sola tabla, con agregación (min / med / avg / máx) por categoría y
+duración, y la capacidad de definir un precio recomendado por categoría aplicando
+una regla con suelo, techo y redondeo, persistiendo esa configuración como
+`pricing_rule` versionada por tenant.
+
+**Alcance concreto.**
+
+1. **Vista de tarifa cruzada (Streamlit).** Nueva pestaña o extensión de la pestaña
+   "Tarifa por proveedor" que permite seleccionar 2-3 proveedores simultáneamente,
+   agrupa filas por `acriss_code` (interlingua), y muestra para cada
+   (código, zona, duración) las columnas min / med / avg / máx sobre los precios
+   de los proveedores seleccionados. Los datos proceden del mismo mecanismo actual
+   (`fetch_tariff_table` extendido o query nueva), sin nueva capa de servicio hasta
+   que haya API.
+
+2. **Precio recomendado por categoría.** A partir de la agregación, el operador
+   configura una regla por (tenant, acriss_code): base (p. ej. avg de proveedores),
+   multiplicador, suelo y techo opcionales, redondeo. El resultado es el
+   `computed_price` de `pricing_outputs`.
+
+3. **Persistencia de `pricing_rules` y `pricing_outputs`.** Crear el repositorio
+   `PricingRuleRepository` (upsert con versioning: nueva fila con `version N+1`,
+   `superseded_at` en la anterior). Aplicar las reglas y persistir en
+   `pricing_outputs` con `inputs_snapshot_jsonb` completo. Respetar RLS
+   (tenant-scoped).
+
+4. **Saldo de la deuda `canonical_type_id → acriss_code`.** Migración Alembic que
+   reemplaza `canonical_type_id INTEGER` por `acriss_code VARCHAR(4) FK →
+   acriss_codes.code` en `pricing_rules` y `pricing_outputs`. Actualizar los ORM
+   correspondientes. Este es el prerequisito técnico del punto 3.
+
+**Decisiones tomadas (pre-milestone).**
+
+- **ACRISS como única llave de las reglas.** Una `pricing_rule` se aplica a un
+  `acriss_code`, no a un grupo de proveedor ni a un `tenant_vehicle_group`. Los
+  tenants con grupos propios resuelven hacia ACRISS al aplicar la regla, igual
+  que hacen en las consultas de precio.
+- **Versioning de reglas: append-only con supersesión.** Editar una regla crea una
+  nueva fila con `version N+1`; la anterior se marca `superseded_at + superseded_by_id`.
+  No hay UPDATE in-place. `pricing_outputs.rule_id` apunta a la versión exacta usada.
+- **La vista cruzada lee directo de BD (BYPASSRLS) mientras no haya API.** Igual
+  que las vistas actuales de Streamlit. Sin nueva capa de servicio previa hasta
+  que exista el endpoint HTTP.
+- **Agregación cruzada siempre a nivel ACRISS.** El cruce de proveedores se hace
+  sobre el código ACRISS común, no sobre nombres de grupo ni sobre agrupaciones
+  del tenant. Esto es posible porque la clasificación ya es la interlingua.
