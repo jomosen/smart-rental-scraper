@@ -91,6 +91,13 @@ table.ct-table tr.rec-row td.cat {
     font-weight: 600;
     vertical-align: top;
 }
+table.ct-table tr.rec-row td.cat .models {
+    font-size: 0.76em;
+    color: #97a0b0;
+    font-weight: 400;
+    margin-top: 3px;
+    line-height: 1.4;
+}
 table.ct-table td.cell {
     padding: 7px 10px;
     border: 1px solid #e6e9f0;
@@ -305,6 +312,22 @@ def _build_grid_html(
         cell_results.get((c, 7), CellResult(c, 7, None, None, None, None, None, None, None)).rec_total or 9999
     ))
 
+    # Collect unique example_models per ACRISS code across all providers/groups.
+    code_to_models: dict[str, str] = {}
+    for code in codes:
+        raw = (
+            zone_df[zone_df["acriss_code"] == code]["example_models"]
+            .dropna()
+            .unique()
+        )
+        seen: list[str] = []
+        for entry in raw:
+            for m in str(entry).split(","):
+                m = m.strip()
+                if m and m not in seen:
+                    seen.append(m)
+        code_to_models[code] = "<br>".join(_html.escape(m) for m in seen)
+
     rows: list[str] = []
     for code in codes:
         meta = acriss_meta.loc[code]
@@ -316,8 +339,10 @@ def _build_grid_html(
             f"— {_html.escape(code)}</td></tr>"
         )
 
-        # Recommended row
-        cells = ["<td class='cat'>Recomendado</td>"]
+        # Recommended row — category cell includes example models
+        models_html = code_to_models.get(code, "")
+        models_div = f"<div class='models'>{models_html}</div>" if models_html else ""
+        cells = [f"<td class='cat'>Recomendado{models_div}</td>"]
         for dur in durations:
             cr = cell_results.get((code, dur))
             if cr is None or cr.rec_total is None:
