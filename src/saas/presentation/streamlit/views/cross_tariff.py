@@ -208,40 +208,24 @@ def _default_rule() -> dict:
 # ── Zone alignment ───────────────────────────────────────────────────────────
 
 def _master_zones(df: pd.DataFrame, master: str) -> pd.DataFrame:
-    """Return one synthetic zone per unique representative_date of the master provider.
-
-    Each zone groups all master groups scraped on the same representative_date,
-    using min(start_date) / max(end_date) for the display label only.
-    Navigating by representative_date guarantees that every master group
-    appears in exactly one zone step.
-    """
-    mdf = (
-        df[df["provider_code"] == master]
-        .groupby("representative_date", as_index=False)
-        .agg(start_date=("start_date", "min"), end_date=("end_date", "max"))
-        .sort_values("representative_date")
-        .reset_index(drop=True)
-    )
-    return mdf  # columns: representative_date, start_date, end_date
+    """Return unique (start_date, end_date) rows from the master provider, sorted."""
+    mdf = df[df["provider_code"] == master][["start_date", "end_date"]].drop_duplicates()
+    return mdf.sort_values("start_date").reset_index(drop=True)
 
 
-def _filter_zone(df: pd.DataFrame, master: str, rep_date: date,
-                 start: date, end: date) -> pd.DataFrame:
-    """Return all rows relevant to one synthetic zone.
-
-    Master rows: all groups with exactly this representative_date.
-    Non-master rows: groups whose representative_date falls within [start, end]
-                     (the span of the master's synthetic zone) and whose
-                     ACRISS code appears in the master snapshot.
-    """
+def _filter_zone(df: pd.DataFrame, master: str, start: date, end: date) -> pd.DataFrame:
+    """Keep rows where the provider's representative_date falls inside [start, end]."""
     master_rows = df[
         (df["provider_code"] == master) &
-        (df["representative_date"] == rep_date)
+        (df["start_date"] == start) &
+        (df["end_date"] == end)
     ]
     acriss_in_zone = set(master_rows["acriss_code"].unique())
     if not acriss_in_zone:
         return pd.DataFrame(columns=df.columns)
 
+    # For each non-master provider, find rows whose representative_date is
+    # within [start, end] and whose ACRISS code appears in the master zone.
     def _in_window(grp):
         return grp[
             (grp["representative_date"] >= start) &
@@ -707,19 +691,19 @@ def render_cross_tariff() -> None:
         z = zones.iloc[idx]
         start_s = pd.Timestamp(z["start_date"]).strftime("%d %b %Y")
         end_s = pd.Timestamp(z["end_date"]).strftime("%d %b %Y")
-        rep_s = pd.Timestamp(z["representative_date"]).strftime("%d %b %Y")
         st.markdown(f"#### {start_s} – {end_s} &nbsp;·&nbsp; zona {idx + 1} / {n_zones}")
 
-    zone_df = _filter_zone(
-        df, master,
-        rep_date=z["representative_date"],
-        start=z["start_date"],
-        end=z["end_date"],
-    )
+    zone_df = _filter_zone(df, master, z["start_date"], z["end_date"])
 
+    rep_dates = sorted(zone_df[zone_df["provider_code"] == master]["representative_date"].unique())
+    rep_label = (
+        pd.Timestamp(rep_dates[0]).strftime("%d %b %Y") if len(rep_dates) == 1
+        else f"{pd.Timestamp(rep_dates[0]).strftime('%d %b')} – {pd.Timestamp(rep_dates[-1]).strftime('%d %b %Y')}"
+        if rep_dates else "—"
+    )
     st.caption(
         f"Maestro: **{master}** · {', '.join(providers)} · "
-        f"fecha repr.: {rep_s} · precios en total (€) + €/día derivado"
+        f"fecha repr.: {rep_label} · precios en total (€) + €/día derivado"
     )
 
     # ── Compute grid ─────────────────────────────────────────────────────────
