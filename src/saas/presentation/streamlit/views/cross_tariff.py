@@ -342,7 +342,7 @@ def _build_grid_html(
         # Recommended row — category cell includes example models
         models_html = code_to_models.get(code, "")
         models_div = f"<div class='models'>{models_html}</div>" if models_html else ""
-        cells = [f"<td class='cat'>Recomendado{models_div}</td>"]
+        cells = [f"<td class='cat'>Precio recomendado{models_div}</td>"]
         for dur in durations:
             cr = cell_results.get((code, dur))
             if cr is None or cr.rec_total is None:
