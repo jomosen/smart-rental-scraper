@@ -310,21 +310,39 @@ def _build_grid_html(
         cell_results.get((c, 7), CellResult(c, 7, None, None, None, None, None, None, None)).rec_total or 9999
     ))
 
-    # Collect unique example_models per ACRISS code across all providers/groups.
+    # Collect example_models per ACRISS code, sorted cheapest-first.
+    # Each row in zone_df belongs to one provider group and has a total_price.
+    # We use the min total_price per (example_models string) as sort key so that
+    # groups with cheaper totals appear first in the list.
     code_to_models: dict[str, str] = {}
+    ref_dur = 7  # reference duration for sorting; fall back to any available
     for code in codes:
-        raw = (
-            zone_df[zone_df["acriss_code"] == code]["example_models"]
-            .dropna()
-            .unique()
-        )
-        seen: list[str] = []
-        for entry in raw:
-            for m in str(entry).split(","):
+        code_df = zone_df[zone_df["acriss_code"] == code].dropna(subset=["example_models"])
+        # Pick one reference duration per row (prefer 7d, else take the first available)
+        avail_durs = code_df["duration_days"].unique()
+        dur = ref_dur if ref_dur in avail_durs else (avail_durs[0] if len(avail_durs) else None)
+        if dur is not None:
+            ref_df = code_df[code_df["duration_days"] == dur]
+        else:
+            ref_df = code_df
+
+        # Build {example_models_string: min_total} mapping
+        price_by_models: dict[str, float] = {}
+        for _, row in ref_df.iterrows():
+            key = str(row["example_models"])
+            price = float(row["total_price"]) if row["total_price"] is not None else 9999.0
+            price_by_models[key] = min(price_by_models.get(key, 9999.0), price)
+
+        # Expand each entry into individual model names, inheriting the group's price
+        seen: dict[str, float] = {}  # model_name → sort_price
+        for entry, sort_price in sorted(price_by_models.items(), key=lambda x: x[1]):
+            for m in entry.split(","):
                 m = m.strip()
                 if m and m not in seen:
-                    seen.append(m)
-        code_to_models[code] = "<br>".join(_html.escape(m) for m in seen)
+                    seen[m] = sort_price
+
+        ordered = sorted(seen.keys(), key=lambda m: seen[m])
+        code_to_models[code] = "<br>".join(_html.escape(m) for m in ordered)
 
     rows: list[str] = []
     for code in codes:
@@ -340,7 +358,7 @@ def _build_grid_html(
         # Recommended row — category cell includes example models
         models_html = code_to_models.get(code, "")
         models_div = f"<div class='models'>{models_html}</div>" if models_html else ""
-        cells = [f"<td class='cat'>Precio recomendado{models_div}</td>"]
+        cells = [f"<td class='cat'>{models_div}</td>"]
         for dur in durations:
             cr = cell_results.get((code, dur))
             if cr is None or cr.rec_total is None:
