@@ -217,8 +217,8 @@ def _filter_zone(df: pd.DataFrame, master: str, start: date, end: date) -> pd.Da
     """Keep rows where the provider's representative_date falls inside [start, end]."""
     master_rows = df[
         (df["provider_code"] == master) &
-        (df["start_date"] == start) &
-        (df["end_date"] == end)
+        (df["representative_date"] >= start) &
+        (df["representative_date"] <= end)
     ]
     acriss_in_zone = set(master_rows["acriss_code"].unique())
     if not acriss_in_zone:
