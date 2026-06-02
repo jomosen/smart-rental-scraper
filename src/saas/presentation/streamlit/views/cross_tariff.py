@@ -96,7 +96,15 @@ table.ct-table tr.rec-row td.cat .models {
     color: #97a0b0;
     font-weight: 400;
     margin-top: 3px;
-    line-height: 1.4;
+    line-height: 1.6;
+}
+table.ct-table tr.rec-row td.cat .pname {
+    font-weight: 600;
+    color: #5a6577;
+}
+table.ct-table tr.rec-row td.cat .tx {
+    color: #b0b8c8;
+    font-size: 0.92em;
 }
 table.ct-table td.cell {
     padding: 7px 10px;
@@ -143,7 +151,7 @@ table.ct-table td.cell.empty { color: #ccc; text-align: center; }
     font-size: 0.68em;
     white-space: nowrap;
 }
-.fbadge.cov  { background:#f0f2f6; color:#5a6577; font-size: 0.80em; padding: 2px 7px; }
+.fbadge.cov  { background:#f0f2f6; color:#7a8498; font-size: 0.80em; padding: 2px 7px; }
 .fbadge.clamp{ background:#fdf5e6; color:#c9871f; }
 .fbadge.anom { background:#fcebed; color:#d63a4e; }
 
@@ -310,39 +318,44 @@ def _build_grid_html(
         cell_results.get((c, 7), CellResult(c, 7, None, None, None, None, None, None, None)).rec_total or 9999
     ))
 
-    # Collect example_models per ACRISS code, sorted cheapest-first.
-    # Each row in zone_df belongs to one provider group and has a total_price.
-    # We use the min total_price per (example_models string) as sort key so that
-    # groups with cheaper totals appear first in the list.
+    # Collect example_models per ACRISS code.
+    # Each line: "Provider · models (Transmission)", sorted cheapest group first.
     code_to_models: dict[str, str] = {}
-    ref_dur = 7  # reference duration for sorting; fall back to any available
+    ref_dur = 7
     for code in codes:
         code_df = zone_df[zone_df["acriss_code"] == code].dropna(subset=["example_models"])
-        # Pick one reference duration per row (prefer 7d, else take the first available)
         avail_durs = code_df["duration_days"].unique()
         dur = ref_dur if ref_dur in avail_durs else (avail_durs[0] if len(avail_durs) else None)
-        if dur is not None:
-            ref_df = code_df[code_df["duration_days"] == dur]
-        else:
-            ref_df = code_df
+        ref_df = code_df[code_df["duration_days"] == dur] if dur is not None else code_df
 
-        # Build {example_models_string: min_total} mapping
-        price_by_models: dict[str, float] = {}
-        for _, row in ref_df.iterrows():
-            key = str(row["example_models"])
-            price = float(row["total_price"]) if row["total_price"] is not None else 9999.0
-            price_by_models[key] = min(price_by_models.get(key, 9999.0), price)
+        seen_keys: set = set()
+        lines: list[tuple[float, str]] = []
+        for _, row in ref_df.sort_values("total_price").iterrows():
+            key = (str(row["provider_code"]), str(row["example_models"]))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
 
-        # Expand each entry into individual model names, inheriting the group's price
-        seen: dict[str, float] = {}  # model_name → sort_price
-        for entry, sort_price in sorted(price_by_models.items(), key=lambda x: x[1]):
-            for m in entry.split(","):
-                m = m.strip()
-                if m and m not in seen:
-                    seen[m] = sort_price
+            pname = str(row["provider_code"]).capitalize()
+            models_escaped = _html.escape(str(row["example_models"]).strip())
+            price = float(row["total_price"]) if pd.notna(row["total_price"]) else 9999.0
 
-        ordered = sorted(seen.keys(), key=lambda m: seen[m])
-        code_to_models[code] = "<br>".join(_html.escape(m) for m in ordered)
+            # Resolve transmission: prefer scraped value, fall back to ACRISS char
+            tx: str | None = None
+            if pd.notna(row.get("transmission")) and row["transmission"]:
+                tx = "Manual" if str(row["transmission"]).lower().startswith("m") else "Auto"
+            elif pd.notna(row.get("acriss_transmission")) and row["acriss_transmission"]:
+                at = str(row["acriss_transmission"]).upper()
+                tx = "Manual" if at == "M" else ("Auto" if at in ("A", "B", "D") else None)
+
+            tx_html = f" <span class='tx'>({tx})</span>" if tx else ""
+            line = (
+                f"<span class='pname'>{_html.escape(pname)}</span>"
+                f" · {models_escaped}{tx_html}"
+            )
+            lines.append((price, line))
+
+        code_to_models[code] = "<br>".join(ln for _, ln in lines)
 
     rows: list[str] = []
     for code in codes:
