@@ -83,6 +83,14 @@ table.ct-table tr.acriss-hdr td {
     border: 1px solid #d5e0fb;
     color: #3949ab;
 }
+table.ct-table tr.acriss-hdr td.dur-hdr {
+    text-align: center;
+    font-size: 0.80em;
+    font-weight: 600;
+    color: #6b83cc;
+    padding: 7px 8px;
+    white-space: nowrap;
+}
 
 /* Recommended row */
 table.ct-table tr.rec-row td.cat {
@@ -303,11 +311,7 @@ def _build_grid_html(
     if zone_df.empty:
         return "<p style='color:#97a0b0'>Sin datos para esta zona.</p>"
 
-    header = (
-        "<tr><th class='cat-col'>Categoría</th>"
-        + "".join(f"<th>{d}d</th>" for d in durations)
-        + "</tr>"
-    )
+    dur_cells = "".join(f"<td class='dur-hdr'>{d}d</td>" for d in durations)
 
     acriss_meta = (
         zone_df[["acriss_code", "acriss_display_name", "pending_review"]]
@@ -363,9 +367,9 @@ def _build_grid_html(
         has_pending = bool(meta["pending_review"])
         badge = "🔍 " if has_pending else ""
         rows.append(
-            f"<tr class='acriss-hdr'><td colspan='{len(durations)+1}'>"
-            f"{badge}{_html.escape(str(meta['acriss_display_name']))} "
-            f"— {_html.escape(code)}</td></tr>"
+            f"<tr class='acriss-hdr'>"
+            f"<td>{badge}{_html.escape(str(meta['acriss_display_name']))} — {_html.escape(code)}</td>"
+            f"{dur_cells}</tr>"
         )
 
         # Recommended row — category cell includes example models
@@ -380,13 +384,6 @@ def _build_grid_html(
 
             flags_html = ""
             badges = []
-            if cr.flags.coverage < n_providers:
-                missing = n_providers - cr.flags.coverage
-                badges.append(
-                    f"<span class='fbadge cov'>"
-                    f"{cr.flags.coverage} de {n_providers} proveedores"
-                    f"</span>"
-                )
             if cr.flags.clamped:
                 badges.append(f"<span class='fbadge clamp'>{cr.flags.clamped}</span>")
             if cr.flags.degraded:
@@ -420,10 +417,7 @@ def _build_grid_html(
             mkt_cells.append(f"<td class='mkt-row'><span class='mm'>{rng}</span></td>")
         rows.append(f"<tr class='mkt-row'>{''.join(mkt_cells)}</tr>")
 
-    return (
-        f"<table class='ct-table'><thead>{header}</thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
-    )
+    return f"<table class='ct-table'><tbody>{''.join(rows)}</tbody></table>"
 
 
 # ── Cell breakdown (replaces drawer) ────────────────────────────────────────
