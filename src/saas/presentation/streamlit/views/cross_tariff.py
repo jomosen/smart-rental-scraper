@@ -143,11 +143,9 @@ table.ct-table td.cell.empty { color: #ccc; text-align: center; }
     font-size: 0.68em;
     white-space: nowrap;
 }
-.fbadge.cov  { background:#f0f2f6; color:#7a8498; }
+.fbadge.cov  { background:#f0f2f6; color:#5a6577; font-size: 0.80em; padding: 2px 7px; }
 .fbadge.clamp{ background:#fdf5e6; color:#c9871f; }
-.fbadge.stale{ background:#efecfb; color:#7a6cd6; }
 .fbadge.anom { background:#fcebed; color:#d63a4e; }
-.fbadge.inf  { background:#eef2fd; color:#3a63d6; }
 
 /* Market summary row */
 table.ct-table tr.mkt-row td {
@@ -352,14 +350,16 @@ def _build_grid_html(
             flags_html = ""
             badges = []
             if cr.flags.coverage < n_providers:
-                badges.append(f"<span class='fbadge cov'>{cr.flags.coverage}/{n_providers}</span>")
+                missing = n_providers - cr.flags.coverage
+                badges.append(
+                    f"<span class='fbadge cov'>"
+                    f"{cr.flags.coverage} de {n_providers} proveedores"
+                    f"</span>"
+                )
             if cr.flags.clamped:
                 badges.append(f"<span class='fbadge clamp'>{cr.flags.clamped}</span>")
-            if cr.flags.stale:
-                badges.append("<span class='fbadge stale'>stale</span>")
             if cr.flags.degraded:
-                badges.append("<span class='fbadge anom'>anomalía</span>")
-            # inferred is always True in V0 (all prices from zone representative) — omitted
+                badges.append("<span class='fbadge anom'>anomalía descartada</span>")
             if badges:
                 flags_html = f"<div class='badge-row'>{''.join(badges)}</div>"
 
