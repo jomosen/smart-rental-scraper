@@ -359,8 +359,7 @@ def _build_grid_html(
                 badges.append("<span class='fbadge stale'>stale</span>")
             if cr.flags.degraded:
                 badges.append("<span class='fbadge anom'>anomalía</span>")
-            if cr.flags.inferred:
-                badges.append("<span class='fbadge inf'>zona</span>")
+            # inferred is always True in V0 (all prices from zone representative) — omitted
             if badges:
                 flags_html = f"<div class='badge-row'>{''.join(badges)}</div>"
 
@@ -704,11 +703,10 @@ def render_cross_tariff() -> None:
 
     # ── Legend ───────────────────────────────────────────────────────────────
     st.caption(
-        "🔢 cobertura parcial &nbsp;·&nbsp; "
+        "🔢 cobertura parcial (proveedores con dato) &nbsp;·&nbsp; "
         "🟡 clamp suelo/techo &nbsp;·&nbsp; "
         "🟣 stale &nbsp;·&nbsp; "
-        "🔴 anomalía descartada &nbsp;·&nbsp; "
-        "🔵 precio de zona (inferido)"
+        "🔴 anomalía descartada"
     )
 
     # ── Cell breakdown ───────────────────────────────────────────────────────
