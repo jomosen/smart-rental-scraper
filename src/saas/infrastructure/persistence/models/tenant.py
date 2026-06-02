@@ -175,6 +175,13 @@ class TenantSubscription(Base):
 
 
 class PricingRule(Base):
+    """Versioned cross-provider pricing configuration for one tenant.
+
+    acriss_code is NULL for a "global config" rule (one rule covers all
+    categories, with per-category overrides stored inside formula_jsonb).
+    See MILESTONES.md D5: versioning is of the complete configuration, not
+    per category — per-category versioning would require a different model.
+    """
     __tablename__ = "pricing_rules"
     __table_args__ = (
         CheckConstraint(
@@ -187,7 +194,11 @@ class PricingRule(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_rules_tenant", ondelete="RESTRICT"), nullable=False
     )
-    canonical_type_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    acriss_code: Mapped[Optional[str]] = mapped_column(
+        String(4),
+        ForeignKey("acriss_codes.code", name="fk_pricing_rules_acriss_code", ondelete="RESTRICT"),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     condition_jsonb: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
@@ -211,7 +222,11 @@ class PricingOutput(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_pricing_outputs_tenant", ondelete="RESTRICT"), nullable=False
     )
-    canonical_type_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    acriss_code: Mapped[Optional[str]] = mapped_column(
+        String(4),
+        ForeignKey("acriss_codes.code", name="fk_pricing_outputs_acriss_code", ondelete="RESTRICT"),
+        nullable=True,
+    )
     pickup_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     computed_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)

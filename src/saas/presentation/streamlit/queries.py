@@ -491,3 +491,146 @@ def fetch_tariff_table(
     return _fetch_tariff_table_impl(
         _get_engine(), provider_code, acriss_codes, durations, include_pending_review,
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-tariff table (multi-provider)
+# ---------------------------------------------------------------------------
+
+_CROSS_TARIFF_COLUMNS = [
+    "acriss_code", "acriss_display_name",
+    "provider_code", "external_code", "example_models",
+    "transmission", "acriss_transmission", "pending_review",
+    "start_date", "end_date", "representative_date",
+    "duration_days", "price_per_day", "total_price",
+]
+
+
+def _fetch_cross_tariff_impl(
+    engine: Engine,
+    provider_codes: tuple[str, ...],
+    acriss_codes: tuple[str, ...] | None = None,
+    durations: tuple[int, ...] = DURATION_BRACKET,
+    include_pending_review: bool = True,
+) -> pd.DataFrame:
+    """Fetch tariff data for multiple providers, aligned to their own zones.
+
+    Each row represents one (provider, acriss_code, zone, duration) observation.
+    Zone alignment to a master provider is done in the view layer, not here.
+    """
+    if not provider_codes:
+        return pd.DataFrame(columns=_CROSS_TARIFF_COLUMNS)
+
+    acriss_clause = "AND pvc.acriss_code = ANY(:acriss_codes)" if acriss_codes else ""
+    pending_clause = "" if include_pending_review else "AND pvc.pending_review = FALSE"
+
+    params: dict = {
+        "provider_codes": list(provider_codes),
+        "durations": list(durations),
+    }
+    if acriss_codes:
+        params["acriss_codes"] = list(acriss_codes)
+
+    sql = text(f"""
+        WITH latest_obs AS (
+            SELECT DISTINCT ON (po.provider_vehicle_category_id, po.pickup_date, po.duration_days)
+                   po.provider_vehicle_category_id,
+                   po.pickup_date,
+                   po.duration_days,
+                   po.price_per_day,
+                   po.total_price
+            FROM   price_observations po
+            JOIN   providers p ON p.id = po.provider_id
+            WHERE  p.code = ANY(:provider_codes)
+              AND  po.duration_days = ANY(:durations)
+            ORDER  BY po.provider_vehicle_category_id, po.pickup_date,
+                      po.duration_days, po.observed_at DESC
+        ),
+        zones AS (
+            SELECT pvc.acriss_code,
+                   ac.display_name  AS acriss_display_name,
+                   pvc.external_code,
+                   pvc.example_models,
+                   pvc.transmission,
+                   pvc.acriss_transmission,
+                   pvc.pending_review,
+                   hz.start_date,
+                   hz.end_date,
+                   hz.representative_date,
+                   hz.provider_vehicle_category_id,
+                   p.code           AS provider_code
+            FROM   homogeneous_zones hz
+            JOIN   provider_vehicle_categories pvc ON pvc.id = hz.provider_vehicle_category_id
+            JOIN   providers    p   ON p.id    = pvc.provider_id
+            JOIN   acriss_codes ac  ON ac.code = pvc.acriss_code
+            WHERE  hz.active       = TRUE
+              AND  pvc.active      = TRUE
+              AND  pvc.acriss_code IS NOT NULL
+              AND  p.code          = ANY(:provider_codes)
+              {acriss_clause}
+              {pending_clause}
+        )
+        SELECT z.acriss_code,
+               z.acriss_display_name,
+               z.provider_code,
+               z.external_code,
+               z.example_models,
+               z.transmission,
+               z.acriss_transmission,
+               z.pending_review,
+               z.start_date,
+               z.end_date,
+               z.representative_date,
+               lo.duration_days,
+               lo.price_per_day,
+               lo.total_price
+        FROM   zones z
+        JOIN   latest_obs lo
+                   ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
+                  AND lo.pickup_date = z.representative_date
+        ORDER  BY z.acriss_code, z.provider_code, z.external_code,
+                  z.start_date, lo.duration_days
+    """)
+
+    with engine.connect() as conn:
+        result = conn.execute(sql, params)
+        rows = result.fetchall()
+        cols = list(result.keys())
+
+    if not rows:
+        return pd.DataFrame(columns=_CROSS_TARIFF_COLUMNS)
+    return pd.DataFrame(rows, columns=cols)
+
+
+@st.cache_data(ttl=60)
+def fetch_cross_tariff_table(
+    provider_codes: tuple[str, ...],
+    acriss_codes: tuple[str, ...] | None,
+    durations: tuple[int, ...],
+    include_pending_review: bool,
+) -> pd.DataFrame:
+    return _fetch_cross_tariff_impl(
+        _get_engine(), provider_codes, acriss_codes, durations, include_pending_review,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tenant helpers (for saving pricing rules from the back-office dashboard)
+# ---------------------------------------------------------------------------
+
+def get_operator_tenant_id() -> "uuid.UUID | None":
+    """Return the UUID of the first tenant in the DB, or None if none exist.
+
+    The back-office dashboard operates as BYPASSRLS (super_engine). This
+    helper picks a tenant to associate the saved pricing rule with. In a
+    multi-tenant production deployment, the dashboard would require explicit
+    tenant selection; for V0 the operator is assumed to be working with the
+    only tenant in their local instance.
+    """
+    import uuid as _uuid
+    sql = text("SELECT id FROM tenants ORDER BY created_at LIMIT 1")
+    with _get_engine().connect() as conn:
+        row = conn.execute(sql).fetchone()
+    if row is None:
+        return None
+    return _uuid.UUID(str(row[0]))

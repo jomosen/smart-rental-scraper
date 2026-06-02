@@ -24,6 +24,7 @@ from src.saas.presentation.streamlit.filters import render_sidebar_filters
 from src.saas.presentation.streamlit.views.overview import render_overview
 from src.saas.presentation.streamlit.views.timeline import render_timeline
 from src.saas.presentation.streamlit.views.tariff import render_tariff
+from src.saas.presentation.streamlit.views.cross_tariff import render_cross_tariff
 
 st.set_page_config(
     page_title="Smart Rental — Mercado",
@@ -36,10 +37,11 @@ st.caption("Comparativa de precios entre providers por categoría ACRISS")
 
 filters = render_sidebar_filters()
 
-tab_overview, tab_timeline, tab_tariff = st.tabs([
+tab_overview, tab_timeline, tab_tariff, tab_cross = st.tabs([
     "📊 Visión general",
     "📈 Evolución temporal",
     "📋 Tarifa por proveedor",
+    "🎯 Tarifa cruzada",
 ])
 
 with tab_overview:
@@ -50,3 +52,6 @@ with tab_timeline:
 
 with tab_tariff:
     render_tariff(filters)
+
+with tab_cross:
+    render_cross_tariff()

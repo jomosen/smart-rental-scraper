@@ -1402,3 +1402,12 @@ una regla con suelo, techo y redondeo, persistiendo esa configuración como
 - **Agregación cruzada siempre a nivel ACRISS.** El cruce de proveedores se hace
   sobre el código ACRISS común, no sobre nombres de grupo ni sobre agrupaciones
   del tenant. Esto es posible porque la clasificación ya es la interlingua.
+- **El versionado es de la configuración completa, no por categoría.** Una fila de
+  `pricing_rules` almacena toda la configuración cruzada en `formula_jsonb`
+  (`acriss_code = NULL`): proveedores, base de agregación, regla global y overrides
+  por categoría. El historial de versiones refleja "cómo cambió la configuración
+  completa" en el tiempo, no "cómo cambió la regla de EDMR". Auditar o versionar
+  la evolución de una sola categoría (p. ej. "histórico de la regla de economy")
+  requeriría cambiar a una fila por `acriss_code`, lo que es un cambio de modelo
+  explícito, no algo soportado por el diseño actual. Registrado como limitación
+  consciente; no silenciosa.
