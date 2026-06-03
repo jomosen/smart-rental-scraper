@@ -595,7 +595,7 @@ def render_cross_tariff() -> None:
         )
         if selected != st.session_state.get("ct_providers"):
             st.session_state["ct_providers"] = selected
-            st.session_state.pop("ct_zone_idx", None)
+            # Do NOT reset ct_zone_idx: clamp (max/min below) handles out-of-bounds.
 
     providers: list[str] = st.session_state.get("ct_providers", selected)
 
