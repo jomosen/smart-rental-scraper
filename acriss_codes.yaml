@@ -339,6 +339,23 @@ acriss_codes:
       - "Opel Astra Cross"
       - "Hyundai Bayon"
 
+  - code: IFMR
+    display_name: SUV Intermedio Manual
+    description: >
+      Mid-size SUV, manual transmission, combustion engine. Length 4.4-4.7m.
+      Manual twin of IFAR: same size, brand tier, and body as IFAR but with
+      manual gearbox. Mainstream brand.
+    criteria:
+      - "Mid-size SUV (length 4.4-4.7m)"
+      - "Manual transmission"
+      - "5 fixed seats (sometimes 5+2 configuration)"
+      - "Combustion engine"
+      - "Mainstream brand (VW, Hyundai, Ford, Mazda, etc.)"
+    examples:
+      - "Ford Kuga (manual)"
+      - "Hyundai Tucson (manual)"
+      - "VW Tiguan (manual)"
+
   - code: IFAR
     display_name: SUV Intermedio Automático
     description: >
@@ -412,6 +429,47 @@ acriss_codes:
       - "BMW X1"
       - "Audi Q3"
       - "Volvo XC40"
+
+  - code: DDAR
+    display_name: Premium Compacto Automático
+    description: >
+      Premium-brand compact/subcompact sedan, sportback, or hatchback,
+      automatic transmission, combustion engine. Length 4.0-4.5m. Sedan/hatch
+      body — NOT an SUV (the premium compact SUV is DFAR). Sits below PDAR
+      (premium executive: BMW 3 / Audi A4 / Mercedes C-Class, 4.5-4.9m) in
+      size and price. Currently also accommodates premium subcompacts (e.g.
+      Audi A1) until a dedicated subcompact-premium tier is warranted by
+      volume.
+    criteria:
+      - "Premium brand (Audi, BMW, Mercedes, Volvo, Lexus, Mini)"
+      - "Sedan, sportback, or hatchback body (NOT SUV — SUV premium compact is DFAR)"
+      - "Compact to subcompact size (length 4.0-4.5m)"
+      - "Automatic transmission"
+      - "Combustion engine"
+      - "Smaller than PDAR (premium executive); includes premium compact and subcompact hatchbacks"
+    examples:
+      - "Audi A3"
+      - "Audi A1"
+      - "BMW Serie 1"
+      - "Mercedes Clase A"
+
+  - code: DDMR
+    display_name: Premium Compacto Manual
+    description: >
+      Premium-brand compact/subcompact sedan, sportback, or hatchback,
+      manual transmission, combustion engine. Manual twin of DDAR: same size,
+      brand tier, and body type, different gearbox.
+    criteria:
+      - "Premium brand (Audi, BMW, Mercedes, Volvo, Lexus, Mini)"
+      - "Sedan, sportback, or hatchback body (NOT SUV)"
+      - "Compact to subcompact size (length 4.0-4.5m)"
+      - "Manual transmission"
+      - "Combustion engine"
+      - "Smaller than PDAR (premium executive)"
+    examples:
+      - "Audi A3 (manual)"
+      - "BMW Serie 1 (manual)"
+      - "Audi A1 (manual)"
 
   # ──────────────────────────────────────────────────────────────
   # STANDARD ELITE — Larger premium-brand sedans/SUVs
