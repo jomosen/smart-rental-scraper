@@ -701,8 +701,12 @@ def render_cross_tariff() -> None:
         else f"{pd.Timestamp(rep_dates[0]).strftime('%d %b')} – {pd.Timestamp(rep_dates[-1]).strftime('%d %b %Y')}"
         if rep_dates else "—"
     )
+    prov_summary = ", ".join(
+        f"{p} ({zone_df[zone_df['provider_code'] == p]['acriss_code'].nunique()} grupos)"
+        for p in providers
+    )
     st.caption(
-        f"Maestro: **{master}** · {', '.join(providers)} · "
+        f"Maestro: **{master}** · {prov_summary} · "
         f"fecha repr.: {rep_label} · precios en total (€) + €/día derivado"
     )
 
