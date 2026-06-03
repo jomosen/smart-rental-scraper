@@ -213,8 +213,25 @@ def _master_zones(df: pd.DataFrame, master: str) -> pd.DataFrame:
     return mdf.sort_values("start_date").reset_index(drop=True)
 
 
-def _filter_zone(df: pd.DataFrame, master: str, start: date, end: date) -> pd.DataFrame:
-    """Keep rows where the provider's representative_date falls inside [start, end]."""
+def _filter_zone(
+    df: pd.DataFrame,
+    master: str,
+    start: date,
+    end: date,
+    master_rep_date: date,
+) -> pd.DataFrame:
+    """Return zone rows for one navigation step.
+
+    Master rows: exact (start_date, end_date) match — the master's own zone.
+    Non-master rows: zones whose [start_date, end_date] COVERS master_rep_date,
+                     so the price derived is "what this provider charges on
+                     master_rep_date" via its own zone structure.
+                     When a non-master has no zone covering that date (gap beyond
+                     its analysed period) it is absent → shown as cobertura parcial.
+                     Overlaps cannot occur per PVC (zones are replaced atomically),
+                     but if they did, we take the row whose representative_date is
+                     closest to master_rep_date as tiebreaker.
+    """
     master_rows = df[
         (df["provider_code"] == master) &
         (df["start_date"] == start) &
@@ -224,20 +241,34 @@ def _filter_zone(df: pd.DataFrame, master: str, start: date, end: date) -> pd.Da
     if not acriss_in_zone:
         return pd.DataFrame(columns=df.columns)
 
-    # For each non-master provider, find rows whose representative_date is
-    # within [start, end] and whose ACRISS code appears in the master zone.
-    def _in_window(grp):
-        return grp[
-            (grp["representative_date"] >= start) &
-            (grp["representative_date"] <= end) &
+    def _covering(grp: pd.DataFrame) -> pd.DataFrame:
+        """Select non-master rows whose zone covers master_rep_date."""
+        covering = grp[
+            (grp["start_date"] <= master_rep_date) &
+            (grp["end_date"] >= master_rep_date) &
             (grp["acriss_code"].isin(acriss_in_zone))
         ]
+        if covering.empty:
+            return covering
+        # Tiebreaker: keep the row with representative_date closest to master_rep_date
+        # per (acriss_code, external_code, duration_days) — safeguard against overlaps.
+        covering = covering.copy()
+        covering["_dist"] = (
+            pd.to_datetime(covering["representative_date"]) -
+            pd.Timestamp(master_rep_date)
+        ).abs()
+        return (
+            covering
+            .sort_values("_dist")
+            .drop_duplicates(subset=["acriss_code", "external_code", "duration_days"])
+            .drop(columns=["_dist"])
+        )
 
     parts = [master_rows]
     for pcode in df["provider_code"].unique():
         if pcode == master:
             continue
-        parts.append(_in_window(df[df["provider_code"] == pcode]))
+        parts.append(_covering(df[df["provider_code"] == pcode]))
 
     return pd.concat(parts, ignore_index=True)
 
@@ -247,12 +278,19 @@ def _filter_zone(df: pd.DataFrame, master: str, start: date, end: date) -> pd.Da
 def _build_cell_results(
     zone_df: pd.DataFrame,
     providers: list[str],
+    master: str,
+    master_rep_date: date,
     base: str,
     global_rule: dict,
     category_rules: dict[str, dict],
     round_mode: str,
 ) -> dict[tuple[str, int], CellResult]:
-    """Compute CellResult for every (acriss_code, duration) in the zone."""
+    """Compute CellResult for every (acriss_code, duration) in the zone.
+
+    master_rep_date is the master provider's representative_date for this zone.
+    Non-master contributions whose representative_date ≠ master_rep_date are
+    marked inferred=True on ProviderContribution.
+    """
     results: dict[tuple[str, int], CellResult] = {}
     if zone_df.empty:
         return results
@@ -274,12 +312,20 @@ def _build_cell_results(
 
         for dur in durations:
             dur_df = code_df[code_df["duration_days"] == dur]
-            # Build provider_groups: each provider may have multiple groups (same ACRISS)
             provider_groups: dict[str, list[Decimal]] = {}
+            provider_inferred: dict[str, bool] = {}
+
             for pcode in providers:
                 prows = dur_df[dur_df["provider_code"] == pcode]
                 if not prows.empty:
                     provider_groups[pcode] = [Decimal(str(v)) for v in prows["total_price"]]
+                    # Inferred when the row's rep_date ≠ the master's rep_date
+                    row_rep = prows["representative_date"].iloc[0]
+                    provider_inferred[pcode] = (
+                        pd.Timestamp(row_rep).date() != master_rep_date
+                        if pcode != master
+                        else False
+                    )
 
             missing = {p for p in providers if p not in provider_groups}
             result = compute_cell(
@@ -294,6 +340,7 @@ def _build_cell_results(
                 round_mode=round_mode,
                 rule_is_default=is_default,
                 total_providers=len(providers),
+                provider_inferred=provider_inferred,
             )
             results[(code, int(dur))] = result
 
@@ -692,10 +739,18 @@ def render_cross_tariff() -> None:
         start_s = pd.Timestamp(z["start_date"]).strftime("%d %b %Y")
         end_s = pd.Timestamp(z["end_date"]).strftime("%d %b %Y")
         st.markdown(f"#### {start_s} – {end_s} &nbsp;·&nbsp; zona {idx + 1} / {n_zones}")
-
-    zone_df = _filter_zone(df, master, z["start_date"], z["end_date"])
-
+    
+    master_rep_dates = sorted(
+        df[
+            (df["provider_code"] == master) &
+            (df["start_date"] == z["start_date"]) &
+            (df["end_date"] == z["end_date"])
+        ]["representative_date"].unique()
+    )
+    master_rep_date = pd.Timestamp(master_rep_dates[0]).date() if master_rep_dates else z["start_date"]
+    zone_df = _filter_zone(df, master, z["start_date"], z["end_date"], master_rep_date)
     rep_dates = sorted(zone_df[zone_df["provider_code"] == master]["representative_date"].unique())
+
     rep_label = (
         pd.Timestamp(rep_dates[0]).strftime("%d %b %Y") if len(rep_dates) == 1
         else f"{pd.Timestamp(rep_dates[0]).strftime('%d %b')} – {pd.Timestamp(rep_dates[-1]).strftime('%d %b %Y')}"
@@ -715,6 +770,8 @@ def render_cross_tariff() -> None:
     cell_results = _build_cell_results(
         zone_df=zone_df,
         providers=providers,
+        master=master,
+        master_rep_date=master_rep_date,
         base=base,
         global_rule=global_rule,
         category_rules=cat_rules,

@@ -56,6 +56,7 @@ class ProviderContribution:
     is_base: bool = False       # True for the provider that determined base
     stale: bool = False
     stale_days: int = 0
+    inferred: bool = False      # True when price is from a zone rep_date ≠ master_rep_date
 
 
 @dataclass
@@ -300,6 +301,7 @@ def compute_cell(
     round_mode: str,
     rule_is_default: bool = True,
     total_providers: int = 0,
+    provider_inferred: dict[str, bool] | None = None,
 ) -> CellResult:
     """Compute the recommended price for one (acriss_code, duration) cell.
 
@@ -307,7 +309,11 @@ def compute_cell(
     stale_providers: set of provider_codes with stale data.
     stale_days: {provider_code: days_since_last_good_scrape}
     missing_providers: provider_codes that have no offer for this cell.
+    provider_inferred: {provider_code: True} when the price was derived from a zone
+                       whose representative_date ≠ the master's representative_date.
     """
+    if provider_inferred is None:
+        provider_inferred = {}
     n_total = total_providers or len(provider_groups) + len(missing_providers)
 
     # Step 1: intra-provider collapse
@@ -335,6 +341,7 @@ def compute_cell(
                 per_day=per_day,
                 stale=pk in stale_providers,
                 stale_days=stale_days.get(pk, 0),
+                inferred=provider_inferred.get(pk, False),
             ))
 
     for pk in missing_providers:
@@ -353,7 +360,7 @@ def compute_cell(
             ceiling_val=None,
             present=present,
             dropped=dropped,
-            flags=CellFlags(0, n_total, None, False, degraded, True),
+            flags=CellFlags(0, n_total, None, False, degraded, False),
             rule_used=rule,
             rule_is_default=rule_is_default,
         )
@@ -383,6 +390,7 @@ def compute_cell(
     rec_per_day = rec_total / duration if duration else Decimal("0")
 
     any_stale = any(p.stale for p in present)
+    any_inferred = any(p.inferred for p in present)
 
     return CellResult(
         acriss_code=acriss_code,
@@ -402,7 +410,7 @@ def compute_cell(
             clamped=clamped_which,
             stale=any_stale,
             degraded=degraded,
-            inferred=True,  # always True in V0: all prices from zone representative
+            inferred=any_inferred,
         ),
         rule_used=rule,
         rule_is_default=rule_is_default,
