@@ -702,7 +702,7 @@ def render_cross_tariff() -> None:
         if rep_dates else "—"
     )
     prov_summary = ", ".join(
-        f"{p} ({zone_df[zone_df['provider_code'] == p]['acriss_code'].nunique()} grupos)"
+        f"{p} ({len(zone_df[zone_df['provider_code'] == p][['acriss_code', 'example_models']].drop_duplicates())} grupos)"
         for p in providers
     )
     st.caption(
