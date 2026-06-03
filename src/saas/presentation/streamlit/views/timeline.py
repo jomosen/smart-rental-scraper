@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ..filters import Filters
-from ..queries import fetch_timeline, get_acriss_codes_with_display_names
+from ..queries import fetch_timeline, get_acriss_codes_with_display_names, get_active_provider_codes
 
 try:
     import plotly.express as px
@@ -12,33 +11,59 @@ try:
 except ImportError:
     _PLOTLY_AVAILABLE = False
 
+_DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
+_DEFAULT_DURATION_INDEX = 6  # 7 días
 
-def render_timeline(filters: Filters) -> None:
+
+def render_timeline() -> None:
     codes_with_names = get_acriss_codes_with_display_names()
     if not codes_with_names:
         st.info("No hay categorías ACRISS con datos en la base de datos.")
         return
 
+    # ── Filtros inline ────────────────────────────────────────────────────────
+    c_code, c_dur, c_prov, c_pending = st.columns([1.8, 0.8, 1.5, 1.0], gap="small")
+
     code_to_label = {code: f"{name} — {code}" for code, name in codes_with_names}
     available_codes = [code for code, _ in codes_with_names]
-    selected_code = st.selectbox(
-        "Categoría ACRISS a visualizar",
-        options=available_codes,
-        index=0,
-        format_func=lambda code: code_to_label.get(code, code),
-        key="timeline_code_selector",
-    )
+
+    with c_code:
+        selected_code = st.selectbox(
+            "Categoría ACRISS",
+            options=available_codes,
+            index=0,
+            format_func=lambda code: code_to_label.get(code, code),
+            key="timeline_code_selector",
+        )
+    with c_dur:
+        duration_days = int(st.selectbox(
+            "Duración (días)",
+            options=_DURATION_OPTIONS,
+            index=_DEFAULT_DURATION_INDEX,
+            key="timeline_duration",
+        ))
+    with c_prov:
+        all_providers = get_active_provider_codes()
+        providers = tuple(st.multiselect(
+            "Providers",
+            options=all_providers,
+            default=all_providers,
+            key="timeline_providers",
+        ))
+    with c_pending:
+        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        include_pending = st.checkbox(
+            "Incl. revisión 🔍",
+            value=True,
+            key="timeline_pending",
+        )
 
     if not selected_code:
         st.info("Selecciona una categoría para ver su evolución.")
         return
 
-    df = fetch_timeline(
-        selected_code,
-        filters.duration_days,
-        filters.providers,
-        filters.include_pending_review,
-    )
+    # ── Datos ─────────────────────────────────────────────────────────────────
+    df = fetch_timeline(selected_code, duration_days, providers, include_pending)
 
     if df.empty:
         st.warning(
@@ -47,9 +72,7 @@ def render_timeline(filters: Filters) -> None:
         )
         return
 
-    st.subheader(
-        f"Evolución de precio — {selected_code}, {filters.duration_days} días"
-    )
+    st.subheader(f"Evolución de precio — {selected_code}, {duration_days} días")
 
     if _PLOTLY_AVAILABLE:
         fig = px.line(

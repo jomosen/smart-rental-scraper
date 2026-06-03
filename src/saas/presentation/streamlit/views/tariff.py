@@ -15,15 +15,24 @@ import html as _html
 import pandas as pd
 import streamlit as st
 
-from ..filters import Filters
 from ..queries import (
     DURATION_BRACKET,
     fetch_tariff_table,
     get_active_provider_codes,
+    get_acriss_codes_with_display_names,
 )
 
 _CSS = """
 <style>
+[data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"] {
+    gap: 2px !important;
+}
+[data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"] {
+    padding-left: 1px !important;
+    padding-right: 1px !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+}
 table.tariff-table {
     border-collapse: collapse;
     width: 100%;
@@ -238,17 +247,41 @@ def _build_tariff_html(zone_df: pd.DataFrame, durations: list[int]) -> str:
     )
 
 
-def render_tariff(filters: Filters) -> None:
+def render_tariff() -> None:
     providers = get_active_provider_codes()
     if not providers:
         st.info("No hay providers activos con datos clasificados.")
         return
 
-    selected_provider = st.selectbox(
-        "Provider",
-        options=providers,
-        key="tariff_provider_select",
-    )
+    # ── Filtros inline ────────────────────────────────────────────────────────
+    c_prov, c_cat, c_pending = st.columns([1.0, 2.0, 1.0], gap="small")
+
+    with c_prov:
+        selected_provider = st.selectbox(
+            "Provider",
+            options=providers,
+            key="tariff_provider_select",
+        )
+    with c_cat:
+        codes_with_names = get_acriss_codes_with_display_names()
+        code_to_label = {code: f"{name} — {code}" for code, name in codes_with_names}
+        all_codes = [code for code, _ in codes_with_names]
+        selected_codes = st.multiselect(
+            "Categorías ACRISS",
+            options=all_codes,
+            default=[],
+            format_func=lambda code: code_to_label.get(code, code),
+            help="Vacío = todas las categorías.",
+            key="tariff_acriss_filter",
+        )
+        acriss_categories = tuple(selected_codes) if selected_codes else None
+    with c_pending:
+        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        include_pending = st.checkbox(
+            "Incl. revisión 🔍",
+            value=True,
+            key="tariff_pending",
+        )
 
     if st.session_state.get("_tariff_last_provider") != selected_provider:
         st.session_state["tariff_zone_idx"] = 0
@@ -256,9 +289,9 @@ def render_tariff(filters: Filters) -> None:
 
     df = fetch_tariff_table(
         provider_code=selected_provider,
-        acriss_codes=filters.acriss_categories,
+        acriss_codes=acriss_categories,
         durations=DURATION_BRACKET,
-        include_pending_review=filters.include_pending_review,
+        include_pending_review=include_pending,
     )
 
     if df.empty:
@@ -279,20 +312,22 @@ def render_tariff(filters: Filters) -> None:
     idx = int(st.session_state.get("tariff_zone_idx", 0))
     idx = max(0, min(idx, n_zones - 1))
 
-    col_prev, col_label, col_next = st.columns([1, 6, 1])
-    with col_prev:
-        if st.button("◀", disabled=(idx == 0), key="tariff_prev_zone"):
-            st.session_state["tariff_zone_idx"] = idx - 1
-            st.rerun()
+    col_nav, col_label = st.columns([0.10, 0.90], gap="small")
+    with col_nav:
+        col_prev, col_next = st.columns(2, gap="small")
+        with col_prev:
+            if st.button("◀", disabled=(idx == 0), key="tariff_prev_zone"):
+                st.session_state["tariff_zone_idx"] = idx - 1
+                st.rerun()
+        with col_next:
+            if st.button("▶", disabled=(idx == n_zones - 1), key="tariff_next_zone"):
+                st.session_state["tariff_zone_idx"] = idx + 1
+                st.rerun()
     with col_label:
         z = zones.iloc[idx]
         start_s = z["start_date"].strftime("%d %b %Y")
         end_s = z["end_date"].strftime("%d %b %Y")
         st.markdown(f"#### {start_s} – {end_s} &nbsp; · &nbsp; zona {idx + 1} / {n_zones}")
-    with col_next:
-        if st.button("▶", disabled=(idx == n_zones - 1), key="tariff_next_zone"):
-            st.session_state["tariff_zone_idx"] = idx + 1
-            st.rerun()
 
     zone_df = df[
         (df["start_date"] == z["start_date"]) & (df["end_date"] == z["end_date"])

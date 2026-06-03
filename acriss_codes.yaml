@@ -399,17 +399,16 @@ acriss_codes:
     description: >
       Compact premium-brand SUV, automatic transmission, combustion engine.
       Length 4.3-4.6m. Premium brand (Mercedes, BMW, Audi, Volvo). Smaller
-      than RFAR. The 5+2 configuration variants of this body are included
-      (e.g. GLB).
+      than RFAR. Strictly 5-seat body; 5+2 or 7-seat variants of the same
+      platform belong in RFAR.
     criteria:
       - "Compact-to-mid premium SUV (length 4.3-4.6m)"
       - "Premium brand (Mercedes, BMW, Audi, Volvo, Lexus)"
       - "Automatic transmission"
       - "Combustion engine"
-      - "Premium-brand size 'Elite' equivalent of compact"
+      - "5 seats only; 5+2 or 7-seat configurations belong in RFAR"
     examples:
       - "Mercedes GLA"
-      - "Mercedes GLB"
       - "BMW X1"
       - "Audi Q3"
       - "Volvo XC40"
@@ -423,16 +422,21 @@ acriss_codes:
     description: >
       Mid-to-large premium SUV, automatic transmission, combustion engine.
       Length 4.6-5m. Larger than DFAR (compact premium SUV) and below
-      LFAR (luxury). Premium brand at executive level.
+      LFAR (luxury). Premium brand at executive level. Also includes
+      compact premium SUVs with a 5+2 or 7-seat configuration (e.g.
+      Mercedes GLB), which share the DFAR platform but occupy a higher
+      market tier due to their extra row.
     criteria:
       - "Mid-to-large premium SUV (length 4.6-5m)"
       - "Premium brand (Mercedes, BMW, Audi, Volvo, Lexus)"
       - "Automatic transmission"
       - "Combustion engine"
       - "Above DFAR in size"
+      - "Includes 5+2 / 7-seat compact premium SUVs (e.g. Mercedes GLB)"
     examples:
       - "Mercedes GLC"
       - "Mercedes GLC Coupé"
+      - "Mercedes GLB"
       - "BMW X3"
       - "Audi Q5"
       - "Volvo XC60"

@@ -20,7 +20,6 @@ load_dotenv(_PROJECT_ROOT / ".env")
 
 import streamlit as st
 
-from src.saas.presentation.streamlit.filters import render_sidebar_filters
 from src.saas.presentation.streamlit.views.overview import render_overview
 from src.saas.presentation.streamlit.views.timeline import render_timeline
 from src.saas.presentation.streamlit.views.tariff import render_tariff
@@ -35,23 +34,21 @@ st.set_page_config(
 st.title("Smart Rental — Vista de Mercado")
 st.caption("Comparativa de precios entre providers por categoría ACRISS")
 
-filters = render_sidebar_filters()
-
-tab_overview, tab_timeline, tab_tariff, tab_cross = st.tabs([
+tab_cross, tab_tariff, tab_overview, tab_timeline = st.tabs([
+    "🎯 Tarifa cruzada",
+    "📋 Tarifa por proveedor",
     "📊 Visión general",
     "📈 Evolución temporal",
-    "📋 Tarifa por proveedor",
-    "🎯 Tarifa cruzada",
 ])
-
-with tab_overview:
-    render_overview(filters)
-
-with tab_timeline:
-    render_timeline(filters)
-
-with tab_tariff:
-    render_tariff(filters)
 
 with tab_cross:
     render_cross_tariff()
+
+with tab_tariff:
+    render_tariff()
+
+with tab_overview:
+    render_overview()
+
+with tab_timeline:
+    render_timeline()
