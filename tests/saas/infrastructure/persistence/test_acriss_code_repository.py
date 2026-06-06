@@ -134,8 +134,9 @@ class TestListActive:
         repo = AcrissCodeRepository(super_db_session)
         active_codes = {r.code for r in repo.list_active()}
         assert "EDMR" in active_codes
-        assert "CGAR" in active_codes
-        assert len(active_codes) >= 26  # at least the 26 seeded codes
+        assert "EFMR" in active_codes
+        assert "CGAR" not in active_codes  # body G dropped in the taxonomy redesign
+        assert len(active_codes) >= 70  # ~72 codes after the redesign
 
 
 # ---------------------------------------------------------------------------
