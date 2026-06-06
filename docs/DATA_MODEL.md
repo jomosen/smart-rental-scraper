@@ -181,7 +181,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 **Option C: do not persist synthetic data.** Only real scraped observations are stored. Expansion happens at query time.
 
-- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_category)` tuple and has a `representative_date` that is actually scraped.
+- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_category)` tuple and has a `representative_date` that is *normally* scraped. It is not guaranteed: availability gaps or re-analysis can leave the representative without an observation, so the read side falls back to the closest observation within the zone range (see the `homogeneous_zones` derivation rule in the schema section).
 - `price_observations` — only contains real scrapes (representatives + probe points).
 - The application layer (`PriceQueryService` or equivalent) joins zones → representative → observation to answer "price for day X". Returns `is_inferred=true` when the day requested ≠ representative date.
 
@@ -343,10 +343,28 @@ users
                                       -- MVP only uses 'owner'; expand when needed
   created_at
   ...
-  -- Authentication itself (passwords, sessions, MFA, recovery, magic links,
-  -- SSO) is delegated to an external identity provider. This table only
-  -- stores the local identity row tied to the external one. Do NOT add
-  -- columns for password_hash, session_token, password_reset_token, etc.
+  -- Authentication is a minimal homegrown passwordless magic link (see
+  -- "Authentication: minimal homegrown magic link" below). `email` is the
+  -- login identity. `external_auth_id` stays nullable, reserved for a future
+  -- external IdP migration. Single-use login tokens live in `login_tokens`;
+  -- sessions are stateless JWTs in an httpOnly cookie (nothing stored here).
+  -- Do NOT add password_hash or server-side session columns.
+
+login_tokens
+  id UUID PK
+  email                              -- requested email (stored even if no user
+                                     -- matches, so rate-limiting works pre-auth)
+  user_id UUID NULL FK → users       -- resolved when the email maps to a user
+  token_hash CHAR(64) UNIQUE         -- SHA-256 hex of a ≥256-bit random token;
+                                     -- the raw token is never stored
+  request_ip                         -- for per-IP rate limiting
+  created_at
+  expires_at                         -- created_at + 15 min
+  used_at NULL                       -- set on first successful verify (single use)
+  -- NO RLS: this table is pre-auth (no tenant context exists when a link is
+  -- requested or verified). It is touched ONLY by the auth service, which runs
+  -- as smart_rental_super (owner-inherited + BYPASSRLS). The app role has no
+  -- grants on it.
 
 tenant_vehicle_groups
   id UUID PK
@@ -401,6 +419,24 @@ pricing_rules
   superseded_at TIMESTAMPTZ NULL
   superseded_by_id UUID NULL FK → pricing_rules
 
+  -- The cross-tariff client stores ONE active rule per tenant with
+  -- acriss_code = NULL (a whole-config rule). Per-category overrides live
+  -- inside formula_jsonb, not as separate rows (versioning is of the complete
+  -- configuration; see MILESTONES D5). Canonical formula_jsonb shape written by
+  -- PUT /api/pricing-config and read by GET /api/cross-tariff:
+  --   {
+  --     "providers": ["centauro", ...],          -- providers in the radar
+  --     "base_aggregation": "min|med|avg|max",
+  --     "master_provider": "centauro",           -- whose calendar drives zones
+  --     "rounding": "0|0.99|0.90|0.50|1",
+  --     "global_rule":  {op:"sub|add", val:>=0, mode:"pct|abs",
+  --                      floor:"auto|cost|none", ceiling:"max|none"},
+  --     "category_overrides": { "CFAR": {<same shape as global_rule>}, ... }
+  --   }
+  -- The column-level floor/ceiling stay NULL for these rules (the modes live
+  -- inside the JSON). Live edits in the front use POST /api/cross-tariff/preview
+  -- (same body, not persisted); Save issues the PUT.
+
 pricing_outputs
   id UUID PK
   tenant_id UUID FK
@@ -442,6 +478,27 @@ providers
   status                              -- 'active' | 'beta' | 'deprecated' | 'broken'
   created_at
 
+### Canonical market locations (catalog)
+
+Providers each have their own offices (`provider_locations`, with the provider's own
+naming — the literal text the RecipeScraper types into the provider's search form).
+What the product compares is a MARKET: the canonical location where provider offices
+compete. The two concepts are deliberately separate:
+
+- **The scraper text belongs to the provider.** `provider_locations` keeps the
+  provider's naming untouched; scraping is unaffected by this feature.
+- **The canonical market is ours**, and the mapping is a manual operator action
+  (SQL or onboarding CLI). A new provider_location discovered by the scraper is born
+  unmapped (`location_id NULL`) and does NOT appear in market-filtered views until
+  an operator maps it. With a handful of providers this is trivial; revisit (text
+  similarity suggester) only if provider count grows by an order of magnitude.
+
+locations                            -- catalog, no tenant_id, no RLS
+  id PK
+  code            -- stable slug, e.g. "alc-airport" (used in URLs/API)
+  name            -- display name, e.g. "Alicante · Aeropuerto"
+  created_at
+
 provider_locations
   id PK
   provider_id FK
@@ -450,6 +507,8 @@ provider_locations
   country
   city
   active
+  location_id FK → locations NULL     -- n:1 mapping to the canonical market;
+                                      -- NULL = unmapped (excluded from filtered views)
 
 provider_rates
   id PK
@@ -534,6 +593,17 @@ homogeneous_zones
   detected_at
   active BOOLEAN
   -- Partial index: WHERE active = true
+  --
+  -- Derivation rule (read side): a zone is backed by the observation at its
+  -- representative_date; if that exact observation is missing (the chosen
+  -- representative was not captured — e.g. no availability for that pickup date,
+  -- or the zone was re-analysed onto a date the extractor did not hit), fall back
+  -- to the CLOSEST observation WITHIN [start_date, end_date]. A homogeneous zone
+  -- is ~flat in price by construction (±SEASON_PRICE_THRESHOLD), so any in-range
+  -- observation is representative. NEVER fall back to an observation outside the
+  -- zone — that belongs to another season and would be a wrong price. A zone with
+  -- no in-range observation at all stays empty (surfaced, not silently dropped).
+  -- Implemented in cross_tariff_read.fetch_cross_tariff_dataframe (obs_in_zone CTE).
 
 price_observations
   id BIGSERIAL
@@ -716,16 +786,47 @@ application code.
 
 ---
 
-### Authentication provider choice
+### Authentication: minimal homegrown magic link
 
-Authentication is delegated to an external identity provider. The choice of provider (Auth0, Clerk, WorkOS, Supabase Auth, FusionAuth, Keycloak self-hosted, etc.) is not made yet.
+**Decision (reverses the earlier "external IdP, deferred" stance).** For the MVP,
+authentication is a small homegrown **passwordless magic link** flow. No external
+identity provider, no passwords. This was deferred before; it is now built because
+the client front-end (RentRadar) needs real per-tenant login and a full IdP is
+overkill for the first customers. `users.external_auth_id` remains in the schema,
+nullable, so a later migration to an external IdP needs no destructive change.
 
-**Why deferred.** The right choice depends on variables not yet resolved: budget, whether enterprise SSO is needed soon, hosting preferences (managed vs self-hosted), and the profile of the first real customer. Building auth from scratch is not on the table for an MVP in 2026.
+**Flow.**
+1. `POST /api/auth/request-link {email}` — always returns an identical `200`
+   whether or not the email exists (**no account enumeration**). If it maps to a
+   user: generate a random token (≥256 bits), store **only its SHA-256** in
+   `login_tokens` with a 15-minute expiry, and email `{APP_BASE_URL}/auth/verify?token=...`.
+2. `GET /api/auth/verify?token=` — validate hash + not used + not expired, set
+   `used_at` (single use), mint a session **JWT** (`user_id`, `tenant_id`, 7-day
+   exp) signed with `JWT_SECRET`, set it in an **httpOnly + Secure + SameSite=Lax**
+   cookie, and redirect to `/`.
+3. `GET /api/auth/me` — `{email, tenant_name}` when the cookie is valid, else `401`.
+4. `POST /api/auth/logout` — clear the cookie.
 
-**Trigger.** Before exposing the first endpoint that requires real user login.
+**Non-negotiable security requirements.**
+- The raw token is never persisted — only `SHA-256(token)`. Lookups hash the
+  incoming token and compare.
+- `request-link` is constant-response regardless of account existence.
+- Tokens are single-use (`used_at`) and time-boxed (15 min).
+- Rate limiting per email and per IP (windowed count over `login_tokens`).
+- Session cookie is httpOnly + SameSite=Lax; `Secure` is on whenever
+  `APP_ENV != development` (kept off only for the local http loop).
+- The token is ≥256 bits of CSPRNG entropy (`secrets.token_urlsafe(32)`).
 
-**What's already decided** (so no rework when the provider is chosen):
-- `users.external_auth_id` will hold the provider's identity reference (the 'sub' claim of the JWT, or equivalent).
+**Dev bypass.** `get_current_tenant` accepts a `DEV_TENANT_ID` env fallback **only
+when `APP_ENV=development`** and there is no session cookie, so the API is usable
+in local development without logging in. In production `APP_ENV` is set and
+`DEV_TENANT_ID` must be absent — the bypass is then dead code. `/api/auth/me` never
+honours the bypass: it reflects only a real session.
+
+**Trigger to revisit (external IdP).** Enterprise SSO/SAML demand, or the first
+customer requiring it. The migration path is: populate `users.external_auth_id`,
+swap the cookie-JWT issuer for the IdP's, drop `login_tokens`.
+
 - `users.role` exists from day one with `'owner'` as default. Granular roles wait until a real customer demands them.
 
 ### Machine-to-machine authentication (API keys)
@@ -822,7 +923,7 @@ Single shared database, single region.
 - Generate real DDL from this document, not from intuition. If something is missing here, surface it before writing the migration.
 - The threshold for change detection (`PRICE_CHANGE_THRESHOLD`) compares against the **last recorded row in `price_observations`**, not against the heartbeat. This is a correctness point, not a style preference.
 - `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact. Include the `acriss_code` and `classification_confidence` of every `provider_vehicle_categories` row consumed.
-- Authentication is **not** built locally. Do not add tables for passwords, sessions, password reset tokens, or any mechanism that would duplicate what an external identity provider does. The `users` table only holds the local identity bound to the external `sub`.
+- Authentication: see the "minimal homegrown magic link" section above. No passwords or server-side session tables; sessions are stateless JWTs and single-use links live in `login_tokens`.
 - Tests for tenant isolation are part of the definition of "API done", not an optional nicety.
 - The LLM-based classification is wrapped behind an abstract `ClassificationService` interface. The interface must not leak provider-specific concepts (request shape, response shape, authentication). Implementations live in infrastructure; the rest of the system depends only on the interface. Confidence threshold (0.85) is hardcoded in the service composition.
 - Classification is **batch by provider**, not vehicle-by-vehicle. The classifier receives the complete provider catalog at once together with each group's representative 7-day price, so it can reason about the provider's internal pricing hierarchy. Calling the classifier with a single vehicle in isolation is supported by the interface but is **not** the production path — it loses the hierarchical context.

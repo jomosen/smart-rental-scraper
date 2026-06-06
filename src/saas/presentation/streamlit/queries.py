@@ -24,6 +24,9 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.saas.infrastructure.persistence.engine import super_engine
+from src.saas.infrastructure.persistence.read.cross_tariff_read import (
+    fetch_cross_tariff_dataframe,
+)
 
 # ---------------------------------------------------------------------------
 # Engine singleton (lazy, not Streamlit-cached so it works in tests too)
@@ -497,15 +500,6 @@ def fetch_tariff_table(
 # Cross-tariff table (multi-provider)
 # ---------------------------------------------------------------------------
 
-_CROSS_TARIFF_COLUMNS = [
-    "acriss_code", "acriss_display_name",
-    "provider_code", "external_code", "example_models",
-    "transmission", "acriss_transmission", "pending_review",
-    "start_date", "end_date", "representative_date",
-    "duration_days", "price_per_day", "total_price",
-]
-
-
 def _fetch_cross_tariff_impl(
     engine: Engine,
     provider_codes: tuple[str, ...],
@@ -513,93 +507,21 @@ def _fetch_cross_tariff_impl(
     durations: tuple[int, ...] = DURATION_BRACKET,
     include_pending_review: bool = True,
 ) -> pd.DataFrame:
-    """Fetch tariff data for multiple providers, aligned to their own zones.
+    """Fetch cross-tariff data via the shared read layer.
 
-    Each row represents one (provider, acriss_code, zone, duration) observation.
-    Zone alignment to a master provider is done in the view layer, not here.
+    Delegates to infrastructure/persistence/read so the back-office and the
+    client API run the SAME query — including the in-zone fallback (obs_in_zone)
+    that backs a zone with the closest observation inside its range. `acriss_codes`
+    is accepted for signature compatibility but unused (the view always passes
+    None); the shared query is location-agnostic here (no location filter).
     """
-    if not provider_codes:
-        return pd.DataFrame(columns=_CROSS_TARIFF_COLUMNS)
-
-    acriss_clause = "AND pvc.acriss_code = ANY(:acriss_codes)" if acriss_codes else ""
-    pending_clause = "" if include_pending_review else "AND pvc.pending_review = FALSE"
-
-    params: dict = {
-        "provider_codes": list(provider_codes),
-        "durations": list(durations),
-    }
-    if acriss_codes:
-        params["acriss_codes"] = list(acriss_codes)
-
-    sql = text(f"""
-        WITH latest_obs AS (
-            SELECT DISTINCT ON (po.provider_vehicle_category_id, po.pickup_date, po.duration_days)
-                   po.provider_vehicle_category_id,
-                   po.pickup_date,
-                   po.duration_days,
-                   po.price_per_day,
-                   po.total_price
-            FROM   price_observations po
-            JOIN   providers p ON p.id = po.provider_id
-            WHERE  p.code = ANY(:provider_codes)
-              AND  po.duration_days = ANY(:durations)
-            ORDER  BY po.provider_vehicle_category_id, po.pickup_date,
-                      po.duration_days, po.observed_at DESC
-        ),
-        zones AS (
-            SELECT pvc.acriss_code,
-                   ac.display_name  AS acriss_display_name,
-                   pvc.external_code,
-                   pvc.example_models,
-                   pvc.transmission,
-                   pvc.acriss_transmission,
-                   pvc.pending_review,
-                   hz.start_date,
-                   hz.end_date,
-                   hz.representative_date,
-                   hz.provider_vehicle_category_id,
-                   p.code           AS provider_code
-            FROM   homogeneous_zones hz
-            JOIN   provider_vehicle_categories pvc ON pvc.id = hz.provider_vehicle_category_id
-            JOIN   providers    p   ON p.id    = pvc.provider_id
-            JOIN   acriss_codes ac  ON ac.code = pvc.acriss_code
-            WHERE  hz.active       = TRUE
-              AND  pvc.active      = TRUE
-              AND  pvc.acriss_code IS NOT NULL
-              AND  p.code          = ANY(:provider_codes)
-              {acriss_clause}
-              {pending_clause}
-        )
-        SELECT z.acriss_code,
-               z.acriss_display_name,
-               z.provider_code,
-               z.external_code,
-               z.example_models,
-               z.transmission,
-               z.acriss_transmission,
-               z.pending_review,
-               z.start_date,
-               z.end_date,
-               z.representative_date,
-               lo.duration_days,
-               lo.price_per_day,
-               lo.total_price
-        FROM   zones z
-        JOIN   latest_obs lo
-                   ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
-                  AND lo.pickup_date = z.representative_date
-        ORDER  BY z.acriss_code, z.provider_code, z.external_code,
-                  z.start_date, lo.duration_days
-    """)
-
     with engine.connect() as conn:
-        result = conn.execute(sql, params)
-        rows = result.fetchall()
-        cols = list(result.keys())
-
-    if not rows:
-        return pd.DataFrame(columns=_CROSS_TARIFF_COLUMNS)
-    return pd.DataFrame(rows, columns=cols)
+        return fetch_cross_tariff_dataframe(
+            conn,
+            provider_codes,
+            durations=durations,
+            include_pending_review=include_pending_review,
+        )
 
 
 @st.cache_data(ttl=60)
