@@ -49,19 +49,25 @@ KEY INSIGHT about Elite:
 - Mercedes GLC (premium-brand mid-large SUV, 4.66m) = R (Standard Elite);
   Ford Kuga (mainstream mid SUV, 4.62m) = I or S.
 
+PREMIUM BRANDS (closed list — the brand decides the Elite tier, deterministically):
+  Audi, BMW, Mercedes-Benz, Volvo, Lexus, Mini, DS, Porsche, Land Rover, Jaguar.
+  Cupra is NOT premium (mainstream — treat like SEAT).
+  If the brand is in this list → use the Elite letter of its size class (H/D/J/R/U/W).
+  If not → mainstream letter (M/E/C/I/S/P/L). Do not decide premium-ness case by case.
+
 REFERENCE MODELS BY CATEGORY (from ACRISS Spanish Selling Guide, European
 fleet):
 
   Mini (M):              Fiat 500 (MBMR/MBMH if hybrid)
   Mini Elite EV (N):     Honda e (NBAE)
-  Economy (E):           Peugeot 208 (ECMR)
+  Economy (E):           Peugeot 208 (EDMR), VW Polo (EDMR)
   Economy Elite (H):     Audi A1 (HDMR)
-  Compact (C):           Ford Focus (CDMR)
-  Compact Elite (D):     Mercedes A-Class, GLA, GLB (DDMR, DFAR)
-  Intermediate (I):      Hyundai Ioniq EV, VW Tiguan (IDAE, IFAR)
+  Compact (C):           Ford Focus (CDMR), VW Golf (CDAR)
+  Compact Elite (D):     Mercedes A-Class, GLA (DDMR, DFAR)
+  Intermediate (I):      VW Tiguan (IFAR), Skoda Octavia (IDAR) — displaced by Superb (S)
   Intermediate Elite (J):Mercedes CLA, BMW Serie 2 Gran Tourer (JDAR, JMAR)
   Standard (S):          Peugeot 508, VW Passat (SDMR, SDAR)
-  Standard Elite (R):    Mercedes GLC, Audi Q4 e-tron (RFAR, RFAE)
+  Standard Elite (R):    Mercedes GLC, GLB, Audi Q4 e-tron (RFAR, RFAE)
   Fullsize (F):          Skoda Superb (FDAR)
   Fullsize Elite (G):    Alfa Romeo Stelvio (GFAR)
   Premium (P):           Mercedes C-Class (PDAR)
@@ -121,6 +127,9 @@ Official definitions (ACRISS Expanded Matrix, Dec 2019, updated 2025):
       from T which has 4 seats)
   G = Crossover (CUV built on unibody car platform, combines SUV features
       with passenger car character; typically WITHOUT 4WD capability)
+  NOTE: G (Crossover) is NOT materialized in our catalog. All SUVs and crossovers
+  use F. Validated against real-market data (Drivalia): C3 Aircross=CFMR,
+  Qashqai=IFMR, 3008=IFAR.
   K = Commercial Van/Truck (cargo or goods transport)
 
 KEY DISTINCTIONS that matter for our market:
@@ -260,36 +269,48 @@ KEY RULES for our market:
 3. The 4 attributes you return MUST be the 4 characters of the chosen
    `acriss_code`, in order. Internal consistency is required.
 
-4. **MIXED GROUPS — classify to the highest-tier model present.**
+4. **COMMERCIAL SEGMENT BEATS CENTIMETERS.** Lengths in this document are orientative,
+   not hard cutoffs. A Ford Focus (4.38m) and a VW Golf (4.28m) belong together in
+   C (Compact) because they are the same commercial segment. Classify by segment
+   positioning (what the model competes with in its brand's lineup), using length
+   only as a supporting signal.
+
+5. **MIXED GROUPS — classify to the lowest-tier model present.**
 
    When the provider's PVC groups multiple distinct vehicle models that
    would map to DIFFERENT ACRISS codes (e.g. "VW Tiguan, VW T-Roc" where
-   Tiguan = IFAR but T-Roc = CGAR), classify the PVC into the code of
-   the model with the HIGHEST tier — the model representing the upper
-   bound of what the customer pays for in that group.
+   Tiguan = IFAR but T-Roc = CFAR), classify the PVC into the code of
+   the model with the LOWEST tier — the model representing the floor of
+   what the customer is guaranteed to receive ("or similar" means the
+   customer may receive the lowest-tier vehicle in the group).
 
-   How to determine "highest tier":
-   - First, by `acriss_category` (position 1). Standard order from
-     lowest to highest in our market:
-       M < E < C < I < S < F < P < L
-     With Elite versions ranking just above their mainstream counterpart
-     of the same size:
-       N (Mini Elite) > M ; H > E ; D > C ; J > I ; R > S ;
-       G > F ; U > P ; W > L
+   How to determine "lowest tier":
+   - STEP 0 — PREMIUM vs MAINSTREAM: In bundles mixing PREMIUM-brand and
+     MAINSTREAM models, DISCARD the premium models first. A premium car is
+     never the guaranteed floor ("or similar" delivers the mainstream car).
+     Apply the lowest-tier rule among remaining mainstream models only.
+     Only if ALL models are premium-brand, apply the Elite scale among them.
+     Premium brands (closed list): Audi, BMW, Mercedes-Benz, Volvo, Lexus,
+     Mini, DS, Porsche, Land Rover, Jaguar. (Cupra = mainstream.)
+   - Then, by `acriss_category` (position 1). Standard order from
+     complete scale (lowest to highest), Elites interleaved:
+       M < N < E < H < C < D < I < J < S < R < P < U < L < W
+       (Each Elite sits IMMEDIATELY above its mainstream counterpart and BELOW
+       the next mainstream size: H is above E but below C; D is above C but
+       below I; etc. The Elite scale applies only in all-premium bundles.)
    - If multiple models tie on category but differ in body type, prefer
-     in this order: F (SUV) > G (Crossover) > M (Monospace) > V (Van)
-     > D (sedan) > W (wagon) > E (coupe) > T (convertible) > N (roadster).
-     When in doubt, pick the body type with greater price prominence in
-     the market.
+     the body with lowest price prominence (lowest wins):
+       D (sedan) < W (wagon) < E (coupe) < T (convertible) < N (roadster)
+       < V (Van) < M (Monospace) < F (SUV).
+     (G crossover body is not materialized; all SUVs use F)
    - If models tie on category and body but differ in transmission, prefer
-     A (Auto) > M (Manual) — automatic is usually the more expensive
-     variant.
+     M (Manual) < A (Auto) — manual is the cheaper variant.
    - If models tie on the first 3 attributes but differ in fuel, prefer
      R (standard combustion) — hybrid/electric are usually features, not
      tier indicators.
 
    ALWAYS in mixed-group cases:
-   - Set `acriss_code` to the highest-tier code (not null).
+   - Set `acriss_code` to the lowest-tier code (not null).
    - Set the 4 attributes accordingly.
    - Set `pending_review = true` to signal operator review needed.
    - Set `confidence` to ~0.65 (low confidence due to model mixing).
@@ -299,15 +320,16 @@ KEY RULES for our market:
    The intent of this rule: when a PVC groups heterogeneous models, we
    DO want to assign it a code (to keep it visible in pricing analytics),
    but we want to be honest about the ambiguity (via pending_review).
-   The highest-tier choice is conservative: it reflects what the
-   customer pays for at the top, never underestimating market pricing.
+   The lowest-tier choice is conservative: the group is guaranteed only
+   up to its lowest model — "or similar" means the customer may receive
+   the lowest-tier vehicle, so the group prices like its floor.
 
-5. If the LLM cannot find ANY materialized code that fits — including
-   the highest-tier model in a mixed group — set `acriss_code = null`
-   and `pending_review = true`. This is rare; rule 4 should usually
+6. If the LLM cannot find ANY materialized code that fits — including
+   the lowest-tier model in a mixed group — set `acriss_code = null`
+   and `pending_review = true`. This is rare; rule 5 should usually
    resolve mixed groups.
 
-6. **NOTE ON `external_code` from the provider:**
+7. **NOTE ON `external_code` from the provider:**
 
    The `external_code` is the provider's internal label (e.g. "Grupo A",
    "Grupo F1", "CDAR"). Most providers use ARBITRARY internal labels
@@ -326,10 +348,10 @@ KEY RULES for our market:
    Do NOT infer ACRISS attributes from arbitrary internal labels. Two
    providers using "Grupo D" may classify completely different vehicles.
 
-7. Confidence calibration:
+8. Confidence calibration:
    - 0.95+: clear match, all attributes unambiguous
    - 0.85-0.95: clear match, one attribute slightly uncertain (e.g. fuel
      not specified but defaulted to R)
    - 0.70-0.85: ambiguous on 1-2 attributes
-   - ~0.65: mixed group resolved via rule 4 (highest-tier choice)
+   - ~0.65: mixed group resolved via rule 5 (lowest-tier choice)
    - <0.60: poor fit; consider pending_review without a code
