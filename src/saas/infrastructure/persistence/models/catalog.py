@@ -88,6 +88,26 @@ class Provider(Base):
     )
 
 
+class Location(Base):
+    """Canonical market location (catalog, no tenant_id, no RLS).
+
+    The market where provider offices compete (e.g. "alc-airport"). Distinct from
+    provider_locations, which keep each provider's own naming. See
+    docs/DATA_MODEL.md §"Canonical market locations (catalog)".
+    """
+    __tablename__ = "locations"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_locations_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+
+
 class ProviderLocation(Base):
     __tablename__ = "provider_locations"
     __table_args__ = (
@@ -106,6 +126,12 @@ class ProviderLocation(Base):
     country: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    # n:1 mapping to the canonical market; NULL = unmapped (excluded from filtered views).
+    location_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("locations.id", name="fk_provider_locations_location", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     provider: Mapped[Provider] = relationship(back_populates="locations")
 

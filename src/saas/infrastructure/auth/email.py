@@ -1,0 +1,51 @@
+"""Magic-link email delivery.
+
+Production: Resend transactional API (RESEND_API_KEY). Dev: when no API key is
+configured, the full magic link is logged to the server console instead of being
+sent — this is how the flow is exercised locally. Delivery failures are logged
+and swallowed so the caller can keep its constant 200 response (no enumeration,
+no leak of whether the email exists or whether sending worked).
+"""
+from __future__ import annotations
+
+import logging
+import os
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+_RESEND_ENDPOINT = "https://api.resend.com/emails"
+
+
+def send_magic_link(email: str, link: str) -> None:
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        logger.warning(
+            "[DEV] No RESEND_API_KEY set — magic link for %s NOT emailed. Open it manually:\n  %s",
+            email, link,
+        )
+        return
+
+    sender = os.environ.get("RESEND_FROM", "RentRadar <login@rentradar.app>")
+    try:
+        resp = httpx.post(
+            _RESEND_ENDPOINT,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "from": sender,
+                "to": [email],
+                "subject": "Tu enlace de acceso a RentRadar",
+                "html": (
+                    "<p>Hola,</p>"
+                    "<p>Pulsa el botón para acceder a tu panel de precios. "
+                    "El enlace caduca en 15 minutos y solo puede usarse una vez.</p>"
+                    f'<p><a href="{link}">Acceder a RentRadar</a></p>'
+                    f"<p>O copia esta URL: {link}</p>"
+                ),
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+    except Exception as exc:  # never surface delivery details to the caller
+        logger.error("Failed to send magic link to %s: %s", email, exc)

@@ -33,6 +33,8 @@ from functools import partial
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as _components
+from sqlalchemy import text
 
 from src.saas.application.pricing.cross_tariff_calc import (
     CellResult,
@@ -40,6 +42,16 @@ from src.saas.application.pricing.cross_tariff_calc import (
     ProviderContribution,
     RuleConfig,
     compute_cell,
+)
+# Shared, presentation-agnostic logic — single source consumed by both the
+# Streamlit back-office and the client API (see application/pricing/cross_tariff_assembler).
+from src.saas.application.pricing.cross_tariff_assembler import (
+    build_cell_results as _build_cell_results,
+    category_sort_key as _category_sort_key,
+    code_label as _code_label,
+    filter_zone as _filter_zone,
+    master_zones as _master_zones,
+    prov_color as _prov_color,
 )
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.repositories import PricingRuleRepository
@@ -75,6 +87,7 @@ table.ct-table {
 }
 
 /* ── ACRISS category band ── */
+table.ct-table tr.acriss-hdr { cursor: pointer; }
 table.ct-table tr.acriss-hdr td {
     background: #eef2fd;
     border: 1px solid #d5e0fb;
@@ -84,18 +97,10 @@ table.ct-table tr.acriss-hdr td.cat-col {
     text-align: left;
     font-weight: 700;
     font-size: 0.92em;
+    font-family: 'Fraunces', serif;
     color: #3949ab;
     min-width: 200px;
-}
-table.ct-table tr.acriss-hdr td.cat-col .acode {
-    font-size: 0.85em;
-    letter-spacing: .03em;
-    background: #fff;
-    border: 1px solid #d5e0fb;
-    border-radius: 5px;
-    padding: 1px 7px;
-    color: #3949ab;
-    margin-left: 8px;
+    white-space: nowrap;
 }
 table.ct-table tr.acriss-hdr td.dur-hdr {
     text-align: right;
@@ -107,24 +112,35 @@ table.ct-table tr.acriss-hdr td.dur-hdr {
     min-width: 90px;
 }
 
+/* Chevron SVG — angle-down; JS rotates 180deg on expand via style.transform */
+.chev-wrap {
+    display: inline-flex; align-items: center; margin-right: 8px;
+    color: #6b83cc; user-select: none; vertical-align: middle;
+    transition: transform 0.18s ease;
+}
+
+/* ACRISS code chip — shown in summary row left cell (not in the band) */
+.acode {
+    font-size: 0.83em; letter-spacing: .03em;
+    background: #fff; border: 1px solid #d5e0fb;
+    border-radius: 5px; padding: 1px 7px;
+    color: #3949ab; font-weight: 600; margin-right: 5px;
+}
+
 /* ── Recommended row (first inside each category) ── */
 table.ct-table tr.close-row td {
     background: #f7f9fc;
     border: 1px solid #e0e2e8;
 }
 table.ct-table td.cat.close {
-    padding: 10px 14px 10px 18px;
+    padding: 8px 14px 8px 18px;
     text-align: left;
     vertical-align: top;
 }
-.lbl-rec { font-weight: 700; font-size: 0.82em; color: #1b2230; line-height: 18px; white-space: nowrap; }
-.lbl-day { color: #97a0b0; font-size: 0.75em; line-height: 15px; white-space: nowrap; }
-.lbl-mkt { color: #97a0b0; font-size: 0.75em; line-height: 15px; margin-top: 3px; white-space: nowrap; }
 table.ct-table td.cell.close {
     padding: 7px 10px;
     text-align: right;
-    vertical-align: top;
-    position: relative;
+    vertical-align: middle;
     min-width: 90px;
 }
 table.ct-table td.cell.close .rec {
@@ -133,15 +149,9 @@ table.ct-table td.cell.close .rec {
     line-height: 18px;
     white-space: nowrap;
 }
-table.ct-table td.cell.close .day {
+table.ct-table td.cell.close .sub-line {
     color: #97a0b0;
-    font-size: 0.76em;
-    line-height: 15px;
-    white-space: nowrap;
-}
-table.ct-table td.cell.close .mkt {
-    color: #5a6577;
-    font-size: 0.76em;
+    font-size: 0.74em;
     line-height: 15px;
     margin-top: 2px;
     white-space: nowrap;
@@ -149,7 +159,13 @@ table.ct-table td.cell.close .mkt {
 table.ct-table td.cell.close.empty { color: #ccc; text-align: center; }
 
 /* Flag badges (small colored squares/dots) */
-.cell-badges { display: inline-flex; gap: 3px; align-items: center; margin-right: 6px; vertical-align: middle; }
+.rowbadges {
+    display: flex; gap: 5px; align-items: center;
+    flex-wrap: wrap; min-height: 14px;
+}
+.catexamples {
+    color: #97a0b0; font-size: 11px; margin-top: 5px; line-height: 1.35;
+}
 .b { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 .b.cov   { background: #97a0b0; }
 .b.clamp { background: #c9871f; }
@@ -188,21 +204,65 @@ table.ct-table td.cell.sub {
 }
 table.ct-table td.cell.sub .rec { font-weight: 500; font-size: 0.87em; white-space: nowrap; }
 table.ct-table td.cell.sub .day { color: #97a0b0; font-size: 0.73em; white-space: nowrap; }
-table.ct-table td.cell.sub.base-hit { background: #f0faf5; box-shadow: inset 2px 0 0 #1f9d6b; }
-table.ct-table td.cell.sub.base-hit .rec { color: #1a8a5e; font-weight: 700; }
-table.ct-table tr.prov-row:hover td.cell.sub.base-hit { background: #e2f5ec; }
+table.ct-table td.cell.sub.base-hit .rec { font-weight: 700; }
 table.ct-table td.cell.sub.empty { color: #ccc; text-align: center; }
 </style>
 """
 
-_PROV_PALETTE = ["#d63a4e", "#3a63d6", "#1f9d6b", "#f59e0b", "#7c3aed", "#0891b2"]
+_GRID_FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=Fraunces'
+    ':opsz,wght@9..144,500;9..144,600'
+    '&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">'
+)
+_GRID_BODY_CSS = (
+    "<style>"
+    "body{margin:0;font-family:'Hanken Grotesk',sans-serif;"
+    "font-size:14px;line-height:1.45;color:#1b2230}"
+    "</style>"
+)
+_GRID_SCRIPT = """<script>
+(function () {
+  function resize() {
+    window.parent.postMessage(
+      { isStreamlitMessage: true, type: 'streamlit:setFrameHeight',
+        height: document.body.scrollHeight + 4 }, '*');
+  }
+  document.addEventListener('click', function (e) {
+    var hdr = e.target.closest('tr.acriss-hdr');
+    if (!hdr) return;
+    var code = hdr.getAttribute('data-code');
+    if (!code) return;
+    var rows = Array.from(document.querySelectorAll('tr[data-cat="' + code + '"]'));
+    if (!rows.length) return;
+    var expanding = rows[0].style.display === 'none';
+    rows.forEach(function (r) { r.style.display = expanding ? '' : 'none'; });
+    var wrap = hdr.querySelector('.chev-wrap');
+    if (wrap) wrap.style.transform = expanding ? 'rotate(180deg)' : '';
+    resize();
+  });
+  var toggleBtn = document.getElementById('ct-toggle-all');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function () {
+      var allProv = Array.from(document.querySelectorAll('tr.prov-row'));
+      var doExpand = allProv.some(function (r) { return r.style.display === 'none'; });
+      allProv.forEach(function (r) { r.style.display = doExpand ? '' : 'none'; });
+      document.querySelectorAll('tr.acriss-hdr .chev-wrap').forEach(function (w) {
+        w.style.transform = doExpand ? 'rotate(180deg)' : '';
+      });
+      this.innerHTML = doExpand ? '&#9662; Colapsar todo' : '&#9658; Expandir todo';
+      resize();
+    });
+  }
+  window.addEventListener('load', function () { setTimeout(resize, 80); });
+}());
+</script>"""
 
-
-def _prov_color(provider_code: str, providers: list[str]) -> str:
-    try:
-        return _PROV_PALETTE[providers.index(provider_code) % len(_PROV_PALETTE)]
-    except ValueError:
-        return "#97a0b0"
+def _hex_rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 
 def _fmt_num(value: float, decimals: int = 2) -> str:
@@ -230,146 +290,18 @@ def _default_rule() -> dict:
     return {"op": "sub", "val": 1.0, "mode": "pct", "floor": "auto", "ceiling": "max"}
 
 
-# ── Zone alignment ───────────────────────────────────────────────────────────
+# Zone alignment, cell-result building and ACRISS naming/ordering now live in
+# application/pricing/cross_tariff_assembler (imported above as _master_zones,
+# _filter_zone, _build_cell_results, _code_label, _category_sort_key) so the API
+# and this view share one implementation.
 
-def _master_zones(df: pd.DataFrame, master: str) -> pd.DataFrame:
-    """Return unique (start_date, end_date) rows from the master provider, sorted."""
-    mdf = df[df["provider_code"] == master][["start_date", "end_date"]].drop_duplicates()
-    return mdf.sort_values("start_date").reset_index(drop=True)
-
-
-def _filter_zone(
-    df: pd.DataFrame,
-    master: str,
-    start: date,
-    end: date,
-    master_rep_date: date,
-) -> pd.DataFrame:
-    """Return zone rows for one navigation step.
-
-    Master rows: exact (start_date, end_date) match — the master's own zone.
-    Non-master rows: zones whose [start_date, end_date] COVERS master_rep_date,
-                     so the price derived is "what this provider charges on
-                     master_rep_date" via its own zone structure.
-                     When a non-master has no zone covering that date (gap beyond
-                     its analysed period) it is absent → shown as cobertura parcial.
-                     Overlaps cannot occur per PVC (zones are replaced atomically),
-                     but if they did, we take the row whose representative_date is
-                     closest to master_rep_date as tiebreaker.
-    """
-    master_rows = df[
-        (df["provider_code"] == master) &
-        (df["start_date"] == start) &
-        (df["end_date"] == end)
-    ]
-    acriss_in_zone = set(master_rows["acriss_code"].unique())
-    if not acriss_in_zone:
-        return pd.DataFrame(columns=df.columns)
-
-    def _covering(grp: pd.DataFrame) -> pd.DataFrame:
-        """Select non-master rows whose zone covers master_rep_date."""
-        covering = grp[
-            (grp["start_date"] <= master_rep_date) &
-            (grp["end_date"] >= master_rep_date) &
-            (grp["acriss_code"].isin(acriss_in_zone))
-        ]
-        if covering.empty:
-            return covering
-        # Tiebreaker: keep the row with representative_date closest to master_rep_date
-        # per (acriss_code, external_code, duration_days) — safeguard against overlaps.
-        covering = covering.copy()
-        covering["_dist"] = (
-            pd.to_datetime(covering["representative_date"]) -
-            pd.Timestamp(master_rep_date)
-        ).abs()
-        return (
-            covering
-            .sort_values("_dist")
-            .drop_duplicates(subset=["acriss_code", "external_code", "duration_days"])
-            .drop(columns=["_dist"])
-        )
-
-    parts = [master_rows]
-    for pcode in df["provider_code"].unique():
-        if pcode == master:
-            continue
-        parts.append(_covering(df[df["provider_code"] == pcode]))
-
-    return pd.concat(parts, ignore_index=True)
-
-
-# ── Build CellResult map from a zone DataFrame ──────────────────────────────
-
-def _build_cell_results(
-    zone_df: pd.DataFrame,
-    providers: list[str],
-    master: str,
-    master_rep_date: date,
-    base: str,
-    global_rule: dict,
-    category_rules: dict[str, dict],
-    round_mode: str,
-) -> dict[tuple[str, int], CellResult]:
-    """Compute CellResult for every (acriss_code, duration) in the zone.
-
-    master_rep_date is the master provider's representative_date for this zone.
-    Non-master contributions whose representative_date ≠ master_rep_date are
-    marked inferred=True on ProviderContribution.
-    """
-    results: dict[tuple[str, int], CellResult] = {}
-    if zone_df.empty:
-        return results
-
-    acriss_codes = zone_df["acriss_code"].unique()
-    durations = zone_df["duration_days"].unique()
-
-    for code in acriss_codes:
-        code_df = zone_df[zone_df["acriss_code"] == code]
-        rule_dict = category_rules.get(code, global_rule)
-        is_default = code not in category_rules
-        rule = RuleConfig(
-            op=rule_dict["op"],
-            val=Decimal(str(rule_dict["val"])),
-            mode=rule_dict["mode"],
-            floor_mode=rule_dict["floor"],
-            ceiling_mode=rule_dict["ceiling"],
-        )
-
-        for dur in durations:
-            dur_df = code_df[code_df["duration_days"] == dur]
-            provider_groups: dict[str, list[Decimal]] = {}
-            provider_inferred: dict[str, bool] = {}
-
-            for pcode in providers:
-                prows = dur_df[dur_df["provider_code"] == pcode]
-                if not prows.empty:
-                    provider_groups[pcode] = [Decimal(str(v)) for v in prows["total_price"]]
-                    # Inferred when the row's rep_date ≠ the master's rep_date
-                    row_rep = prows["representative_date"].iloc[0]
-                    provider_inferred[pcode] = (
-                        pd.Timestamp(row_rep).date() != master_rep_date
-                        if pcode != master
-                        else False
-                    )
-
-            missing = {p for p in providers if p not in provider_groups}
-            result = compute_cell(
-                acriss_code=code,
-                duration=int(dur),
-                provider_groups=provider_groups,
-                stale_providers=set(),   # TODO(D5): wire heartbeats for staleness
-                stale_days={},
-                missing_providers=missing,
-                rule=rule,
-                base=base,
-                round_mode=round_mode,
-                rule_is_default=is_default,
-                total_providers=len(providers),
-                provider_inferred=provider_inferred,
-            )
-            results[(code, int(dur))] = result
-
-    return results
+# Inline SVG angle-down chevron — no unicode chars; JS rotates 180° on expand.
+_SVG_CHEVRON = (
+    "<svg class='chev-svg' width='11' height='11' viewBox='0 0 24 24' "
+    "fill='none' stroke='currentColor' stroke-width='2.5' "
+    "stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>"
+    "<path d='M6 9l6 6 6-6'/></svg>"
+)
 
 
 # ── HTML grid ────────────────────────────────────────────────────────────────
@@ -379,6 +311,7 @@ def _build_grid_html(
     zone_df: pd.DataFrame,
     durations: list[int],
     providers: list[str],
+    examples: dict[str, list[str]],
 ) -> str:
     if zone_df.empty:
         return "<p style='color:#97a0b0'>Sin datos para esta zona.</p>"
@@ -388,9 +321,7 @@ def _build_grid_html(
         .drop_duplicates("acriss_code")
         .set_index("acriss_code")
     )
-    codes = sorted(acriss_meta.index, key=lambda c: float(
-        cell_results.get((c, 7), CellResult(c, 7, None, None, None, None, None, None, None)).rec_total or 9999
-    ))
+    codes = sorted(acriss_meta.index, key=lambda c: _category_sort_key(c, cell_results))
 
     rows: list[str] = []
     for code in codes:
@@ -398,43 +329,58 @@ def _build_grid_html(
         has_pending = bool(meta["pending_review"])
         badge = "🔍 " if has_pending else ""
 
-        # ── ACRISS band: category name + per-column duration headers ──
+        # ── ACRISS band: name only (chip moves to summary row) + dur headers ──
         dur_ths = "".join(f"<td class='dur-hdr'>{d}d</td>" for d in durations)
         rows.append(
-            f"<tr class='acriss-hdr'>"
-            f"<td class='cat-col'>{badge}{_html.escape(str(meta['acriss_display_name']))}"
-            f"<span class='acode'>{_html.escape(code)}</span></td>"
+            f"<tr class='acriss-hdr' data-code='{code}'>"
+            f"<td class='cat-col'>"
+            f"<span class='chev-wrap'>{_SVG_CHEVRON}</span>"
+            f"{badge}{_html.escape(_code_label(code))}</td>"
             f"{dur_ths}</tr>"
         )
 
-        # ── Recommended row (first) ──
-        rec_cells = [
-            "<td class='cat close'>"
-            "<div class='lbl-rec'>Total recomendado</div>"
-            "<div class='lbl-day'>precio día</div>"
-            "<div class='lbl-mkt'>rango de mercado</div>"
-            "</td>"
-        ]
+        # ── Recommended row ── badges (union of all durations) in left cell; inline values
+        _cov = _clamp = _stale = _deg = _inf = False
+        for _dur in durations:
+            _cr = cell_results.get((code, _dur))
+            if _cr is None:
+                continue
+            if _cr.flags.coverage < _cr.flags.total_providers:
+                _cov = True
+            if _cr.flags.clamped:
+                _clamp = True
+            if _cr.flags.stale:
+                _stale = True
+            if _cr.flags.degraded:
+                _deg = True
+            if _cr.flags.inferred:
+                _inf = True
+        _cat_badges = "".join([
+            "<span class='b cov' title='cobertura parcial'></span>" if _cov else "",
+            "<span class='b clamp' title='suelo/techo'></span>" if _clamp else "",
+            "<span class='b stale' title='stale'></span>" if _stale else "",
+            "<span class='b anom' title='anomalía descartada'></span>" if _deg else "",
+            "<span class='b inf' title='inferido'></span>" if _inf else "",
+        ])
+
+        # Left cell: chip + badges in .rowbadges, catalog examples below
+        exs = examples.get(code, [])
+        exs_html = (
+            f"<div class='catexamples'>{_html.escape(', '.join(exs[:4]))} o similar</div>"
+            if exs else ""
+        )
+        rowbadges = (
+            f"<div class='rowbadges'>"
+            f"<span class='acode'>{_html.escape(code)}</span>"
+            f"{_cat_badges}"
+            f"</div>"
+        )
+        rec_cells = [f"<td class='cat close'>{rowbadges}{exs_html}</td>"]
         for dur in durations:
             cr = cell_results.get((code, dur))
             if cr is None or cr.rec_total is None:
                 rec_cells.append("<td class='cell close empty'>—</td>")
                 continue
-
-            badges = []
-            if cr.flags.coverage < cr.flags.total_providers:
-                badges.append("<span class='b cov' title='cobertura parcial'></span>")
-            if cr.flags.clamped:
-                badges.append("<span class='b clamp' title='suelo/techo'></span>")
-            if cr.flags.stale:
-                badges.append("<span class='b stale' title='stale'></span>")
-            if cr.flags.degraded:
-                badges.append("<span class='b anom' title='anomalía descartada'></span>")
-            if cr.flags.inferred:
-                badges.append("<span class='b inf' title='inferido'></span>")
-            badges_html = (
-                f"<span class='cell-badges'>{''.join(badges)}</span>" if badges else ""
-            )
 
             if cr.present:
                 totals = [p.total for p in cr.present]
@@ -449,9 +395,8 @@ def _build_grid_html(
 
             rec_cells.append(
                 f"<td class='cell close'>"
-                f"<div class='rec'>{badges_html}{_fmt(cr.rec_total)}</div>"
-                f"<div class='day'>{_fmt_day(cr.rec_per_day)}</div>"
-                f"<div class='mkt'>{rng}</div>"
+                f"<div class='rec'>{_fmt(cr.rec_total)}</div>"
+                f"<div class='sub-line'>{_fmt_day(cr.rec_per_day)} · {rng}</div>"
                 f"</td>"
             )
         rows.append(f"<tr class='close-row'>{''.join(rec_cells)}</tr>")
@@ -552,17 +497,40 @@ def _build_grid_html(
                     if not all_prov_totals.empty:
                         is_base_row = abs(total - float(all_prov_totals.min())) < 0.001
 
-                cell_cls = "cell sub base-hit" if is_base_row else "cell sub"
-                dur_tds.append(
-                    f"<td class='{cell_cls}'>"
-                    f"<div class='rec'>{_fmt(Decimal(str(total)))}</div>"
-                    f"<div class='day'>{_fmt_day(Decimal(str(round(per_day, 2))))}</div>"
-                    f"</td>"
-                )
+                if is_base_row:
+                    hit_style = (
+                        f"box-shadow:inset 3px 0 0 {color};"
+                        f"background:{_hex_rgba(color, 0.07)}"
+                    )
+                    dur_tds.append(
+                        f"<td class='cell sub base-hit' style='{hit_style}'>"
+                        f"<div class='rec'>{_fmt(Decimal(str(total)))}</div>"
+                        f"<div class='day'>{_fmt_day(Decimal(str(round(per_day, 2))))}</div>"
+                        f"</td>"
+                    )
+                else:
+                    dur_tds.append(
+                        f"<td class='cell sub'>"
+                        f"<div class='rec'>{_fmt(Decimal(str(total)))}</div>"
+                        f"<div class='day'>{_fmt_day(Decimal(str(round(per_day, 2))))}</div>"
+                        f"</td>"
+                    )
 
-            rows.append(f"<tr class='prov-row'>{left_cell}{''.join(dur_tds)}</tr>")
+            rows.append(
+                f"<tr class='prov-row' data-cat='{code}' style='display:none'>"
+                f"{left_cell}{''.join(dur_tds)}</tr>"
+            )
 
-    return f"<table class='ct-table'><tbody>{''.join(rows)}</tbody></table>"
+    toggle_btn = (
+        "<div style='text-align:right;margin-bottom:6px'>"
+        "<button id='ct-toggle-all'"
+        " style='background:none;border:1px solid #d5e0fb;border-radius:5px;"
+        "padding:3px 12px;font-size:0.80em;color:#3949ab;cursor:pointer;"
+        "font-family:inherit;line-height:1.6'>"
+        "&#9658; Expandir todo"
+        "</button></div>"
+    )
+    return toggle_btn + f"<table class='ct-table'><tbody>{''.join(rows)}</tbody></table>"
 
 
 # ── Cell breakdown (replaces drawer) ────────────────────────────────────────
@@ -878,15 +846,34 @@ def render_cross_tariff() -> None:
         round_mode=round_mode,
     )
 
+    # ── Fetch catalog examples (read-only, 1 query per render) ───────────────
+    _eng = super_engine()
+    with super_session(_eng) as _sess:
+        _rows = _sess.execute(
+            text("SELECT code, examples FROM acriss_codes WHERE active = TRUE")
+        ).fetchall()
+    acriss_examples: dict[str, list[str]] = {
+        r.code: list(r.examples or [])[:4] for r in _rows
+    }
+
     # ── Render grid ──────────────────────────────────────────────────────────
-    st.markdown(_CSS, unsafe_allow_html=True)
     grid_html = _build_grid_html(
         cell_results=cell_results,
         zone_df=zone_df,
         durations=list(DURATION_BRACKET),
         providers=providers,
+        examples=acriss_examples,
     )
-    st.markdown(grid_html, unsafe_allow_html=True)
+    # Collapsed height: acriss-hdr (~38px) + close-row (~70px) per category.
+    # The script sends setFrameHeight after load and after every toggle.
+    n_cats = zone_df["acriss_code"].nunique()
+    est_height = n_cats * 110 + 40
+    _components.html(
+        _GRID_FONTS + _GRID_BODY_CSS + _CSS + grid_html + _GRID_SCRIPT,
+        height=est_height,
+        scrolling=False,
+    )
+    st.markdown(_CSS, unsafe_allow_html=True)  # legend badges (.b.*) outside iframe
 
     # ── Legend ───────────────────────────────────────────────────────────────
     st.markdown(
