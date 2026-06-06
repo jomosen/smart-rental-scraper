@@ -33,6 +33,26 @@ export function fmtDate(iso: string | null): string {
   return `${day} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
+/** Short date "23 jun" (day + lowercase month, no year). */
+export function fmtDateShort(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].toLowerCase()}`
+}
+
+/** Compact zone range: "2–29 jun" if same month, else "2 jun – 5 jul". */
+export function zoneRangeShort(from: string | null, to: string | null): string {
+  if (!from || !to) return ''
+  const a = new Date(from)
+  const b = new Date(to)
+  const am = MONTHS[a.getUTCMonth()].toLowerCase()
+  const bm = MONTHS[b.getUTCMonth()].toLowerCase()
+  if (am === bm && a.getUTCFullYear() === b.getUTCFullYear()) {
+    return `${a.getUTCDate()}–${b.getUTCDate()} ${bm}`
+  }
+  return `${a.getUTCDate()} ${am} – ${b.getUTCDate()} ${bm}`
+}
+
 /** "hace 2 h" / "hace 30 min" / "hace 3 d" from an ISO timestamp. */
 export function fmtAgo(iso: string | null): string {
   if (!iso) return 'sin datos'

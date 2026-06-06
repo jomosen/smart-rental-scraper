@@ -1,5 +1,5 @@
-import type { CrossTariffResponse } from '../types'
-import { eur, eurDay, marketRange, BASE_LABELS_NOUN } from '../lib/format'
+import type { CrossTariffResponse, ProviderRow } from '../types'
+import { eur, eurDay, marketRange, fmtDateShort, zoneRangeShort, BASE_LABELS_NOUN } from '../lib/format'
 
 interface Props {
   data: CrossTariffResponse
@@ -8,6 +8,15 @@ interface Props {
 }
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** "Precio del 23 jun · zona 2–29 jun" — provenance of a provider's derived price. */
+function provenance(pr: ProviderRow): string {
+  if (!pr.observation_date) return ''
+  const zone = pr.zone_range
+    ? ` · zona ${zoneRangeShort(pr.zone_range.date_from, pr.zone_range.date_to)}`
+    : ''
+  return `Precio del ${fmtDateShort(pr.observation_date)}${zone}`
+}
 
 export default function CellDrawer({ data, selection, onClose }: Props) {
   const open = selection != null
@@ -69,7 +78,10 @@ export default function CellDrawer({ data, selection, onClose }: Props) {
                     <div className="prov-line dropped" key={i}>
                       <span className="who">
                         <span className="dot" style={{ background: color }} />
-                        <span>{capitalize(pr.provider_key)}<small>anomalía (descartado)</small></span>
+                        <span>
+                          {capitalize(pr.provider_key)}<small>anomalía (descartado)</small>
+                          {provenance(pr) && <small>{provenance(pr)}</small>}
+                        </span>
                       </span>
                       <span className="pr">{eur(c.total)}</span>
                     </div>
@@ -82,6 +94,7 @@ export default function CellDrawer({ data, selection, onClose }: Props) {
                       <span>
                         {capitalize(pr.provider_key)}
                         {pr.models ? <small>{pr.models}</small> : null}
+                        {provenance(pr) && <small>{provenance(pr)}</small>}
                       </span>
                     </span>
                     <span className="pr">

@@ -82,6 +82,8 @@ export interface ProviderRow {
   models: string
   transmission: string | null
   inferred: boolean
+  observation_date: string | null
+  zone_range: { date_from: string; date_to: string } | null
   cells: ProviderCell[]
 }
 

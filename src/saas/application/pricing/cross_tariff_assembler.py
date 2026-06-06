@@ -274,6 +274,10 @@ class ProviderRow:
     transmission: Optional[str]   # "manual" | "automatic" | None
     inferred: bool
     cells: list[ProviderCell]
+    # Provenance (category-level: same zone for every duration in the row).
+    observation_date: Optional[date] = None   # representative_date the price comes from
+    zone_from: Optional[date] = None           # the provider's homogeneous zone covering master_rep_date
+    zone_to: Optional[date] = None
 
 
 @dataclass
@@ -393,7 +397,8 @@ def _build_provider_rows(
     prov_order = {p: i for i, p in enumerate(providers)}
     groups = (
         code_df[["provider_code", "external_code", "example_models",
-                 "transmission", "acriss_transmission"]]
+                 "transmission", "acriss_transmission",
+                 "start_date", "end_date", "representative_date"]]
         .drop_duplicates(["provider_code", "external_code"])
         .copy()
     )
@@ -443,12 +448,18 @@ def _build_provider_rows(
                 missing=False,
             ))
 
+        def _as_date(v):
+            return pd.Timestamp(v).date() if pd.notna(v) else None
+
         rows.append(ProviderRow(
             provider_key=pcode,
             models=model_name,
             transmission=_derive_transmission(grp.get("transmission"), grp.get("acriss_transmission")),
             inferred=inferred_by_provider.get(pcode, False),
             cells=cells,
+            observation_date=_as_date(grp.get("representative_date")),
+            zone_from=_as_date(grp.get("start_date")),
+            zone_to=_as_date(grp.get("end_date")),
         ))
     return rows
 

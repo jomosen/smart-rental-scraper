@@ -233,6 +233,11 @@ def _serialize(
                         "models": pr.models,
                         "transmission": pr.transmission,
                         "inferred": pr.inferred,
+                        "observation_date": pr.observation_date.isoformat() if pr.observation_date else None,
+                        "zone_range": (
+                            {"date_from": pr.zone_from.isoformat(), "date_to": pr.zone_to.isoformat()}
+                            if pr.zone_from and pr.zone_to else None
+                        ),
                         "cells": [
                             {
                                 "duration": pc.duration,

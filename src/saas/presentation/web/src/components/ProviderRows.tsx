@@ -1,5 +1,5 @@
 import type { Category } from '../types'
-import { eur, eurDay } from '../lib/format'
+import { eur, eurDay, fmtDateShort } from '../lib/format'
 
 interface Props {
   category: Category
@@ -20,7 +20,14 @@ export default function ProviderRows({ category, durations, colorByKey }: Props)
               <span className="pdot" style={{ background: color }} />
               <span className="pname">{pr.provider_key.charAt(0).toUpperCase() + pr.provider_key.slice(1)}</span>
               <span className="pmodels">{pr.models || '—'}</span>
-              {pr.inferred && <span className="inf-badge">INFERIDO</span>}
+              {pr.inferred && (
+                <span
+                  className="inf-badge"
+                  title={`Derivado de su zona de precios${pr.observation_date ? ` (representante: ${fmtDateShort(pr.observation_date)})` : ''}`}
+                >
+                  INFERIDO
+                </span>
+              )}
             </td>
             {durations.map((d) => {
               const c = cellByDur.get(d)
