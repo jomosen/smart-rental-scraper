@@ -78,6 +78,42 @@ body {
 .modal .rulebar { margin-top: 16px; }
 .modal .rule-row { grid-template-columns: 1fr; gap: 10px; }
 
+/* Rule rows: delete button, add button, per-category modal fields. */
+.rule-del {
+  border: 1px solid var(--line); background: #fff; border-radius: 7px; width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  color: var(--ink-faint); transition: background .12s, color .12s, border-color .12s; justify-self: start;
+}
+.rule-del:hover { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.rule-del svg { display: block; }
+.rule-add { display: flex; align-items: center; gap: 10px; padding: 14px 0 2px; }
+.rule-add .addbtn {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--blue); color: var(--blue);
+  background: #fff; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.rule-add .addbtn:hover { background: var(--blue-bg); }
+.rule-add .addbtn svg { display: block; }
+.rule-add .none-left { color: var(--ink-faint); font-size: 12.5px; }
+
+.mfield { margin-bottom: 18px; }
+.mfield label {
+  display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint); font-weight: 600; margin-bottom: 8px;
+}
+.mfield-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 8px 0 0; }
+
+/* Save button dirty indicator + toast. */
+.btn.primary.dirty::after {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: #fff; margin-left: 8px; vertical-align: middle;
+}
+.toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(20,30,60,.24); z-index: 120;
+}
+
 /* ---------- Control bar ---------- */
 .controls {
   display: grid;

@@ -419,6 +419,24 @@ pricing_rules
   superseded_at TIMESTAMPTZ NULL
   superseded_by_id UUID NULL FK → pricing_rules
 
+  -- The cross-tariff client stores ONE active rule per tenant with
+  -- acriss_code = NULL (a whole-config rule). Per-category overrides live
+  -- inside formula_jsonb, not as separate rows (versioning is of the complete
+  -- configuration; see MILESTONES D5). Canonical formula_jsonb shape written by
+  -- PUT /api/pricing-config and read by GET /api/cross-tariff:
+  --   {
+  --     "providers": ["centauro", ...],          -- providers in the radar
+  --     "base_aggregation": "min|med|avg|max",
+  --     "master_provider": "centauro",           -- whose calendar drives zones
+  --     "rounding": "0|0.99|0.90|0.50|1",
+  --     "global_rule":  {op:"sub|add", val:>=0, mode:"pct|abs",
+  --                      floor:"auto|cost|none", ceiling:"max|none"},
+  --     "category_overrides": { "CFAR": {<same shape as global_rule>}, ... }
+  --   }
+  -- The column-level floor/ceiling stay NULL for these rules (the modes live
+  -- inside the JSON). Live edits in the front use POST /api/cross-tariff/preview
+  -- (same body, not persisted); Save issues the PUT.
+
 pricing_outputs
   id UUID PK
   tenant_id UUID FK

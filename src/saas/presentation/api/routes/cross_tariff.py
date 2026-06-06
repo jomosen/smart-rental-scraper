@@ -1,26 +1,32 @@
-"""GET /api/cross-tariff — read-only data for the price-radar grid.
+"""Cross-tariff data + pricing-config endpoints.
 
-The tenant is resolved by `get_current_tenant` (Fase 1: DEV_TENANT_ID env var).
-The request runs inside `tenant_context` on the RLS-enforcing app engine, so
-tenant-scoped tables (tenants, pricing_rules) are isolated; the global catalog
-(providers, prices, zones, acriss_codes) is read in the same session.
+  GET  /api/cross-tariff            — render from the tenant's SAVED config
+                                      (defaults if none). Accepts zone/location_id.
+  POST /api/cross-tariff/preview    — render from a config in the body, WITHOUT
+                                      persisting (live editing in the front).
+  PUT  /api/pricing-config          — validate + persist the tenant's config.
 
-Calculation, naming and ordering are NOT done here — they live in
-application/pricing (cross_tariff_calc + cross_tariff_assembler), shared with
-the Streamlit back-office. This route only fetches, configures and serializes.
+The tenant comes from the session (get_current_tenant); everything runs inside
+tenant_context on the RLS engine. Calculation/naming/ordering live in
+application/pricing (shared with the Streamlit back-office); this route fetches,
+validates, configures and serializes.
 
-Ephemeral overrides (Fase 2): the query params base / round / master /
-rule_op / rule_val / rule_mode / rule_floor / rule_ceiling override the tenant's
-resolved defaults for this request only. Nothing is persisted — they are simply
-fed to the assembler, keeping the calculation in a single place.
+Overrides for live editing use the preview POST (not query params) because
+category_rules is a nested dict of arbitrary size that does not encode cleanly
+in a query string. The preview body is the same shape as the PUT body, so "a
+pricing config" has a single schema.
+
+CSRF: the mutating/echo endpoints (PUT, preview) require the header
+X-Requested-With: fetch — a cheap defence on top of SameSite=Lax cookies.
 """
 from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
 from src.saas.application.pricing.cross_tariff_assembler import (
@@ -50,7 +56,6 @@ _DEFAULT_RULE = {"op": "sub", "val": 1.0, "mode": "pct", "floor": "auto", "ceili
 _DEFAULT_BASE = "min"
 _DEFAULT_ROUND = "0"
 
-# Lazy engine singleton — avoids building a pool per request.
 _engine: Engine | None = None
 
 
@@ -67,8 +72,36 @@ def _money(x: Optional[Decimal]) -> Optional[str]:
     return str(Decimal(x).quantize(Decimal("0.01")))
 
 
-def _resolve_config(rule_formula: Optional[dict], active_providers: list[str]) -> dict:
-    """Merge the tenant's saved pricing rule with defaults, clamped to active providers."""
+# ── Request bodies (Pydantic → automatic 422 on bad enums / negative val) ─────
+
+class RuleBody(BaseModel):
+    op: Literal["sub", "add"]
+    val: float = Field(ge=0)
+    mode: Literal["pct", "abs"]
+    floor: Literal["auto", "cost", "none"]
+    ceiling: Literal["max", "none"]
+
+
+class PricingConfigBody(BaseModel):
+    base: Literal["min", "med", "avg", "max"]
+    round: Literal["0", "0.99", "0.90", "0.50", "1"]
+    master_provider_key: Optional[str] = None
+    default_rule: RuleBody
+    category_rules: dict[str, RuleBody] = Field(default_factory=dict)
+    # Only meaningful for preview (ignored by PUT).
+    zone: Optional[int] = None
+    location_id: Optional[int] = None
+
+
+def require_fetch_header(x_requested_with: str = Header(default="")) -> None:
+    if x_requested_with != "fetch":
+        raise HTTPException(status_code=403, detail={"error": "Missing X-Requested-With header"})
+
+
+# ── Config resolution ────────────────────────────────────────────────────────
+
+def _resolve_saved_config(rule_formula: Optional[dict], active_providers: list[str]) -> dict:
+    """Build the working config from the tenant's saved rule, clamped to active providers."""
     f = rule_formula or {}
     providers = [p for p in (f.get("providers") or active_providers) if p in active_providers]
     if not providers:
@@ -86,28 +119,51 @@ def _resolve_config(rule_formula: Optional[dict], active_providers: list[str]) -
     }
 
 
-def _apply_overrides(cfg: dict, *, base, round_mode, master,
-                     rule_op, rule_val, rule_mode, rule_floor, rule_ceiling) -> None:
-    """Apply ephemeral query-param overrides onto the resolved config (in place)."""
-    if base:
-        cfg["base"] = base
-    if round_mode is not None:
-        cfg["round_mode"] = round_mode
-    if master and master in cfg["providers"]:
-        cfg["master"] = master
-    gr = dict(cfg["global_rule"])
-    if rule_op:
-        gr["op"] = rule_op
-    if rule_val is not None:
-        gr["val"] = rule_val
-    if rule_mode:
-        gr["mode"] = rule_mode
-    if rule_floor:
-        gr["floor"] = rule_floor
-    if rule_ceiling:
-        gr["ceiling"] = rule_ceiling
-    cfg["global_rule"] = gr
+def _cfg_from_body(body: PricingConfigBody, session, active_codes: list[str]) -> dict:
+    """Translate a validated body into a working config; DB-level checks raise 422."""
+    if body.master_provider_key and body.master_provider_key not in active_codes:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": f"Unknown provider '{body.master_provider_key}'"},
+        )
+    master = body.master_provider_key or (active_codes[0] if active_codes else None)
 
+    if body.category_rules:
+        valid = {
+            r[0] for r in session.execute(
+                text("SELECT code FROM acriss_codes WHERE active = TRUE")
+            ).fetchall()
+        }
+        unknown = [c for c in body.category_rules if c not in valid]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": f"Unknown ACRISS code(s): {', '.join(sorted(unknown))}"},
+            )
+
+    return {
+        "providers": list(active_codes),
+        "master": master,
+        "base": body.base,
+        "round_mode": body.round,
+        "global_rule": body.default_rule.model_dump(),
+        "category_rules": {k: v.model_dump() for k, v in body.category_rules.items()},
+    }
+
+
+def _formula_from_cfg(cfg: dict) -> dict:
+    """Persisted formula_jsonb shape (see docs/DATA_MODEL.md pricing_rules)."""
+    return {
+        "providers": cfg["providers"],
+        "base_aggregation": cfg["base"],
+        "master_provider": cfg["master"],
+        "rounding": cfg["round_mode"],
+        "global_rule": cfg["global_rule"],
+        "category_overrides": cfg["category_rules"],
+    }
+
+
+# ── Serialization ────────────────────────────────────────────────────────────
 
 def _serialize(
     payload: CrossTariffPayload,
@@ -125,8 +181,8 @@ def _serialize(
         "meta": {
             "tenant_name": tenant_name,
             "plan": plan,
-            "location": location,        # selected canonical market {id, code, name} | None
-            "locations": locations,      # selectable canonical markets (those with data)
+            "location": location,
+            "locations": locations,
             "zone": {
                 "index": payload.zone.index,
                 "total": payload.zone.total,
@@ -158,6 +214,16 @@ def _serialize(
                         "market_min": _money(cell.market_min),
                         "market_max": _money(cell.market_max),
                         "empty": cell.empty,
+                        # Calculation pipeline (drawer) + per-cell flags.
+                        "market_base": _money(cell.market_base),
+                        "after_rule": _money(cell.after_rule),
+                        "clamped": cell.clamped,
+                        "clamp_bound": _money(cell.clamp_bound),
+                        "rounded": _money(cell.rounded),
+                        "round_flip": cell.round_flip,
+                        "stale": cell.stale,
+                        "inferred": cell.inferred,
+                        "partial": cell.partial,
                     }
                     for cell in c.cells
                 ],
@@ -187,79 +253,48 @@ def _serialize(
     }
 
 
-@router.get("/api/cross-tariff")
-def get_cross_tariff(
-    location_id: Optional[int] = Query(default=None),
-    zone: Optional[int] = Query(default=None),
-    base: Optional[str] = Query(default=None),
-    round_mode: Optional[str] = Query(default=None, alias="round"),
-    master: Optional[str] = Query(default=None),
-    rule_op: Optional[str] = Query(default=None),
-    rule_val: Optional[float] = Query(default=None),
-    rule_mode: Optional[str] = Query(default=None),
-    rule_floor: Optional[str] = Query(default=None),
-    rule_ceiling: Optional[str] = Query(default=None),
-    tenant_id: uuid.UUID = Depends(get_current_tenant),
+def _compute_payload(
+    session, tenant_id: uuid.UUID, cfg: dict,
+    zone: Optional[int], location_id: Optional[int],
 ) -> dict:
-    factory = make_session_factory(_get_engine())
-    with tenant_context(factory, tenant_id) as session:
-        # Tenant-scoped reads (RLS-filtered to this tenant).
-        trow = session.execute(text("SELECT name, plan FROM tenants")).fetchone()
-        tenant_name = trow.name if trow else ""
-        plan = trow.plan if trow else None
-        active_rule = PricingRuleRepository(session).get_active(tenant_id)
-        rule_formula = active_rule.formula_jsonb if active_rule else None
+    """Shared render path for GET and preview. Raises 404 for an unknown location_id."""
+    trow = session.execute(text("SELECT name, plan FROM tenants")).fetchone()
+    tenant_name = trow.name if trow else ""
+    plan = trow.plan if trow else None
 
-        # Global catalog reads (not RLS-scoped) in the same session.
-        active_providers = fetch_active_providers(session)
-        provider_names = {code: name for code, name in active_providers}
-        active_codes = [code for code, _ in active_providers]
+    active_providers = fetch_active_providers(session)
+    provider_names = {code: name for code, name in active_providers}
+    provider_codes = cfg["providers"]
+    master_code = cfg["master"]
 
-        cfg = _resolve_config(rule_formula, active_codes)
-        _apply_overrides(
-            cfg, base=base, round_mode=round_mode, master=master,
-            rule_op=rule_op, rule_val=rule_val, rule_mode=rule_mode,
-            rule_floor=rule_floor, rule_ceiling=rule_ceiling,
-        )
-        provider_codes = cfg["providers"]
-        master_code = cfg["master"]
+    canonical_locations = fetch_canonical_locations(session)
+    if location_id is not None:
+        location = fetch_location(session, location_id)
+        if location is None:
+            raise HTTPException(status_code=404, detail={"error": "Location not found"})
+        selected_location_id = location_id
+    else:
+        selected_location_id = canonical_locations[0]["id"] if canonical_locations else None
+        location = fetch_location(session, selected_location_id) if selected_location_id else None
 
-        # Canonical market locations: the selectable markets (those with data) and
-        # the one in effect for this request. An explicit location_id that does not
-        # exist in the catalog is a 404 (not silent). A valid market with no mapped
-        # offices simply yields an empty grid.
-        canonical_locations = fetch_canonical_locations(session)
-        if location_id is not None:
-            location = fetch_location(session, location_id)
-            if location is None:
-                raise HTTPException(
-                    status_code=404, detail={"error": "Location not found"}
-                )
-            selected_location_id = location_id
-        else:
-            selected_location_id = canonical_locations[0]["id"] if canonical_locations else None
-            location = fetch_location(session, selected_location_id) if selected_location_id else None
+    df = fetch_cross_tariff_dataframe(
+        session, tuple(provider_codes), DURATIONS, True, location_id=selected_location_id
+    )
+    examples = fetch_catalog_examples(session)
+    updated_at = fetch_data_updated_at(session, tuple(provider_codes))
 
-        df = fetch_cross_tariff_dataframe(
-            session, tuple(provider_codes), DURATIONS, True, location_id=selected_location_id
-        )
-        examples = fetch_catalog_examples(session)
-        updated_at = fetch_data_updated_at(session, tuple(provider_codes))
-
-        payload = assemble_cross_tariff(
-            df=df,
-            providers=provider_codes,
-            master=master_code,
-            base=cfg["base"],
-            round_mode=cfg["round_mode"],
-            global_rule=cfg["global_rule"],
-            category_rules=cfg["category_rules"],
-            durations=list(DURATIONS),
-            examples=examples,
-            zone_index=zone,
-        )
-
-    # Real provider display names in meta (assembler only had the keys).
+    payload = assemble_cross_tariff(
+        df=df,
+        providers=provider_codes,
+        master=master_code,
+        base=cfg["base"],
+        round_mode=cfg["round_mode"],
+        global_rule=cfg["global_rule"],
+        category_rules=cfg["category_rules"],
+        durations=list(DURATIONS),
+        examples=examples,
+        zone_index=zone,
+    )
     for pm in payload.providers:
         pm.name = provider_names.get(pm.key, pm.key)
 
@@ -275,3 +310,52 @@ def get_cross_tariff(
         round_mode=cfg["round_mode"],
         rules=rules_out,
     )
+
+
+# ── Endpoints ────────────────────────────────────────────────────────────────
+
+@router.get("/api/cross-tariff")
+def get_cross_tariff(
+    location_id: Optional[int] = Query(default=None),
+    zone: Optional[int] = Query(default=None),
+    tenant_id: uuid.UUID = Depends(get_current_tenant),
+) -> dict:
+    factory = make_session_factory(_get_engine())
+    with tenant_context(factory, tenant_id) as session:
+        active_codes = [code for code, _ in fetch_active_providers(session)]
+        active_rule = PricingRuleRepository(session).get_active(tenant_id)
+        cfg = _resolve_saved_config(
+            active_rule.formula_jsonb if active_rule else None, active_codes
+        )
+        return _compute_payload(session, tenant_id, cfg, zone, location_id)
+
+
+@router.post("/api/cross-tariff/preview", dependencies=[Depends(require_fetch_header)])
+def preview_cross_tariff(
+    body: PricingConfigBody,
+    tenant_id: uuid.UUID = Depends(get_current_tenant),
+) -> dict:
+    factory = make_session_factory(_get_engine())
+    with tenant_context(factory, tenant_id) as session:
+        active_codes = [code for code, _ in fetch_active_providers(session)]
+        cfg = _cfg_from_body(body, session, active_codes)
+        return _compute_payload(session, tenant_id, cfg, body.zone, body.location_id)
+
+
+@router.put("/api/pricing-config", dependencies=[Depends(require_fetch_header)])
+def put_pricing_config(
+    body: PricingConfigBody,
+    tenant_id: uuid.UUID = Depends(get_current_tenant),
+) -> dict:
+    factory = make_session_factory(_get_engine())
+    with tenant_context(factory, tenant_id) as session:
+        active_codes = [code for code, _ in fetch_active_providers(session)]
+        cfg = _cfg_from_body(body, session, active_codes)
+        rule = PricingRuleRepository(session).save(
+            tenant_id=tenant_id,
+            name="cross-tariff config",
+            formula_jsonb=_formula_from_cfg(cfg),
+            acriss_code=None,
+        )
+        # tenant_context commits on exit.
+        return {"ok": True, "version": rule.version}

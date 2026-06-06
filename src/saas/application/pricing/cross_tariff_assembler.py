@@ -284,6 +284,17 @@ class SummaryCell:
     market_min: Optional[Decimal]
     market_max: Optional[Decimal]
     empty: bool
+    # Calculation pipeline (for the drawer): market base → rule → clamp → round.
+    market_base: Optional[Decimal] = None      # aggregate before the rule
+    after_rule: Optional[Decimal] = None        # after ± rule, before clamp
+    clamped: bool = False                       # floor/ceiling fired
+    clamp_bound: Optional[Decimal] = None        # the bound it was clamped to
+    rounded: Optional[Decimal] = None            # final value after rounding (== recommended_total)
+    round_flip: bool = False                     # rounding guard nudged it back across the base
+    # Per-cell flags (not just the per-category union).
+    stale: bool = False
+    inferred: bool = False
+    partial: bool = False
 
 
 @dataclass
@@ -528,6 +539,12 @@ def assemble_cross_tariff(
             totals = [p.total for p in cr.present]
             mkt_min = min(totals) if totals else None
             mkt_max = max(totals) if totals else None
+            clamp_kind = cr.flags.clamped  # "floor" | "ceiling" | None
+            clamp_bound = (
+                cr.floor_val if clamp_kind == "floor"
+                else cr.ceiling_val if clamp_kind == "ceiling"
+                else None
+            )
             summary_cells.append(SummaryCell(
                 duration=dur,
                 recommended_total=cr.rec_total,
@@ -535,6 +552,15 @@ def assemble_cross_tariff(
                 market_min=mkt_min,
                 market_max=mkt_max,
                 empty=False,
+                market_base=cr.base_total,
+                after_rule=cr.adjusted_total,
+                clamped=clamp_kind is not None,
+                clamp_bound=clamp_bound,
+                rounded=cr.rec_total,
+                round_flip=cr.round_flip,
+                stale=cr.flags.stale,
+                inferred=cr.flags.inferred,
+                partial=cr.flags.coverage < cr.flags.total_providers,
             ))
             if cr.flags.coverage < cr.flags.total_providers:
                 f_partial = True

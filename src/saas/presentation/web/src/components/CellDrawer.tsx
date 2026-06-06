@@ -25,6 +25,12 @@ export default function CellDrawer({ data, selection, onClose }: Props) {
   })
   const presentCount = lines.filter((l) => l.c && !l.c.missing && !l.c.anomaly).length
   const totalProviders = data.meta.providers.length
+  const degraded = lines.some((l) => l.c?.anomaly)
+
+  // Effective rule for this category (own override or the global default).
+  const rule = cat ? (data.meta.rules[cat.acriss_code] ?? data.meta.rules._default) : undefined
+  const usedDefault = cat ? !(cat.acriss_code in data.meta.rules) : true
+  const opTxt = rule ? `${rule.op === 'sub' ? '−' : '+'} ${rule.val}${rule.mode === 'pct' ? '%' : ' €'}` : ''
 
   return (
     <>
@@ -89,9 +95,40 @@ export default function CellDrawer({ data, selection, onClose }: Props) {
               })}
 
               <div className="calc">
-                <div className="step muted">
+                <div className="step">
                   <span className="k">Rango de mercado</span>
                   <span className="v">{marketRange(summary.market_min, summary.market_max)}</span>
+                </div>
+                <div className="step">
+                  <span className="k">Base ({BASE_LABELS_NOUN[data.meta.base] ?? data.meta.base})</span>
+                  <span className="v">{eur(summary.market_base)}</span>
+                </div>
+                <div className="step">
+                  <span className="k">
+                    Regla {opTxt} ·{' '}
+                    <span style={{ color: 'var(--blue)' }}>{usedDefault ? 'global' : 'propia'}</span>
+                  </span>
+                  <span className="v">{eur(summary.after_rule)}</span>
+                </div>
+                {summary.clamped ? (
+                  <div className="step">
+                    <span className="k">Ajuste por suelo/techo ({eur(summary.clamp_bound)})</span>
+                    <span className="v" style={{ color: 'var(--warn)' }}>{eur(summary.clamp_bound)}</span>
+                  </div>
+                ) : (
+                  <div className="step muted">
+                    <span className="k">Suelo · techo</span>
+                    <span className="v">ok</span>
+                  </div>
+                )}
+                <div className="step">
+                  <span className="k">
+                    Redondeo ({data.meta.round === '0' ? 'no' : data.meta.round})
+                    {summary.round_flip && (
+                      <span style={{ color: 'var(--warn)' }}> · ajustado para no cruzar la base</span>
+                    )}
+                  </span>
+                  <span className="v">{eur(summary.rounded)}</span>
                 </div>
                 <div className="step total">
                   <span className="k">Total recomendado</span>
@@ -105,16 +142,16 @@ export default function CellDrawer({ data, selection, onClose }: Props) {
 
               <div className="flagrow">
                 <span className="flag cov"><span className="b cov" />cobertura {presentCount} de {totalProviders}</span>
-                {cat.flags.clamped && <span className="flag clamp"><span className="b clamp" />clamped</span>}
-                {cat.flags.stale && <span className="flag stale"><span className="b stale" />stale</span>}
-                {cat.flags.anomaly && <span className="flag anom"><span className="b anom" />degraded_inputs</span>}
-                {cat.flags.inferred && <span className="flag inf"><span className="b inf" />is_inferred</span>}
+                {summary.clamped && <span className="flag clamp"><span className="b clamp" />clamped</span>}
+                {summary.stale && <span className="flag stale"><span className="b stale" />stale</span>}
+                {degraded && <span className="flag anom"><span className="b anom" />degraded_inputs</span>}
+                {summary.inferred && <span className="flag inf"><span className="b inf" />is_inferred</span>}
               </div>
 
               <div className="hint">
-                Procedencia de esta celda: cada precio de proveedor usado, cuál fijó la base
-                (resaltado), la cobertura y los avisos. El detalle del pipeline de cálculo
-                (base → regla → suelo/techo → redondeo) se añadirá al guardar la regla.
+                Procedencia exacta de esta celda: cada precio de proveedor usado, cuál fijó la base
+                (resaltado), el pipeline base → regla → suelo/techo → redondeo, y el estado de
+                cobertura. Es lo que se persistirá como <code>inputs_snapshot</code> al guardar.
               </div>
             </div>
           </>

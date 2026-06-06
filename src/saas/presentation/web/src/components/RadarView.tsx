@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { fetchCrossTariff } from '../lib/api'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { configKey, fetchInitial, previewCrossTariff, savePricingConfig } from '../lib/api'
 import type { Controls, Meta, Rule } from '../types'
 import Topbar from './Topbar'
 import ControlsBar from './ControlsBar'
@@ -14,6 +14,8 @@ import Modal from './Modal'
 function controlsFromMeta(meta: Meta): Controls {
   const master = meta.providers.find((p) => p.is_master)?.key ?? null
   const r = meta.rules._default
+  const category_rules: Record<string, Rule> = {}
+  for (const [k, v] of Object.entries(meta.rules)) if (k !== '_default') category_rules[k] = v
   return {
     base: meta.base,
     round: meta.round,
@@ -25,6 +27,7 @@ function controlsFromMeta(meta: Meta): Controls {
     rule_mode: r.mode,
     rule_floor: r.floor,
     rule_ceiling: r.ceiling,
+    category_rules,
   }
 }
 
@@ -36,25 +39,42 @@ interface Props {
 
 export default function RadarView({ onMeta, email, onLogout }: Props) {
   const [controls, setControls] = useState<Controls | null>(null)
+  const [saved, setSaved] = useState<string | null>(null) // configKey of last saved/loaded
   const [openCats, setOpenCats] = useState<Set<string>>(new Set())
   const [drawer, setDrawer] = useState<{ code: string; duration: number } | null>(null)
   const [ruleOpen, setRuleOpen] = useState(true)
-  // Settings/rules live in a modal — closed by default, grid gets full width.
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
 
   const query = useQuery({
     queryKey: ['cross-tariff', controls],
-    queryFn: () => fetchCrossTariff(controls),
+    queryFn: () => (controls ? previewCrossTariff(controls) : fetchInitial()),
     placeholderData: keepPreviousData,
   })
 
-  // Seed local controls from the first successful response; lift meta to the shell.
+  // Seed controls + saved-snapshot from the first response; lift meta to the shell.
   useEffect(() => {
     if (query.data) {
       onMeta(query.data.meta)
-      if (controls === null) setControls(controlsFromMeta(query.data.meta))
+      if (controls === null) {
+        const seeded = controlsFromMeta(query.data.meta)
+        setControls(seeded)
+        setSaved(configKey(seeded))
+      }
     }
   }, [query.data, controls, onMeta])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2600)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const saveMutation = useMutation({
+    mutationFn: () => savePricingConfig(controls!),
+    onSuccess: () => { setSaved(configKey(controls!)); setToast('Precios guardados') },
+    onError: (e: unknown) => setToast(`Error al guardar: ${(e as Error).message}`),
+  })
 
   const patch = (p: Partial<Controls>) => setControls((c) => (c ? { ...c, ...p } : c))
   const patchRule = (r: Partial<Rule>) =>
@@ -65,6 +85,8 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
       ...(r.floor !== undefined ? { rule_floor: r.floor } : {}),
       ...(r.ceiling !== undefined ? { rule_ceiling: r.ceiling } : {}),
     })
+
+  const setCategoryRules = (cr: Record<string, Rule>) => patch({ category_rules: cr })
 
   const toggleCat = (code: string) =>
     setOpenCats((s) => {
@@ -103,6 +125,8 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
 
   const data = query.data!
   const ctl = controls ?? controlsFromMeta(data.meta)
+  const dirty = controls !== null && saved !== null && configKey(controls) !== saved
+  const categories = data.categories.map((c) => ({ code: c.acriss_code, label: c.view_label }))
 
   return (
     <>
@@ -143,7 +167,13 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button className="btn">Exportar CSV</button>
-            <button className="btn primary">Guardar configuración de precios</button>
+            <button
+              className={`btn primary${dirty ? ' dirty' : ''}`}
+              disabled={!dirty || saveMutation.isPending}
+              onClick={() => saveMutation.mutate()}
+            >
+              {saveMutation.isPending ? 'Guardando…' : 'Guardar configuración de precios'}
+            </button>
           </div>
         </div>
       </div>
@@ -170,9 +200,19 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
           open={ruleOpen}
           onToggle={() => setRuleOpen((o) => !o)}
           onChange={patchRule}
+          categoryRules={ctl.category_rules}
+          categories={categories}
+          onAddCategory={(code, rule) => setCategoryRules({ ...ctl.category_rules, [code]: rule })}
+          onChangeCategory={(code, p) =>
+            setCategoryRules({ ...ctl.category_rules, [code]: { ...ctl.category_rules[code], ...p } })}
+          onDeleteCategory={(code) => {
+            const { [code]: _drop, ...rest } = ctl.category_rules
+            setCategoryRules(rest)
+          }}
         />
       </Modal>
       <CellDrawer data={data} selection={drawer} onClose={() => setDrawer(null)} />
+      {toast && <div className="toast">{toast}</div>}
     </>
   )
 }

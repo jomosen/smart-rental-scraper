@@ -56,6 +56,16 @@ export interface SummaryCell {
   market_min: string | null
   market_max: string | null
   empty: boolean
+  // Calculation pipeline (for the drawer) + per-cell flags.
+  market_base: string | null
+  after_rule: string | null
+  clamped: boolean
+  clamp_bound: string | null
+  rounded: string | null
+  round_flip: boolean
+  stale: boolean
+  inferred: boolean
+  partial: boolean
 }
 
 export interface ProviderCell {
@@ -109,4 +119,16 @@ export interface Controls {
   rule_mode: string
   rule_floor: string
   rule_ceiling: string
+  category_rules: Record<string, Rule>
+}
+
+// Body shape for POST /preview and PUT /pricing-config.
+export interface PricingConfig {
+  base: string
+  round: string
+  master_provider_key: string | null
+  default_rule: Rule
+  category_rules: Record<string, Rule>
+  zone?: number | null
+  location_id?: number | null
 }
