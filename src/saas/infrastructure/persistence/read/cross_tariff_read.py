@@ -100,6 +100,7 @@ def fetch_cross_tariff_dataframe(
                    hz.start_date,
                    hz.end_date,
                    hz.representative_date,
+                   hz.id            AS zone_id,
                    hz.provider_vehicle_category_id,
                    p.code           AS provider_code
             FROM   homogeneous_zones hz
@@ -113,6 +114,25 @@ def fetch_cross_tariff_dataframe(
               {acriss_clause}
               {pending_clause}
               {zone_loc_clause}
+        ),
+        obs_in_zone AS (
+            -- Back each zone with the observation at its representative_date, or
+            -- failing that the CLOSEST observation WITHIN [start_date, end_date].
+            -- A homogeneous zone is ~flat in price by design, so any in-range
+            -- observation is representative. Deliberately never falls back to an
+            -- observation OUTSIDE the zone (that would be another season).
+            -- See docs/DATA_MODEL.md (homogeneous_zones — representative/derivation).
+            SELECT DISTINCT ON (z.zone_id, lo.duration_days)
+                   z.zone_id,
+                   lo.duration_days,
+                   lo.price_per_day,
+                   lo.total_price
+            FROM   zones z
+            JOIN   latest_obs lo
+                       ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
+                      AND lo.pickup_date BETWEEN z.start_date AND z.end_date
+            ORDER  BY z.zone_id, lo.duration_days,
+                      abs(lo.pickup_date - z.representative_date), lo.pickup_date
         )
         SELECT z.acriss_code,
                z.acriss_display_name,
@@ -125,15 +145,13 @@ def fetch_cross_tariff_dataframe(
                z.start_date,
                z.end_date,
                z.representative_date,
-               lo.duration_days,
-               lo.price_per_day,
-               lo.total_price
+               o.duration_days,
+               o.price_per_day,
+               o.total_price
         FROM   zones z
-        JOIN   latest_obs lo
-                   ON lo.provider_vehicle_category_id = z.provider_vehicle_category_id
-                  AND lo.pickup_date = z.representative_date
+        JOIN   obs_in_zone o ON o.zone_id = z.zone_id
         ORDER  BY z.acriss_code, z.provider_code, z.external_code,
-                  z.start_date, lo.duration_days
+                  z.start_date, o.duration_days
     """)
 
     result = conn.execute(sql, params)
@@ -202,6 +220,34 @@ def fetch_canonical_locations(conn: _Executor) -> list[dict]:
         ORDER  BY l.name
     """)
     return [{"id": r.id, "code": r.code, "name": r.name} for r in conn.execute(sql).fetchall()]
+
+
+def fetch_master_zone_covering(
+    conn: _Executor, master_code: str, location_id: int | None, today
+) -> dict | None:
+    """Return {date_from, date_to} of the master's active zone covering `today`, or None.
+
+    Used to label the data-gap notice: the genuinely-current season even when no
+    master observation backs it (so it was skipped from the rendered grid).
+    """
+    loc = ""
+    params = {"code": master_code, "today": today}
+    if location_id is not None:
+        loc = "AND pvc.provider_location_id IN (SELECT id FROM provider_locations WHERE location_id = :loc)"
+        params["loc"] = location_id
+    row = conn.execute(text(f"""
+        SELECT hz.start_date, hz.end_date
+        FROM   homogeneous_zones hz
+        JOIN   provider_vehicle_categories pvc ON pvc.id = hz.provider_vehicle_category_id
+        JOIN   providers p ON p.id = pvc.provider_id
+        WHERE  hz.active = TRUE AND pvc.active = TRUE
+          AND  p.code = :code
+          AND  hz.start_date <= :today AND hz.end_date >= :today
+          {loc}
+        ORDER  BY hz.start_date
+        LIMIT  1
+    """), params).fetchone()
+    return {"date_from": row.start_date.isoformat(), "date_to": row.end_date.isoformat()} if row else None
 
 
 def fetch_location(conn: _Executor, location_id: int) -> dict | None:

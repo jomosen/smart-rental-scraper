@@ -181,7 +181,7 @@ Each `tenant_subscription` declares how many days of forward coverage it wants. 
 
 **Option C: do not persist synthetic data.** Only real scraped observations are stored. Expansion happens at query time.
 
-- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_category)` tuple and has a `representative_date` that is actually scraped.
+- `homogeneous_zones` — persisted output of `SeasonAnalyzer`. Each zone covers a date range for a `(provider, location, rate, provider_vehicle_category)` tuple and has a `representative_date` that is *normally* scraped. It is not guaranteed: availability gaps or re-analysis can leave the representative without an observation, so the read side falls back to the closest observation within the zone range (see the `homogeneous_zones` derivation rule in the schema section).
 - `price_observations` — only contains real scrapes (representatives + probe points).
 - The application layer (`PriceQueryService` or equivalent) joins zones → representative → observation to answer "price for day X". Returns `is_inferred=true` when the day requested ≠ representative date.
 
@@ -593,6 +593,17 @@ homogeneous_zones
   detected_at
   active BOOLEAN
   -- Partial index: WHERE active = true
+  --
+  -- Derivation rule (read side): a zone is backed by the observation at its
+  -- representative_date; if that exact observation is missing (the chosen
+  -- representative was not captured — e.g. no availability for that pickup date,
+  -- or the zone was re-analysed onto a date the extractor did not hit), fall back
+  -- to the CLOSEST observation WITHIN [start_date, end_date]. A homogeneous zone
+  -- is ~flat in price by construction (±SEASON_PRICE_THRESHOLD), so any in-range
+  -- observation is representative. NEVER fall back to an observation outside the
+  -- zone — that belongs to another season and would be a wrong price. A zone with
+  -- no in-range observation at all stays empty (surfaced, not silently dropped).
+  -- Implemented in cross_tariff_read.fetch_cross_tariff_dataframe (obs_in_zone CTE).
 
 price_observations
   id BIGSERIAL

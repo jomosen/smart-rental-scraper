@@ -22,6 +22,7 @@ X-Requested-With: fetch — a cheap defence on top of SameSite=Lax cookies.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Literal, Optional
 
@@ -42,6 +43,7 @@ from src.saas.infrastructure.persistence.read.cross_tariff_read import (
     fetch_cross_tariff_dataframe,
     fetch_data_updated_at,
     fetch_location,
+    fetch_master_zone_covering,
 )
 from src.saas.infrastructure.persistence.repositories import PricingRuleRepository
 from src.saas.infrastructure.persistence.session import make_session_factory, tenant_context
@@ -176,6 +178,8 @@ def _serialize(
     base: str,
     round_mode: str,
     rules: dict,
+    data_gap: bool,
+    vigente_range: Optional[dict],
 ) -> dict:
     return {
         "meta": {
@@ -188,6 +192,11 @@ def _serialize(
                 "total": payload.zone.total,
                 "date_from": payload.zone.date_from.isoformat() if payload.zone.date_from else None,
                 "date_to": payload.zone.date_to.isoformat() if payload.zone.date_to else None,
+                "covers_today": payload.zone.covers_today,
+                # True when the season covering today has no master data and was
+                # skipped, so the grid is showing a different (fallback) zone.
+                "data_gap": data_gap,
+                "vigente_range": vigente_range,  # the real current season when data_gap
             },
             "master_rep_date": payload.master_rep_date.isoformat() if payload.master_rep_date else None,
             "durations": payload.durations,
@@ -288,6 +297,7 @@ def _compute_payload(
     examples = fetch_catalog_examples(session)
     updated_at = fetch_data_updated_at(session, tuple(provider_codes))
 
+    today = date.today()
     payload = assemble_cross_tariff(
         df=df,
         providers=provider_codes,
@@ -299,9 +309,22 @@ def _compute_payload(
         durations=list(DURATIONS),
         examples=examples,
         zone_index=zone,
+        today=today,
     )
     for pm in payload.providers:
         pm.name = provider_names.get(pm.key, pm.key)
+
+    # Data gap: on a default load (no explicit zone) the rendered zone does not
+    # contain today → the current season had no master data and was skipped.
+    data_gap = False
+    vigente_range: Optional[dict] = None
+    if zone is None and not payload.zone.covers_today:
+        vigente = fetch_master_zone_covering(session, master_code, selected_location_id, today)
+        if vigente and (
+            vigente["date_from"] != (payload.zone.date_from.isoformat() if payload.zone.date_from else None)
+        ):
+            data_gap = True
+            vigente_range = vigente
 
     rules_out = {"_default": cfg["global_rule"], **cfg["category_rules"]}
     return _serialize(
@@ -314,6 +337,8 @@ def _compute_payload(
         base=cfg["base"],
         round_mode=cfg["round_mode"],
         rules=rules_out,
+        data_gap=data_gap,
+        vigente_range=vigente_range,
     )
 
 

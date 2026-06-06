@@ -10,6 +10,7 @@ import PriceGrid from './PriceGrid'
 import CellDrawer from './CellDrawer'
 import Legend from './Legend'
 import Modal from './Modal'
+import { fmtDate } from '../lib/format'
 
 function controlsFromMeta(meta: Meta): Controls {
   const master = meta.providers.find((p) => p.is_master)?.key ?? null
@@ -152,6 +153,12 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
             </button>
           }
         />
+        {data.meta.zone.data_gap && data.meta.zone.vigente_range && (
+          <div className="zone-gap-note">
+            La temporada vigente ({fmtDate(data.meta.zone.vigente_range.date_from)} – {fmtDate(data.meta.zone.vigente_range.date_to)})
+            no tiene datos del maestro; mostrando {fmtDate(data.meta.zone.date_from)} – {fmtDate(data.meta.zone.date_to)}.
+          </div>
+        )}
         <PriceGrid
           data={data}
           openCats={openCats}

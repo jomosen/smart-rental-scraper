@@ -325,6 +325,7 @@ class ZoneMeta:
     total: int
     date_from: Optional[date]
     date_to: Optional[date]
+    covers_today: bool = False   # does the rendered zone actually contain `today`?
 
 
 @dataclass
@@ -599,7 +600,10 @@ def assemble_cross_tariff(
     return CrossTariffPayload(
         durations=list(durations),
         providers=prov_meta,
-        zone=ZoneMeta(index=idx, total=n_zones, date_from=z_start, date_to=z_end),
+        zone=ZoneMeta(
+            index=idx, total=n_zones, date_from=z_start, date_to=z_end,
+            covers_today=(z_start <= today <= z_end),
+        ),
         master_rep_date=master_rep_date,
         categories=categories,
     )

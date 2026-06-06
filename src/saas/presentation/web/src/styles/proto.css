@@ -212,6 +212,13 @@ select.mini, input.mini {
 }
 .ctxline .ctx-link:hover { color: var(--accent-ink); }
 
+/* Data-gap notice: the current season had no master data and was skipped. */
+.zone-gap-note {
+  margin: 0 0 14px; padding: 9px 14px; border-radius: 8px;
+  background: var(--warn-bg); border: 1px solid #f0d9a8; color: var(--warn);
+  font-size: 12.5px; font-weight: 500;
+}
+
 /* ---------- Grid ---------- */
 .gridwrap { border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

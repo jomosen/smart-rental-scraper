@@ -13,6 +13,9 @@ export interface ZoneMeta {
   total: number
   date_from: string | null
   date_to: string | null
+  covers_today: boolean
+  data_gap: boolean
+  vigente_range: { date_from: string; date_to: string } | null
 }
 
 export interface Rule {
