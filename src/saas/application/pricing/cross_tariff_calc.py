@@ -246,6 +246,25 @@ _ROUND_OFFSETS = {
 }
 
 
+def _snap_to_mode(value: Decimal, round_mode: str) -> Decimal:
+    """Snap value to the target grid of round_mode (no directional guard).
+
+    Two families:
+      - "multiple of step" (offset == 0): nearest multiple of step. For "1" that
+        is the nearest integer; for "0.50" the nearest half — (value*2 rounded)/2.
+      - "cents target" (offset != 0): nearest integer, then set the cents to the
+        target — e.g. ,99 / ,90.
+    """
+    step = _ROUND_STEPS[round_mode]
+    offset = _ROUND_OFFSETS[round_mode]
+    if offset == 0:
+        # Nearest multiple of `step`. Dividing by step keeps halves exact:
+        # 52.46 / 0.5 = 104.92 → 105 → 52.50 (NOT quantize(0.5), which rounds to tenths).
+        return (value / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step
+    base_int = (value - offset).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return base_int + offset
+
+
 def apply_rounding_directional(
     value: Decimal,
     base_total: Decimal,
@@ -257,22 +276,21 @@ def apply_rounding_directional(
     Invariant: if rule.op == "sub", result < base_total.
                if rule.op == "add", result > base_total.
     When rounding would violate the invariant the value is nudged by one step
-    in the correct direction.
+    (the step of `round_mode`, e.g. 0.5 for "0.50") in the correct direction.
 
     Returns (rounded_value, round_flip_occurred).
     """
     if round_mode == "0" or rule.val == 0:
         return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), False
 
-    step = _ROUND_STEPS[round_mode]
-    offset = _ROUND_OFFSETS[round_mode]
+    if round_mode not in _ROUND_STEPS:
+        raise ValueError(f"Unknown round_mode: {round_mode!r}")
 
+    step = _ROUND_STEPS[round_mode]
     if step is None:
         return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), False
 
-    # Round to nearest ,XX
-    base_int = (value - offset).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    rounded = base_int + offset
+    rounded = _snap_to_mode(value, round_mode)
 
     flip = False
     if rule.op == "sub" and rounded >= base_total:

@@ -195,9 +195,48 @@ class TestApplyRoundingDirectional:
         val, flip = apply_rounding_directional(D("94.7"), D("100"), _rule(op="sub"), "0.50")
         assert float(val) % 0.5 == pytest.approx(0.0)
 
+    def test_round_to_half_lands_on_50(self):
+        # Reproducible bug: base 53.46, rule -1€ → after_rule 52.46 → 52.50 (not 52.00).
+        val, flip = apply_rounding_directional(D("52.46"), D("53.46"), _rule(op="sub"), "0.50")
+        assert val == D("52.50")
+        assert flip is False
+
+    def test_round_to_half_lands_on_00(self):
+        # The other half of the fraction: 52.20 → nearest half is 52.00.
+        val, flip = apply_rounding_directional(D("52.20"), D("53.46"), _rule(op="sub"), "0.50")
+        assert val == D("52.00")
+
+    def test_round_to_half_add_lands_on_50(self):
+        # add rule, .xx that snaps up to .50
+        val, flip = apply_rounding_directional(D("54.40"), D("53.46"), _rule(op="add"), "0.50")
+        assert val == D("54.50")
+        assert flip is False
+
+    def test_round_to_half_guard_steps_by_half(self):
+        # add rule, snap lands on/below base (53.20 → 53.00 ≤ 53.46) → guard nudges
+        # up by exactly one step (0.5), not 1.
+        val, flip = apply_rounding_directional(D("53.20"), D("53.46"), _rule(op="add"), "0.50")
+        assert val == D("53.50")
+        assert flip is True
+
     def test_round_to_integer(self):
         val, flip = apply_rounding_directional(D("94.6"), D("100"), _rule(op="sub"), "1")
+        assert val == D("95.00")
         assert float(val) == float(int(float(val)))
+
+    def test_round_to_integer_other_half(self):
+        val, flip = apply_rounding_directional(D("94.4"), D("100"), _rule(op="sub"), "1")
+        assert val == D("94.00")
+
+    def test_round_to_99_other_half(self):
+        # value already near a .99 boundary from below
+        val, flip = apply_rounding_directional(D("95.6"), D("100"), _rule(op="sub"), "0.99")
+        assert str(val).endswith(".99")
+        assert val == D("95.99")
+
+    def test_unknown_round_mode_raises(self):
+        with pytest.raises(ValueError, match="Unknown round_mode"):
+            apply_rounding_directional(D("95.3"), D("100"), _rule(op="sub"), "0.25")
 
     def test_zero_val_no_guard(self):
         val, flip = apply_rounding_directional(D("100.0"), D("100"), _rule(val="0"), "0.99")
