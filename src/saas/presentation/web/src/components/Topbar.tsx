@@ -1,20 +1,15 @@
 import { fmtAgo } from '../lib/format'
 
 interface Props {
-  providerCount: number
   dataUpdatedAt: string | null
   email: string
   onLogout: () => void
 }
 
-export default function Topbar({ providerCount, dataUpdatedAt, email, onLogout }: Props) {
+export default function Topbar({ dataUpdatedAt, email, onLogout }: Props) {
   const initial = (email || '?').charAt(0).toUpperCase()
   return (
     <div className="topbar">
-      <div>
-        <div className="vtitle">Radar de precios</div>
-        <div className="vsub">Mercado por segmento · {providerCount} proveedores en el radar</div>
-      </div>
       <div className="tspacer" />
       <div className="databadge">
         <span className="dot-ok" /> Datos actualizados {fmtAgo(dataUpdatedAt)}

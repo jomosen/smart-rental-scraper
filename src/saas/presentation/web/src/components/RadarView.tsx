@@ -140,12 +140,13 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
   const data = query.data!
   const ctl = controls ?? controlsFromMeta(data.meta)
   const dirty = controls !== null && saved !== null && configKey(controls) !== saved
+  // Showing the previous zone/config while the new one loads → dim + spinner.
+  const busy = query.isFetching && query.isPlaceholderData
   const categories = data.categories.map((c) => ({ code: c.acriss_code, label: c.view_label }))
 
   return (
     <>
       <Topbar
-        providerCount={ctl.active_providers.length}
         dataUpdatedAt={data.meta.data_updated_at}
         email={email}
         onLogout={onLogout}
@@ -153,6 +154,7 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
       <div className="wrap">
         <ZoneNav
           meta={data.meta}
+          loading={busy}
           onPrev={() => patch({ zone: Math.max(0, (ctl.zone ?? data.meta.zone.index) - 1) })}
           onNext={() => patch({ zone: (ctl.zone ?? data.meta.zone.index) + 1 })}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -172,29 +174,34 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
             no tiene datos del maestro; mostrando {fmtDate(data.meta.zone.date_from)} – {fmtDate(data.meta.zone.date_to)}.
           </div>
         )}
-        <PriceGrid
-          data={data}
-          openCats={openCats}
-          onToggleCat={toggleCat}
-          onCellClick={(code, duration) => setDrawer({ code, duration })}
-        />
+        <div className={`grid-area${busy ? ' loading' : ''}`} aria-busy={busy}>
+          <PriceGrid
+            data={data}
+            openCats={openCats}
+            onToggleCat={toggleCat}
+            onCellClick={(code, duration) => setDrawer({ code, duration })}
+          />
+          {busy && (
+            <div className="grid-loader">
+              <span className="spinner" role="status" aria-label="Cargando zona" />
+            </div>
+          )}
+        </div>
         <Legend />
-        <div className="footer-actions">
-          <div className="export-note">
-            Esto es un <b>preview en vivo</b>. Al guardar, se persiste como regla versionada; el
-            motor recalcula con cada scrape y la API sirve por código ACRISS. La aplicación al
-            sistema del cliente la decide su cron — nada se publica en silencio.
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn">Exportar CSV</button>
-            <button
-              className={`btn primary${dirty ? ' dirty' : ''}`}
-              disabled={!dirty || saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
-            >
-              {saveMutation.isPending ? 'Guardando…' : 'Guardar configuración de precios'}
-            </button>
-          </div>
+        <div className="export-note">
+          Esto es un <b>preview en vivo</b>. Al guardar, se persiste como regla versionada; el
+          motor recalcula con cada scrape y la API sirve por código ACRISS. La aplicación al
+          sistema del cliente la decide su cron — nada se publica en silencio.
+        </div>
+        <div className="floating-actions">
+          <button className="btn">Exportar CSV</button>
+          <button
+            className={`btn primary${dirty ? ' dirty' : ''}`}
+            disabled={!dirty || saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? 'Guardando…' : 'Guardar configuración de precios'}
+          </button>
         </div>
       </div>
 

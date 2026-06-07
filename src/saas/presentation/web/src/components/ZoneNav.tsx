@@ -8,21 +8,22 @@ interface Props {
   onNext: () => void
   action?: ReactNode
   onOpenSettings?: () => void
+  loading?: boolean
 }
 
-export default function ZoneNav({ meta, onPrev, onNext, action, onOpenSettings }: Props) {
+export default function ZoneNav({ meta, onPrev, onNext, action, onOpenSettings, loading }: Props) {
   const { zone, providers, master_rep_date } = meta
   const masterName = providers.find((p) => p.is_master)?.name ?? '—'
   const providerCount = providers.length
   return (
-    <>
+    <div className="zone-sticky">
       <div className="zonenav">
-        <button className="arrow" aria-label="Zona anterior" disabled={zone.index <= 0} onClick={onPrev}>
+        <button className="arrow" aria-label="Zona anterior" disabled={loading || zone.index <= 0} onClick={onPrev}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M15 6l-6 6 6 6" />
           </svg>
         </button>
-        <button className="arrow" aria-label="Zona siguiente" disabled={zone.index >= zone.total - 1} onClick={onNext}>
+        <button className="arrow" aria-label="Zona siguiente" disabled={loading || zone.index >= zone.total - 1} onClick={onNext}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 6l6 6-6 6" />
           </svg>
@@ -40,6 +41,6 @@ export default function ZoneNav({ meta, onPrev, onNext, action, onOpenSettings }
         )}
         {' '}· fecha representativa {fmtDate(master_rep_date)} · precio total en € (€/día derivado)
       </div>
-    </>
+    </div>
   )
 }
