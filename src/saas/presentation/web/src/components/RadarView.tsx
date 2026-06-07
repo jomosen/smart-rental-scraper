@@ -21,6 +21,7 @@ function controlsFromMeta(meta: Meta): Controls {
     base: meta.base,
     round: meta.round,
     master,
+    active_providers: meta.active_providers,
     location_id: meta.location?.id ?? null,
     zone: meta.zone.index,
     rule_op: r.op,
@@ -89,6 +90,18 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
 
   const setCategoryRules = (cr: Record<string, Rule>) => patch({ category_rules: cr })
 
+  // Toggle a provider in/out of the radar. The master can never be removed
+  // (the chip is disabled too) and the radar can never be emptied.
+  const toggleProvider = (key: string) =>
+    setControls((c) => {
+      if (!c || key === c.master) return c
+      const on = c.active_providers.includes(key)
+      const next = on
+        ? c.active_providers.filter((k) => k !== key)
+        : [...c.active_providers, key]
+      return next.length === 0 ? c : { ...c, active_providers: next }
+    })
+
   const toggleCat = (code: string) =>
     setOpenCats((s) => {
       const n = new Set(s)
@@ -132,7 +145,7 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
   return (
     <>
       <Topbar
-        providerCount={data.meta.providers.length}
+        providerCount={ctl.active_providers.length}
         dataUpdatedAt={data.meta.data_updated_at}
         email={email}
         onLogout={onLogout}
@@ -191,10 +204,12 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
           base={ctl.base}
           round={ctl.round}
           master={ctl.master}
+          activeProviders={ctl.active_providers}
           locationId={ctl.location_id}
           onBase={(base) => patch({ base })}
           onRound={(round) => patch({ round })}
           onMaster={(master) => patch({ master, zone: 0 })}
+          onToggleProvider={toggleProvider}
           onLocation={(location_id) => patch({ location_id, zone: 0 })}
         />
         <RuleBar

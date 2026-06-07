@@ -9,6 +9,7 @@ export function controlsToConfig(c: Controls): PricingConfig {
     base: c.base,
     round: c.round,
     master_provider_key: c.master,
+    active_providers: c.active_providers,
     default_rule: {
       op: c.rule_op, val: c.rule_val, mode: c.rule_mode,
       floor: c.rule_floor, ceiling: c.rule_ceiling,
@@ -23,7 +24,8 @@ export function configKey(c: Controls): string {
   const cats = Object.keys(cfg.category_rules).sort().reduce<Record<string, Rule>>((acc, k) => {
     acc[k] = cfg.category_rules[k]; return acc
   }, {})
-  return JSON.stringify({ ...cfg, category_rules: cats })
+  const radar = [...cfg.active_providers].sort()
+  return JSON.stringify({ ...cfg, active_providers: radar, category_rules: cats })
 }
 
 async function parse(res: Response): Promise<CrossTariffResponse> {

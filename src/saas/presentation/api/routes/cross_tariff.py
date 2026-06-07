@@ -33,6 +33,7 @@ from sqlalchemy import Engine, text
 from src.saas.application.pricing.cross_tariff_assembler import (
     CrossTariffPayload,
     assemble_cross_tariff,
+    prov_color,
 )
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.read.cross_tariff_read import (
@@ -88,6 +89,9 @@ class PricingConfigBody(BaseModel):
     base: Literal["min", "med", "avg", "max"]
     round: Literal["0", "0.99", "0.90", "0.50", "1"]
     master_provider_key: Optional[str] = None
+    # Radar subset: which providers count for the calculation. Absent/None = all
+    # active providers. Validated in _cfg_from_body (min 1, known keys, master in).
+    active_providers: Optional[list[str]] = None
     default_rule: RuleBody
     category_rules: dict[str, RuleBody] = Field(default_factory=dict)
     # Only meaningful for preview (ignored by PUT).
@@ -123,12 +127,36 @@ def _resolve_saved_config(rule_formula: Optional[dict], active_providers: list[s
 
 def _cfg_from_body(body: PricingConfigBody, session, active_codes: list[str]) -> dict:
     """Translate a validated body into a working config; DB-level checks raise 422."""
+    # Radar subset (active providers). Absent → all. Preserve market order.
+    if body.active_providers is None:
+        providers = list(active_codes)
+    else:
+        unknown_p = [p for p in body.active_providers if p not in active_codes]
+        if unknown_p:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": f"Unknown provider(s): {', '.join(sorted(set(unknown_p)))}"},
+            )
+        wanted = set(body.active_providers)
+        providers = [c for c in active_codes if c in wanted]
+        if not providers:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "At least one provider must be in the radar"},
+            )
+
     if body.master_provider_key and body.master_provider_key not in active_codes:
         raise HTTPException(
             status_code=422,
             detail={"error": f"Unknown provider '{body.master_provider_key}'"},
         )
-    master = body.master_provider_key or (active_codes[0] if active_codes else None)
+    master = body.master_provider_key or (providers[0] if providers else None)
+    # The whole calculation hangs off the master's calendar — it must be in the radar.
+    if master not in providers:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "The master provider cannot be removed from the radar"},
+        )
 
     if body.category_rules:
         valid = {
@@ -144,7 +172,7 @@ def _cfg_from_body(body: PricingConfigBody, session, active_codes: list[str]) ->
             )
 
     return {
-        "providers": list(active_codes),
+        "providers": providers,
         "master": master,
         "base": body.base,
         "round_mode": body.round,
@@ -180,6 +208,8 @@ def _serialize(
     rules: dict,
     data_gap: bool,
     vigente_range: Optional[dict],
+    all_providers: list[dict],
+    active_providers: list[str],
 ) -> dict:
     return {
         "meta": {
@@ -200,10 +230,10 @@ def _serialize(
             },
             "master_rep_date": payload.master_rep_date.isoformat() if payload.master_rep_date else None,
             "durations": payload.durations,
-            "providers": [
-                {"key": p.key, "name": p.name, "color": p.color, "is_master": p.is_master}
-                for p in payload.providers
-            ],
+            # Full active market (drives the toggleable chips); active_providers is
+            # the radar subset that actually feeds the calculation.
+            "providers": all_providers,
+            "active_providers": active_providers,
             "data_updated_at": data_updated_at.isoformat() if data_updated_at else None,
             "base": base,
             "round": round_mode,
@@ -278,8 +308,20 @@ def _compute_payload(
 
     active_providers = fetch_active_providers(session)
     provider_names = {code: name for code, name in active_providers}
+    full_codes = [code for code, _ in active_providers]
     provider_codes = cfg["providers"]
     master_code = cfg["master"]
+
+    # Full market list with stable colors (by market order) for the radar chips.
+    all_provider_meta = [
+        {
+            "key": code,
+            "name": provider_names.get(code, code),
+            "color": prov_color(code, full_codes),
+            "is_master": code == master_code,
+        }
+        for code in full_codes
+    ]
 
     canonical_locations = fetch_canonical_locations(session)
     if location_id is not None:
@@ -311,8 +353,6 @@ def _compute_payload(
         zone_index=zone,
         today=today,
     )
-    for pm in payload.providers:
-        pm.name = provider_names.get(pm.key, pm.key)
 
     # Data gap: on a default load (no explicit zone) the rendered zone does not
     # contain today → the current season had no master data and was skipped.
@@ -339,6 +379,8 @@ def _compute_payload(
         rules=rules_out,
         data_gap=data_gap,
         vigente_range=vigente_range,
+        all_providers=all_provider_meta,
+        active_providers=list(provider_codes),
     )
 
 

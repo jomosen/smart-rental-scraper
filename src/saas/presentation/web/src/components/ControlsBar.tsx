@@ -5,10 +5,12 @@ interface Props {
   base: string
   round: string
   master: string | null
+  activeProviders: string[]
   locationId: number | null
   onBase: (b: string) => void
   onRound: (r: string) => void
   onMaster: (m: string) => void
+  onToggleProvider: (key: string) => void
   onLocation: (id: number) => void
 }
 
@@ -28,8 +30,10 @@ const ROUND_OPTS = [
 ]
 
 export default function ControlsBar({
-  meta, base, round, master, locationId, onBase, onRound, onMaster, onLocation,
+  meta, base, round, master, activeProviders, locationId,
+  onBase, onRound, onMaster, onToggleProvider, onLocation,
 }: Props) {
+  const activeSet = new Set(activeProviders)
   return (
     <div className="controls">
       <div>
@@ -50,15 +54,27 @@ export default function ControlsBar({
       </div>
 
       <div>
-        <div className="ctl-label">En el radar · {meta.providers.length}/3</div>
+        <div className="ctl-label">En el radar · {activeProviders.length}/{meta.providers.length}</div>
         <div className="field">
           <div className="chips">
-            {meta.providers.map((p) => (
-              <span className="chip" key={p.key}>
-                <span className="dot" style={{ background: p.color }} />
-                {p.name}
-              </span>
-            ))}
+            {meta.providers.map((p) => {
+              const on = activeSet.has(p.key)
+              const isMaster = p.key === master
+              return (
+                <button
+                  type="button"
+                  className={`chip${on ? ' on' : ' off'}${isMaster ? ' master' : ''}`}
+                  key={p.key}
+                  disabled={isMaster}
+                  aria-pressed={on}
+                  title={isMaster ? 'Calendario maestro — no se puede quitar' : undefined}
+                  onClick={() => !isMaster && onToggleProvider(p.key)}
+                >
+                  <span className="dot" style={{ background: p.color }} />
+                  {p.name}
+                </button>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -84,7 +100,7 @@ export default function ControlsBar({
         <div className="ctl-label">Calendario maestro</div>
         <div className="field">
           <select className="mini" value={master ?? ''} onChange={(e) => onMaster(e.target.value)}>
-            {meta.providers.map((p) => (
+            {meta.providers.filter((p) => activeSet.has(p.key)).map((p) => (
               <option key={p.key} value={p.key}>{p.name}</option>
             ))}
           </select>

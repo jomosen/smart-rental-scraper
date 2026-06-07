@@ -136,9 +136,19 @@ body {
 .chip {
   display: inline-flex; align-items: center; gap: 8px;
   background: #fff; border: 1px solid var(--line); border-radius: 999px;
-  padding: 5px 6px 5px 12px; font-size: 13px; font-weight: 500;
+  padding: 5px 12px; font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: opacity .12s, border-color .12s, background .12s;
 }
 .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+/* off = greyed out, still readable; on = solid */
+.chip.off { opacity: .45; background: var(--line-soft); }
+.chip.off .dot { background: #b8bfca !important; }
+.chip.on { border-color: var(--ink, #1a1f2b); }
+.chip:not(.master):hover { border-color: var(--ink, #1a1f2b); }
+.chip.master { cursor: not-allowed; opacity: 1; border-color: var(--line); }
+.chip.master::after {
+  content: '★'; font-size: 11px; color: #f59e0b; margin-left: 2px;
+}
 
 /* segmented control */
 .seg { display: inline-flex; background: var(--line-soft); border-radius: 8px; padding: 3px; }

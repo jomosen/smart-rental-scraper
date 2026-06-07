@@ -45,7 +45,8 @@ export interface Meta {
   zone: ZoneMeta
   master_rep_date: string | null
   durations: number[]
-  providers: ProviderMeta[]
+  providers: ProviderMeta[]        // full active market (chips)
+  active_providers: string[]       // radar subset that feeds the calculation
   data_updated_at: string | null
   base: string // effective base aggregation
   round: string // effective rounding mode
@@ -117,6 +118,7 @@ export interface Controls {
   base: string
   round: string
   master: string | null
+  active_providers: string[]
   location_id: number | null
   zone: number | null
   rule_op: string
@@ -132,6 +134,7 @@ export interface PricingConfig {
   base: string
   round: string
   master_provider_key: string | null
+  active_providers: string[]
   default_rule: Rule
   category_rules: Record<string, Rule>
   zone?: number | null
