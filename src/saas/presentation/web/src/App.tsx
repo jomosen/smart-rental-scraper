@@ -11,6 +11,7 @@ export default function App() {
   const me = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   // `plan` only lives in the cross-tariff meta; lift it for the sidebar.
   const [meta, setMeta] = useState<Meta | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const handleLogout = async () => {
     await logout()
@@ -26,10 +27,15 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <Sidebar tenantName={me.data.tenant_name} plan={meta?.plan ?? null} />
       <main className="main">
-        <RadarView onMeta={setMeta} email={me.data.email} onLogout={handleLogout} />
+        <RadarView
+          onMeta={setMeta}
+          email={me.data.email}
+          onLogout={handleLogout}
+          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        />
       </main>
     </div>
   )

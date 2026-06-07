@@ -334,6 +334,15 @@ td.cell .sub { color: var(--ink-faint); font-size: 11px; margin-top: 2px; text-a
 .btn:hover { background: var(--line-soft); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: var(--accent-ink); }
+/* Disabled: clearly inactive (no changes to save yet) and not clickable. */
+.btn:disabled { cursor: not-allowed; }
+/* Save with no pending changes: muted grey, obviously inactive. */
+.btn.primary:not(.dirty):disabled,
+.btn.primary:not(.dirty):disabled:hover {
+  background: var(--ink-soft); border-color: var(--ink-soft); opacity: .55;
+}
+/* Saving in progress (dirty + disabled): keep accent, just dim a touch. */
+.btn.primary.dirty:disabled { opacity: .7; }
 .export-note { color: var(--ink-faint); font-size: 12.5px; max-width: 620px; margin-top: 18px; }
 
 /* ---------- Drawer (procedencia) ---------- */
@@ -387,7 +396,9 @@ td.cell .sub { color: var(--ink-faint); font-size: 11px; margin-top: 2px; text-a
 .sidebar {
   width: 232px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  overflow: hidden; transition: width .18s ease, border-color .18s ease;
 }
+.app.sidebar-collapsed .sidebar { width: 0; border-right-color: transparent; }
 .sb-brand { display: flex; align-items: center; gap: 9px; height: 54px; padding: 0 16px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .brand-dot { width: 12px; height: 12px; border-radius: 4px; background: var(--blue); }
 .sb-brand .tname { font-family: "Lato", sans-serif; font-weight: 700; font-size: 16.5px; color: var(--ink); line-height: 1.2; }
@@ -413,6 +424,13 @@ td.cell .sub { color: var(--ink-faint); font-size: 11px; margin-top: 2px; text-a
 .topbar .tspacer { flex: 1; }
 .databadge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
 .databadge .dot-ok { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.tb-burger {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--ink-soft); cursor: pointer;
+  padding: 7px; border-radius: 8px; margin-left: -4px;
+  transition: background .12s, color .12s;
+}
+.tb-burger:hover { background: var(--line-soft); color: var(--ink); }
 .tb-bell { position: relative; color: var(--ink-soft); cursor: pointer; display: flex; padding: 6px; border-radius: 8px; }
 .tb-bell:hover { background: var(--line-soft); }
 .tb-user { display: flex; align-items: center; gap: 8px; padding-left: 12px; border-left: 1px solid var(--line); }

@@ -37,9 +37,10 @@ interface Props {
   onMeta: (meta: Meta) => void
   email: string
   onLogout: () => void
+  onToggleSidebar: () => void
 }
 
-export default function RadarView({ onMeta, email, onLogout }: Props) {
+export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: Props) {
   const [controls, setControls] = useState<Controls | null>(null)
   const [saved, setSaved] = useState<string | null>(null) // configKey of last saved/loaded
   const [openCats, setOpenCats] = useState<Set<string>>(new Set())
@@ -74,7 +75,7 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
 
   const saveMutation = useMutation({
     mutationFn: () => savePricingConfig(controls!),
-    onSuccess: () => { setSaved(configKey(controls!)); setToast('Precios guardados') },
+    onSuccess: () => { setSaved(configKey(controls!)); setToast('Configuración guardada') },
     onError: (e: unknown) => setToast(`Error al guardar: ${(e as Error).message}`),
   })
 
@@ -150,6 +151,7 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
         dataUpdatedAt={data.meta.data_updated_at}
         email={email}
         onLogout={onLogout}
+        onToggleSidebar={onToggleSidebar}
       />
       <div className="wrap">
         <ZoneNav
@@ -200,7 +202,7 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
             disabled={!dirty || saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
           >
-            {saveMutation.isPending ? 'Guardando…' : 'Guardar configuración de precios'}
+            {saveMutation.isPending ? 'Guardando…' : 'Guardar configuración'}
           </button>
         </div>
       </div>
