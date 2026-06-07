@@ -102,6 +102,10 @@ body {
 }
 .mfield-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 8px 0 0; }
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 22px; border-top: 1px solid var(--line-soft);
+}
 
 /* Save button dirty indicator + toast. */
 .btn.primary.dirty::after {

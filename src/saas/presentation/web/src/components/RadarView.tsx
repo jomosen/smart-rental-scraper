@@ -198,7 +198,16 @@ export default function RadarView({ onMeta, email, onLogout }: Props) {
         </div>
       </div>
 
-      <Modal open={settingsOpen} title="Ajustes y reglas" onClose={() => setSettingsOpen(false)}>
+      <Modal
+        open={settingsOpen}
+        title="Ajustes y reglas"
+        onClose={() => setSettingsOpen(false)}
+        footer={
+          <button className="btn primary" onClick={() => setSettingsOpen(false)}>
+            Hecho
+          </button>
+        }
+      >
         <ControlsBar
           meta={data.meta}
           base={ctl.base}

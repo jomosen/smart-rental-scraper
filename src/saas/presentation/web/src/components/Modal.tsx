@@ -5,10 +5,11 @@ interface Props {
   title: string
   onClose: () => void
   children: ReactNode
+  footer?: ReactNode
 }
 
 /** Centered modal with scrim. Close with ×, backdrop click, or Esc. */
-export default function Modal({ open, title, onClose, children }: Props) {
+export default function Modal({ open, title, onClose, children, footer }: Props) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -27,6 +28,7 @@ export default function Modal({ open, title, onClose, children }: Props) {
           <span className="close" onClick={onClose}>×</span>
         </div>
         <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>
   )
