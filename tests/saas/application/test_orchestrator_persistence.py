@@ -109,7 +109,7 @@ def _make_orchestrator(
     )
 
 
-def _empty_results(requests):
+def _empty_results(requests, should_stop=None):
     """Return one empty BookingResult per request (no cars)."""
     return [BookingResult(provider_name="Orch Test Provider", cars=[]) for _ in requests]
 
@@ -160,7 +160,7 @@ class TestOrchestratorFailure:
             provider = BookingProvider(name="Orch Test Provider", base_url="https://x.com")
             location = Location(canonical_id="ORC", display_name="Orch Test Location")
 
-            async def raise_on_first(requests):
+            async def raise_on_first(requests, should_stop=None):
                 raise RuntimeError("simulated scraper failure")
 
             with pytest.raises(RuntimeError, match="simulated scraper failure"):
@@ -279,7 +279,7 @@ class TestOrchestratorZoneReplication:
 
             call_count = 0
 
-            async def side_effect(requests):
+            async def side_effect(requests, should_stop=None):
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:  # probe — 2 groups at stable price → 1 zone
@@ -351,7 +351,7 @@ class TestOrchestratorObservationPersistence:
 
             call_count = 0
 
-            async def side_effect(requests):
+            async def side_effect(requests, should_stop=None):
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:  # probe — empty, produces one "unknown" zone

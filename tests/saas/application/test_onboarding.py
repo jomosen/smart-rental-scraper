@@ -308,7 +308,7 @@ def test_activates_subscription_with_partial_mappings(
 ):
     pid, lid, rid = _setup_catalog(super_db_session)
     _setup_pvg(super_db_session, pid, lid, rid, "ECMR", acriss_code="EDMR")
-    _setup_pvg(super_db_session, pid, lid, rid, "SUV1", acriss_code="CGAR")
+    _setup_pvg(super_db_session, pid, lid, rid, "SUV1", acriss_code="CFAR")
     super_db_session.commit()
     tenant_id = None
     try:
@@ -334,8 +334,8 @@ def test_activates_subscription_with_partial_mappings(
 
         captured = capsys.readouterr()
         assert "[info]" in captured.err
-        # [info] lists unmapped ACRISS codes — SUV1 was assigned CGAR
-        assert "CGAR" in captured.err
+        # [info] lists unmapped ACRISS codes — SUV1 was assigned CFAR
+        assert "CFAR" in captured.err
     finally:
         _cleanup(super_db_session, pid, tenant_id)
 
