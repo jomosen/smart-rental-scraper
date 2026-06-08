@@ -22,8 +22,7 @@ export default function LoginScreen() {
     <div className="login-screen">
       <div className="login-card">
         <div className="login-brand">
-          <span className="brand-dot" />
-          <b>RentRadar</b>
+          <b>Acceso</b>
         </div>
         <p className="lsub">
           Accede a tu panel de precios. Te enviaremos un enlace de acceso a tu correo — sin contraseñas.
@@ -55,7 +54,7 @@ export default function LoginScreen() {
           </div>
         )}
 
-        <div className="login-foot">Acceso restringido a clientes · RentRadar</div>
+        <div className="login-foot">Acceso restringido a clientes</div>
       </div>
     </div>
   )

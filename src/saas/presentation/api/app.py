@@ -9,7 +9,7 @@ Mount order is critical for the SPA pattern:
   3. /{full_path:path} catch-all  →  serves dist/ or index.html (SPA).
 
 Verification:
-  GET /api/health          → 200 {"status": "ok", "service": "rentradar-api"}
+  GET /api/health          → 200 {"status": "ok", "service": "saas-api"}
   GET /api/doesnotexist   → 404 {"detail": {"error": "API endpoint not found"}}
   GET /                   → 200 index.html (if built) or JSON dev hint
 
@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "service": "rentradar-api"}
+        return {"status": "ok", "service": "saas-api"}
 
     # Data + auth routers — registered before the /api/* catch-all and SPA fallback.
     from .routes import cross_tariff as cross_tariff_routes

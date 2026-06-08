@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Meta } from './types'
 import { fetchMe, logout } from './lib/auth'
@@ -12,6 +12,11 @@ export default function App() {
   // `plan` only lives in the cross-tariff meta; lift it for the sidebar.
   const [meta, setMeta] = useState<Meta | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  // White-label: the browser tab shows the tenant's name, never a product brand.
+  useEffect(() => {
+    document.title = me.data?.tenant_name || 'Acceso'
+  }, [me.data])
 
   const handleLogout = async () => {
     await logout()

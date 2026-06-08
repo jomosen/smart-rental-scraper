@@ -9,7 +9,7 @@ export default function Sidebar({ tenantName, plan }: Props) {
       <div className="sb-brand">
         <span className="brand-dot" />
         <div>
-          <div className="tname">{tenantName || 'RentRadar'}</div>
+          <div className="tname">{tenantName || 'Panel'}</div>
           <div className="tplan">{plan ? `Plan ${plan}` : 'Plan demo'}</div>
         </div>
       </div>

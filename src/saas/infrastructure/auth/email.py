@@ -35,12 +35,12 @@ def send_magic_link(email: str, link: str) -> None:
             json={
                 "from": sender,
                 "to": [email],
-                "subject": "Tu enlace de acceso a RentRadar",
+                "subject": "Tu enlace de acceso",
                 "html": (
                     "<p>Hola,</p>"
                     "<p>Pulsa el botón para acceder a tu panel de precios. "
                     "El enlace caduca en 15 minutos y solo puede usarse una vez.</p>"
-                    f'<p><a href="{link}">Acceder a RentRadar</a></p>'
+                    f'<p><a href="{link}">Acceder a tu panel</a></p>'
                     f"<p>O copia esta URL: {link}</p>"
                 ),
             },
