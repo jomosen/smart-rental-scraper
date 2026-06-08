@@ -13,6 +13,7 @@ providers.json
 
 # Editor
 .vscode/
+*.code-workspace
 .idea/
 
 # Python
