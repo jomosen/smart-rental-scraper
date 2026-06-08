@@ -1,26 +1,27 @@
-"""Homegrown magic-link auth endpoints.
+"""Homegrown email + password auth endpoints.
 
 All DB access runs as smart_rental_super (BYPASSRLS + owner-inherited): these
 operations are pre-auth and cross-tenant (resolve an email to its user/tenant,
-read/write login_tokens which has no RLS). See docs/DATA_MODEL.md.
+read/write login_tokens which has no RLS). See docs/DATA_MODEL.md
+§"Authentication: email + password".
+
+login_tokens is retained but no longer drives login; here it backs only the
+per-email / per-IP rate-limit window for the login endpoint.
 """
 from __future__ import annotations
 
 import datetime as _dt
 
-from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import Engine, text
 
-from src.saas.infrastructure.auth.email import send_magic_link
 from src.saas.infrastructure.auth.security import (
     COOKIE_NAME,
     SESSION_TTL,
-    TOKEN_TTL,
     cookie_secure,
-    generate_token,
-    hash_token,
     make_session_jwt,
+    verify_password,
 )
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.session import super_session
@@ -31,8 +32,8 @@ router = APIRouter(prefix="/api/auth")
 
 # Rate-limit windows (counted over login_tokens.created_at).
 _RL_WINDOW = _dt.timedelta(minutes=15)
-_RL_MAX_PER_EMAIL = 5
-_RL_MAX_PER_IP = 20
+_RL_MAX_PER_EMAIL = 10
+_RL_MAX_PER_IP = 40
 
 _engine: Engine | None = None
 
@@ -60,17 +61,40 @@ def _set_session_cookie(resp, token: str) -> None:
     )
 
 
-@router.post("/request-link")
-async def request_link(request: Request) -> JSONResponse:
-    """Always returns an identical 200 (no account enumeration)."""
-    ok = JSONResponse({"ok": True})
+def _record_attempt(s, email: str, ip: str | None) -> None:
+    """Log a login attempt in login_tokens so the rate-limit window can count it.
+
+    No token is minted here; token_hash is a unique sentinel per attempt.
+    """
+    import secrets as _secrets
+
+    s.execute(
+        text("""
+            INSERT INTO login_tokens (email, token_hash, request_ip, expires_at)
+            VALUES (:email, :token_hash, :ip, :expires_at)
+        """),
+        {
+            "email": email,
+            "token_hash": _secrets.token_hex(32),  # 64 hex chars, just a marker
+            "ip": ip,
+            "expires_at": _now() + _RL_WINDOW,
+        },
+    )
+
+
+@router.post("/login", response_model=None)
+async def login(request: Request) -> JSONResponse:
+    """Email + password login. Generic 401 on any failure (no enumeration)."""
+    invalid = JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
     try:
         body = await request.json()
     except Exception:
         body = {}
     email = str(body.get("email", "")).strip().lower()
-    if not email or "@" not in email:
-        return ok  # invalid input — same neutral response
+    password = str(body.get("password", ""))
+    if not email or not password:
+        return invalid
 
     ip = request.client.host if request.client else None
     since = _now() - _RL_WINDOW
@@ -88,78 +112,33 @@ async def request_link(request: Request) -> JSONResponse:
             ).scalar() or 0
         ) if ip else 0
         if email_count >= _RL_MAX_PER_EMAIL or ip_count >= _RL_MAX_PER_IP:
-            return ok  # throttled — stay silent
+            return JSONResponse(
+                {"error": "Too many attempts. Try again later."}, status_code=429
+            )
+
+        _record_attempt(s, email, ip)
 
         user = s.execute(
-            text("SELECT id FROM users WHERE LOWER(email) = :e LIMIT 1"),
+            text("""
+                SELECT id, tenant_id, email, password_hash, session_version
+                FROM users WHERE LOWER(email) = :e LIMIT 1
+            """),
             {"e": email},
         ).fetchone()
 
-        raw, token_hash = generate_token()
-        s.execute(
-            text("""
-                INSERT INTO login_tokens (email, user_id, token_hash, request_ip, expires_at)
-                VALUES (:email, :user_id, :token_hash, :ip, :expires_at)
-            """),
-            {
-                "email": email,
-                "user_id": user.id if user else None,
-                "token_hash": token_hash,
-                "ip": ip,
-                "expires_at": _now() + TOKEN_TTL,
-            },
-        )
+    # Verify outside the session; verify_password is constant-time and handles
+    # the no-password (None hash) case. A missing user still pays the hash cost
+    # via a dummy compare to keep timing uniform.
+    if user is None:
+        verify_password(password, None)
+        return invalid
+    if not verify_password(password, user.password_hash):
+        return invalid
 
-    # Only email a usable link when the address maps to a real user. The token
-    # for an unknown email is stored (for rate-limiting) but never sent and never
-    # verifiable to a session (verify requires user_id).
-    if user:
-        import os
-        base = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
-        send_magic_link(email, f"{base}/auth/verify?token={raw}")
-
-    return ok
-
-
-@router.get("/verify", response_model=None)
-def verify(token: str = "") -> Response:
-    if not token:
-        return JSONResponse({"error": "Missing token"}, status_code=400)
-
-    token_hash = hash_token(token)
-    with super_session(_get_engine()) as s:
-        row = s.execute(
-            text("""
-                SELECT id, user_id, expires_at, used_at
-                FROM login_tokens WHERE token_hash = :h
-            """),
-            {"h": token_hash},
-        ).fetchone()
-
-        if row is None or row.user_id is None:
-            return JSONResponse({"error": "Invalid token"}, status_code=400)
-        if row.used_at is not None:
-            return JSONResponse({"error": "Token already used"}, status_code=400)
-        if row.expires_at < _now():
-            return JSONResponse({"error": "Token expired"}, status_code=400)
-
-        # Single-use: claim it atomically; if no row updated, it was just used.
-        claimed = s.execute(
-            text("UPDATE login_tokens SET used_at = NOW() WHERE id = :id AND used_at IS NULL"),
-            {"id": row.id},
-        )
-        if claimed.rowcount == 0:
-            return JSONResponse({"error": "Token already used"}, status_code=400)
-
-        user = s.execute(
-            text("SELECT id, email, tenant_id FROM users WHERE id = :id"),
-            {"id": row.user_id},
-        ).fetchone()
-        if user is None:
-            return JSONResponse({"error": "Invalid token"}, status_code=400)
-
-    jwt_token = make_session_jwt(user.id, user.tenant_id, user.email)
-    resp = RedirectResponse(url="/", status_code=303)
+    jwt_token = make_session_jwt(
+        user.id, user.tenant_id, user.email, user.session_version
+    )
+    resp = JSONResponse({"ok": True})
     _set_session_cookie(resp, jwt_token)
     return resp
 

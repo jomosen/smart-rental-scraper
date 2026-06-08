@@ -19,13 +19,23 @@ export async function fetchMe(): Promise<Me> {
   return res.json() as Promise<Me>
 }
 
-export async function requestLink(email: string): Promise<void> {
-  await fetch('/api/auth/request-link', {
+/** Throws InvalidCredentialsError on 401, generic Error otherwise. */
+export class InvalidCredentialsError extends Error {
+  constructor() {
+    super('Invalid credentials')
+    this.name = 'InvalidCredentialsError'
+  }
+}
+
+export async function login(email: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, password }),
   })
-  // Always resolves — the endpoint is intentionally constant-response.
+  if (res.status === 401) throw new InvalidCredentialsError()
+  if (res.status === 429) throw new Error('Demasiados intentos. Inténtalo más tarde.')
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 
 export async function logout(): Promise<void> {

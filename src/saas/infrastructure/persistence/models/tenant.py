@@ -64,6 +64,8 @@ class User(Base):
         ForeignKey("tenants.id", name="fk_users_tenant", ondelete="RESTRICT"), nullable=False
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    session_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     external_auth_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(32), nullable=False, server_default="owner")
     created_at: Mapped[datetime.datetime] = mapped_column(

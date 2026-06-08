@@ -47,11 +47,6 @@ def create_app() -> FastAPI:
     app.include_router(cross_tariff_routes.router)
     app.include_router(auth_routes.router)
 
-    # Clean magic-link URL: the email points to {APP_BASE_URL}/auth/verify (no /api),
-    # served by the same handler. Registered before the SPA catch-all so it is not
-    # swallowed and returned as index.html.
-    app.add_api_route("/auth/verify", auth_routes.verify, methods=["GET"])
-
     # Explicit /api/* 404 handler.
     # Registered BEFORE the SPA catch-all so undefined /api/<anything>
     # always returns 404 JSON, never the SPA index.html.

@@ -1,20 +1,27 @@
 import { useState } from 'react'
-import { requestLink } from '../lib/auth'
+import { login, InvalidCredentialsError } from '../lib/auth'
 
-/** Magic-link login, ported from the proto (no demo button). */
-export default function LoginScreen() {
+/** Email + password login. Calls onLoggedIn() so the app can refetch /me. */
+export default function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const send = async () => {
-    if (!email.trim() || busy) return
+  const submit = async () => {
+    if (!email.trim() || !password || busy) return
     setBusy(true)
+    setError('')
     try {
-      await requestLink(email.trim())
-    } finally {
+      await login(email.trim(), password)
+      onLoggedIn()
+    } catch (e) {
+      setError(
+        e instanceof InvalidCredentialsError
+          ? 'Correo o contraseña incorrectos.'
+          : (e as Error).message || 'No se pudo iniciar sesión.',
+      )
       setBusy(false)
-      setSent(true) // constant response — always show the neutral "check your inbox"
     }
   }
 
@@ -24,35 +31,34 @@ export default function LoginScreen() {
         <div className="login-brand">
           <b>Acceso</b>
         </div>
-        <p className="lsub">
-          Accede a tu panel de precios. Te enviaremos un enlace de acceso a tu correo — sin contraseñas.
-        </p>
+        <p className="lsub">Accede a tu panel de precios con tu correo y contraseña.</p>
 
-        {!sent ? (
-          <div>
-            <label htmlFor="lemail">Correo electrónico</label>
-            <input
-              type="email"
-              id="lemail"
-              placeholder="tu@empresa.com"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') send() }}
-            />
-            <button className="btn-primary" onClick={send} disabled={busy}>
-              {busy ? 'Enviando…' : 'Enviarme el enlace de acceso'}
-            </button>
-          </div>
-        ) : (
-          <div className="login-sent" style={{ display: 'block' }}>
-            <div className="mail-ic">✉️</div>
-            <p>
-              Si tu correo está registrado, recibirás un enlace de acceso en unos segundos.
-              <br />Revisa tu bandeja de entrada.
-            </p>
-          </div>
-        )}
+        <div>
+          <label htmlFor="lemail">Correo electrónico</label>
+          <input
+            type="email"
+            id="lemail"
+            placeholder="tu@empresa.com"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+          />
+          <label htmlFor="lpass">Contraseña</label>
+          <input
+            type="password"
+            id="lpass"
+            placeholder="••••••••"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+          />
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="btn-primary" onClick={submit} disabled={busy}>
+            {busy ? 'Entrando…' : 'Entrar'}
+          </button>
+        </div>
 
         <div className="login-foot">Acceso restringido a clientes</div>
       </div>

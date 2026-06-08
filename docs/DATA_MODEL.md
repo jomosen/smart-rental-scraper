@@ -337,18 +337,32 @@ users
   id UUID PK
   tenant_id UUID FK → tenants
   email
+  password_hash TEXT NULL             -- bcrypt hash of the user's password.
+                                      -- NULL = user cannot log in yet (e.g. created
+                                      -- by onboarding before a password is set).
+                                      -- The raw password is never stored.
+  session_version INT NOT NULL DEFAULT 0
+                                      -- bumped to invalidate all of this user's
+                                      -- outstanding session JWTs (logout-everywhere,
+                                      -- password change). The minted JWT carries the
+                                      -- value; a mismatch on validation = 401.
   external_auth_id                    -- identity from external auth provider
                                       -- (the 'sub' claim of the JWT, or equivalent)
   role                                -- enum, default 'owner'
                                       -- MVP only uses 'owner'; expand when needed
   created_at
   ...
-  -- Authentication is a minimal homegrown passwordless magic link (see
-  -- "Authentication: minimal homegrown magic link" below). `email` is the
-  -- login identity. `external_auth_id` stays nullable, reserved for a future
-  -- external IdP migration. Single-use login tokens live in `login_tokens`;
-  -- sessions are stateless JWTs in an httpOnly cookie (nothing stored here).
-  -- Do NOT add password_hash or server-side session columns.
+  -- Authentication is a minimal homegrown email + password flow (see
+  -- "Authentication: email + password" below). `email` is the login identity
+  -- (unique across all tenants — see uniqueness note). `external_auth_id` stays
+  -- nullable, reserved for a future external IdP migration. Sessions are
+  -- stateless JWTs in an httpOnly cookie carrying `session_version`; the only
+  -- server-side session state is that integer counter.
+  --
+  -- Email uniqueness: a UNIQUE index on LOWER(email) is enforced GLOBALLY (not
+  -- per tenant), because password login resolves an email to exactly one user
+  -- without a tenant context. The legacy per-tenant unique (tenant_id, email)
+  -- is kept too.
 
 login_tokens
   id UUID PK
@@ -361,10 +375,12 @@ login_tokens
   created_at
   expires_at                         -- created_at + 15 min
   used_at NULL                       -- set on first successful verify (single use)
-  -- NO RLS: this table is pre-auth (no tenant context exists when a link is
-  -- requested or verified). It is touched ONLY by the auth service, which runs
-  -- as smart_rental_super (owner-inherited + BYPASSRLS). The app role has no
-  -- grants on it.
+  -- RETAINED, currently unused by the login flow. Kept as the natural
+  -- substrate for a future "password reset by email" flow (and for the
+  -- per-email / per-IP rate-limit accounting that the login endpoint reuses).
+  -- NO RLS: this table is pre-auth (no tenant context exists). It is touched
+  -- ONLY by the auth service, which runs as smart_rental_super (owner-inherited
+  -- + BYPASSRLS). The app role has no grants on it.
 
 tenant_vehicle_groups
   id UUID PK
@@ -786,36 +802,43 @@ application code.
 
 ---
 
-### Authentication: minimal homegrown magic link
+### Authentication: email + password
 
-**Decision (reverses the earlier "external IdP, deferred" stance).** For the MVP,
-authentication is a small homegrown **passwordless magic link** flow. No external
-identity provider, no passwords. This was deferred before; it is now built because
-the client front-end (RentRadar) needs real per-tenant login and a full IdP is
-overkill for the first customers. `users.external_auth_id` remains in the schema,
-nullable, so a later migration to an external IdP needs no destructive change.
+**Decision (supersedes the earlier "magic link" stance, which itself reversed the
+"external IdP, deferred" stance).** For the MVP, authentication is a small
+homegrown **email + password** flow. No external identity provider. The earlier
+passwordless magic-link flow was replaced because the first customers want a
+conventional credential login and a 30-day "remember me" session.
+`users.external_auth_id` remains in the schema, nullable, so a later migration to
+an external IdP needs no destructive change.
 
 **Flow.**
-1. `POST /api/auth/request-link {email}` — always returns an identical `200`
-   whether or not the email exists (**no account enumeration**). If it maps to a
-   user: generate a random token (≥256 bits), store **only its SHA-256** in
-   `login_tokens` with a 15-minute expiry, and email `{APP_BASE_URL}/auth/verify?token=...`.
-2. `GET /api/auth/verify?token=` — validate hash + not used + not expired, set
-   `used_at` (single use), mint a session **JWT** (`user_id`, `tenant_id`, 7-day
-   exp) signed with `JWT_SECRET`, set it in an **httpOnly + Secure + SameSite=Lax**
-   cookie, and redirect to `/`.
-3. `GET /api/auth/me` — `{email, tenant_name}` when the cookie is valid, else `401`.
-4. `POST /api/auth/logout` — clear the cookie.
+1. `POST /api/auth/login {email, password}` — resolve the email to a single user
+   (global `LOWER(email)` uniqueness), verify the password against
+   `users.password_hash` with bcrypt. On success mint a session **JWT**
+   (`sub`=user_id, `tenant_id`, `email`, `sv`=session_version, **30-day** exp)
+   signed with `JWT_SECRET`, set it in an **httpOnly + Secure + SameSite=Lax**
+   cookie, and return `200`. On failure return a generic `401` (no distinction
+   between "unknown email" and "wrong password" → no account enumeration).
+2. `GET /api/auth/me` — `{email, tenant_name}` when the cookie is valid, else `401`.
+3. `POST /api/auth/logout` — clear the cookie.
+
+**Session invalidation.** The JWT carries `sv` (the user's `session_version`).
+On every authenticated request the value is compared against the current
+`users.session_version`; a mismatch is a `401`. Bumping `session_version`
+(password change, "log out everywhere", or incident response) invalidates every
+outstanding token for that one user without rotating the global `JWT_SECRET`.
 
 **Non-negotiable security requirements.**
-- The raw token is never persisted — only `SHA-256(token)`. Lookups hash the
-  incoming token and compare.
-- `request-link` is constant-response regardless of account existence.
-- Tokens are single-use (`used_at`) and time-boxed (15 min).
-- Rate limiting per email and per IP (windowed count over `login_tokens`).
+- Passwords are stored only as a bcrypt hash; the raw password is never persisted
+  or logged.
+- `login` is generic-failure: the same `401` whether the email is unknown or the
+  password is wrong.
+- Rate limiting per email and per IP on `login` (windowed count; reuses the
+  `login_tokens` accounting substrate) to blunt credential stuffing / brute force.
 - Session cookie is httpOnly + SameSite=Lax; `Secure` is on whenever
   `APP_ENV != development` (kept off only for the local http loop).
-- The token is ≥256 bits of CSPRNG entropy (`secrets.token_urlsafe(32)`).
+- `JWT_SECRET` must be a strong random secret in any non-development environment.
 
 **Dev bypass.** `get_current_tenant` accepts a `DEV_TENANT_ID` env fallback **only
 when `APP_ENV=development`** and there is no session cookie, so the API is usable
@@ -823,9 +846,13 @@ in local development without logging in. In production `APP_ENV` is set and
 `DEV_TENANT_ID` must be absent — the bypass is then dead code. `/api/auth/me` never
 honours the bypass: it reflects only a real session.
 
+**`login_tokens`** is retained but no longer part of the login path — see its
+schema note. It is the intended substrate for a future "password reset by email"
+flow and backs the login rate-limit window.
+
 **Trigger to revisit (external IdP).** Enterprise SSO/SAML demand, or the first
 customer requiring it. The migration path is: populate `users.external_auth_id`,
-swap the cookie-JWT issuer for the IdP's, drop `login_tokens`.
+swap the cookie-JWT issuer for the IdP's, retire the password columns.
 
 - `users.role` exists from day one with `'owner'` as default. Granular roles wait until a real customer demands them.
 
@@ -923,7 +950,7 @@ Single shared database, single region.
 - Generate real DDL from this document, not from intuition. If something is missing here, surface it before writing the migration.
 - The threshold for change detection (`PRICE_CHANGE_THRESHOLD`) compares against the **last recorded row in `price_observations`**, not against the heartbeat. This is a correctness point, not a style preference.
 - `inputs_snapshot_jsonb` is the audit trail for pricing decisions. Any field that participates in the calculation must be captured there at calculation time, because mutable configuration upstream can change after the fact. Include the `acriss_code` and `classification_confidence` of every `provider_vehicle_categories` row consumed.
-- Authentication: see the "minimal homegrown magic link" section above. No passwords or server-side session tables; sessions are stateless JWTs and single-use links live in `login_tokens`.
+- Authentication: see the "email + password" section above. Passwords are bcrypt-hashed in `users.password_hash`; sessions are stateless JWTs carrying `session_version`, the only server-side session state.
 - Tests for tenant isolation are part of the definition of "API done", not an optional nicety.
 - The LLM-based classification is wrapped behind an abstract `ClassificationService` interface. The interface must not leak provider-specific concepts (request shape, response shape, authentication). Implementations live in infrastructure; the rest of the system depends only on the interface. Confidence threshold (0.85) is hardcoded in the service composition.
 - Classification is **batch by provider**, not vehicle-by-vehicle. The classifier receives the complete provider catalog at once together with each group's representative 7-day price, so it can reason about the provider's internal pricing hierarchy. Calling the classifier with a single vehicle in isolation is supported by the interface but is **not** the production path — it loses the hierarchical context.

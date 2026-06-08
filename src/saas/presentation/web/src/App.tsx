@@ -28,7 +28,7 @@ export default function App() {
     return <div className="login-screen" />
   }
   if (me.isError || !me.data) {
-    return <LoginScreen />
+    return <LoginScreen onLoggedIn={() => qc.invalidateQueries({ queryKey: ['me'] })} />
   }
 
   return (
