@@ -1,10 +1,13 @@
-"""Magic-link email delivery.
+"""Transactional link-email delivery.
+
+RETAINED, currently unused by the login flow (login is email + password — see
+docs/DATA_MODEL.md §"Authentication: email + password"). Kept as the substrate
+for a future "password reset by email" flow.
 
 Production: Resend transactional API (RESEND_API_KEY). Dev: when no API key is
-configured, the full magic link is logged to the server console instead of being
-sent — this is how the flow is exercised locally. Delivery failures are logged
-and swallowed so the caller can keep its constant 200 response (no enumeration,
-no leak of whether the email exists or whether sending worked).
+configured, the full link is logged to the server console instead of being sent.
+Delivery failures are logged and swallowed so the caller can keep a constant
+response (no enumeration, no leak of whether the email exists or sending worked).
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ def send_magic_link(email: str, link: str) -> None:
         )
         return
 
-    sender = os.environ.get("RESEND_FROM", "RentRadar <login@rentradar.app>")
+    sender = os.environ.get("RESEND_FROM", "Acceso <login@example.com>")
     try:
         resp = httpx.post(
             _RESEND_ENDPOINT,

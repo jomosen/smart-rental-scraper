@@ -7,17 +7,20 @@ Todos los comandos asumen PowerShell desde la raíz del repo
 
 ## Arrancar la API FastAPI
 
-La API necesita `DEV_TENANT_ID` (el tenant que sirve mientras no hay auth — Fase 3).
-Ponlo en `.env` junto a las URLs de BD, o expórtalo antes de arrancar:
+La auth es **email + contraseña** (JWT de 30 días en cookie httpOnly). Necesita
+`JWT_SECRET` en `.env`. En desarrollo, `DEV_TENANT_ID` hace que los endpoints de
+datos sirvan ese tenant sin cookie; aun así la SPA muestra el login porque
+`/api/auth/me` no aplica el bypass. Da de alta usuarios con
+`python scripts/create_tenant.py` (o `scripts/seed_user.py` para fijar contraseña).
 
 ```powershell
 # Terminal 1 — DESDE LA RAÍZ del repo (donde está src/)
 # python -m uvicorn añade el cwd a sys.path; el comando uvicorn directo no lo hace
-$env:DEV_TENANT_ID = "7757e3e2-1b79-4086-9982-d9ffe4c4960b"
 python -m uvicorn src.saas.presentation.api.app:app --reload --port 8000
 ```
 
-La SPA entra directa a la vista **Radar de precios** (sin login todavía). Los controles
+La SPA muestra la pantalla de **login** (email + contraseña); tras autenticarse
+entra en la vista **Radar de precios**. Los controles
 de base / redondeo / maestro / regla global y la navegación de zona disparan un refetch
 con query params efímeros (`?base=&round=&master=&zone=&rule_op=&rule_val=&rule_mode=&rule_floor=&rule_ceiling=`);
 nada se persiste. El cálculo vive solo en el servidor (assembler + cross_tariff_calc).
