@@ -41,6 +41,7 @@ from src.saas.application.pricing.cross_tariff_assembler import (
 )
 from src.saas.application.pricing.csv_exporter import CsvExporter
 from src.saas.application.pricing.export_service import PricingExportService
+from src.saas.application.pricing.pdf_exporter import PdfExporter
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.read.cross_tariff_read import (
     DURATIONS,
@@ -484,4 +485,22 @@ def export_csv(
         content=csv_bytes,
         media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": 'attachment; filename="tarifas.csv"'},
+    )
+
+
+@router.get("/api/cross-tariff/export.pdf")
+def export_pdf(
+    location_id: Optional[int] = Query(default=None),
+    tenant_id: uuid.UUID = Depends(get_current_tenant),
+) -> Response:
+    factory = make_session_factory(_get_engine())
+    with tenant_context(factory, tenant_id) as session:
+        trow = session.execute(text("SELECT name FROM tenants")).fetchone()
+        tenant_name: str = trow.name if trow else ""
+        result = _export_result(session, tenant_id, location_id)
+    pdf_bytes = PdfExporter().export(result, tenant_name=tenant_name)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="tarifas.pdf"'},
     )
