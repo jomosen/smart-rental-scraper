@@ -126,6 +126,11 @@ tables are `price_observations`, `homogeneous_zones`, `scrape_runs`, and
 `price_observation_heartbeats`. To inspect data during development, connect to the local
 Postgres and query those tables directly.
 
+**The scraping pipeline writes no CSV/JSON** (that ban is about the data-sink, not reports).
+The SaaS API exposes `GET /api/cross-tariff/export.csv` and `export.pdf` for client-facing
+pricing reports; these are read-only exports of already-persisted data and are intentional.
+Do not remove them citing the "no CSV output" rule.
+
 ---
 
 ## Things that have bitten us before
