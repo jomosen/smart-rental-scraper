@@ -5,6 +5,8 @@
   POST /api/cross-tariff/preview    — render from a config in the body, WITHOUT
                                       persisting (live editing in the front).
   PUT  /api/pricing-config          — validate + persist the tenant's config.
+  GET  /api/cross-tariff/export.csv — download all zones as wide-format CSV.
+  GET  /api/cross-tariff/export.pdf — download all zones as wide-format PDF.
 
 The tenant comes from the session (get_current_tenant); everything runs inside
 tenant_context on the RLS engine. Calculation/naming/ordering live in
@@ -18,6 +20,7 @@ pricing config" has a single schema.
 
 CSRF: the mutating/echo endpoints (PUT, preview) require the header
 X-Requested-With: fetch — a cheap defence on top of SameSite=Lax cookies.
+Export endpoints are GET (read-only), so no CSRF header is required.
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
@@ -35,6 +39,8 @@ from src.saas.application.pricing.cross_tariff_assembler import (
     assemble_cross_tariff,
     prov_color,
 )
+from src.saas.application.pricing.csv_exporter import CsvExporter
+from src.saas.application.pricing.export_service import PricingExportService
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.read.cross_tariff_read import (
     DURATIONS,
@@ -431,3 +437,51 @@ def put_pricing_config(
         )
         # tenant_context commits on exit.
         return {"ok": True, "version": rule.version}
+
+
+# ── Export endpoints ──────────────────────────────────────────────────────────
+
+def _export_result(session, tenant_id: uuid.UUID, location_id: Optional[int]):
+    """Shared data-fetch + assembly path for CSV and PDF exports.
+
+    The DataFrame is fetched inside the caller's tenant_context session, then
+    PricingExportService iterates all zones over that in-memory df — no extra
+    queries per zone.
+    """
+    active_codes = [code for code, _ in fetch_active_providers(session)]
+    active_rule = PricingRuleRepository(session).get_active(tenant_id)
+    cfg = _resolve_saved_config(
+        active_rule.formula_jsonb if active_rule else None, active_codes
+    )
+    df = fetch_cross_tariff_dataframe(
+        session, tuple(cfg["providers"]), DURATIONS, True,
+        location_id=location_id,
+    )
+    examples = fetch_catalog_examples(session)
+    return PricingExportService().build_rows(
+        df=df,
+        providers=cfg["providers"],
+        master=cfg["master"],
+        base=cfg["base"],
+        round_mode=cfg["round_mode"],
+        global_rule=cfg["global_rule"],
+        category_rules=cfg["category_rules"],
+        durations=list(DURATIONS),
+        examples=examples,
+    )
+
+
+@router.get("/api/cross-tariff/export.csv")
+def export_csv(
+    location_id: Optional[int] = Query(default=None),
+    tenant_id: uuid.UUID = Depends(get_current_tenant),
+) -> Response:
+    factory = make_session_factory(_get_engine())
+    with tenant_context(factory, tenant_id) as session:
+        result = _export_result(session, tenant_id, location_id)
+    csv_bytes = CsvExporter().export(result)
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": 'attachment; filename="tarifas.csv"'},
+    )
