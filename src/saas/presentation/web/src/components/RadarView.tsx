@@ -110,6 +110,21 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
       return n
     })
 
+  const handleExport = async (format: 'csv' | 'pdf') => {
+    const locationId = controls?.location_id
+    const qs = locationId != null ? `?location_id=${locationId}` : ''
+    const res = await fetch(`/api/cross-tariff/export.${format}${qs}`)
+    if (res.status === 401) { onLogout(); return }
+    if (!res.ok) { setToast(`Error al exportar: HTTP ${res.status}`); return }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tarifas.${format}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ── Loading (first load) ──
   if (query.isLoading && !query.data) {
     return (
@@ -196,7 +211,16 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
           sistema del cliente la decide su cron — nada se publica en silencio.
         </div>
         <div className="floating-actions">
-          <button className="btn">Exportar CSV</button>
+          <span title={dirty ? 'Guarda los precios antes de exportar' : ''}>
+            <button className="btn" disabled={dirty} onClick={() => handleExport('csv')}>
+              Exportar CSV
+            </button>
+          </span>
+          <span title={dirty ? 'Guarda los precios antes de exportar' : ''}>
+            <button className="btn" disabled={dirty} onClick={() => handleExport('pdf')}>
+              Exportar PDF
+            </button>
+          </span>
           <button
             className={`btn primary${dirty ? ' dirty' : ''}`}
             disabled={!dirty || saveMutation.isPending}
