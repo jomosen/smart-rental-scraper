@@ -150,6 +150,30 @@ def master_zones(df: pd.DataFrame, master: str) -> pd.DataFrame:
     return mdf.sort_values("start_date").reset_index(drop=True)
 
 
+def season_ranges(df: pd.DataFrame, master: str) -> list[dict]:
+    """All master seasons as [{index, date_from, date_to}] (date objects), sorted.
+
+    Same zone set the navigation uses (master_zones), but flattened to a plain
+    list so callers (e.g. the export season picker) can label each season with
+    its dates without assembling every zone.
+    """
+    if df.empty:
+        return []
+    zones = master_zones(df, master)
+
+    def _as_date(v):
+        return pd.Timestamp(v).date() if pd.notna(v) else None
+
+    return [
+        {
+            "index": i,
+            "date_from": _as_date(zones.iloc[i]["start_date"]),
+            "date_to": _as_date(zones.iloc[i]["end_date"]),
+        }
+        for i in range(len(zones))
+    ]
+
+
 def filter_zone(
     df: pd.DataFrame,
     master: str,
@@ -250,6 +274,7 @@ def build_cell_results(
                 rule_is_default=is_default,
                 total_providers=len(providers),
                 provider_inferred=provider_inferred,
+                master=master,
             )
 
     return results

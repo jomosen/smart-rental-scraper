@@ -12,11 +12,76 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.scraper.application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
+from types import SimpleNamespace
+
+from src.scraper.application.smart_scraping.smart_orchestrator import (
+    SmartScraperOrchestrator,
+    _partition_for_classification,
+)
 from src.scraper.domain.models.season_internals import PricePoint
+from src.saas.application.classification.dtos import ClassificationResult
+from src.saas.infrastructure.persistence.repositories.provider_vehicle_category_repository import (
+    attributes_hash,
+)
 from src.shared.domain.models.result import BookingResult
 from src.shared.domain.models.search import BookingSearch, Location
 from src.shared.domain.models.season import HomogeneousZone
+
+
+def _cr(code: str = "CDMR", conf: float = 0.95, pending: bool = False) -> ClassificationResult:
+    return ClassificationResult(code[0], code[1], code[2], code[3], conf, pending, None)
+
+
+class TestPartitionForClassification:
+    def test_reuses_on_hash_match(self):
+        cached = {"A": ("h1", _cr("MDMR"))}
+        reused, to_classify = _partition_for_classification({"A": "h1"}, cached)
+        assert to_classify == []
+        assert reused["A"].acriss_category == "M"
+
+    def test_classifies_on_changed_attributes(self):
+        cached = {"A": ("h1", _cr())}
+        reused, to_classify = _partition_for_classification({"A": "h2"}, cached)
+        assert reused == {} and to_classify == ["A"]
+
+    def test_classifies_new_group(self):
+        reused, to_classify = _partition_for_classification({"B": "h"}, {})
+        assert reused == {} and to_classify == ["B"]
+
+
+class TestClassifyProbeCatalogReuse:
+    def test_only_changed_group_hits_the_llm(self):
+        orch = _make_orchestrator()
+        car_a = SimpleNamespace(example_models="Fiat 500", seats=5, luggage=2, transmission="manual")
+        car_b = SimpleNamespace(example_models="VW Golf", seats=5, luggage=3, transmission="manual")
+        probe = {"A": car_a, "B": car_b}
+
+        # A's cached hash matches its current attributes; B's is stale → reclassify B only.
+        cached = {
+            "A": (attributes_hash("Fiat 500", 5, 2), _cr("MDMR")),
+            "B": ("stale-hash", _cr("CDMR")),
+        }
+        orch._load_cached_classifications = lambda: cached
+        orch._classification_service.classify_provider_batch.return_value = [_cr("CDAR")]
+
+        out = orch._classify_probe_catalog(probe, {}, {})
+
+        svc = orch._classification_service.classify_provider_batch
+        svc.assert_called_once()
+        sent = svc.call_args.args[1]
+        assert [v.external_code for v in sent] == ["B"]   # only the changed group
+        assert out["A"].acriss_category == "M"            # reused MDMR, no LLM
+        assert out["B"].acriss_category == "C"            # fresh CDAR from LLM
+
+    def test_no_llm_call_when_everything_cached(self):
+        orch = _make_orchestrator()
+        car = SimpleNamespace(example_models="Fiat 500", seats=5, luggage=2, transmission="manual")
+        orch._load_cached_classifications = lambda: {
+            "A": (attributes_hash("Fiat 500", 5, 2), _cr("MDMR")),
+        }
+        out = orch._classify_probe_catalog({"A": car}, {}, {})
+        orch._classification_service.classify_provider_batch.assert_not_called()
+        assert out["A"].acriss_category == "M"
 
 
 def _make_orchestrator() -> SmartScraperOrchestrator:

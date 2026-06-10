@@ -10,6 +10,7 @@ import PriceGrid from './PriceGrid'
 import CellDrawer from './CellDrawer'
 import Legend from './Legend'
 import Modal from './Modal'
+import ExportModal from './ExportModal'
 import { fmtDate } from '../lib/format'
 
 function controlsFromMeta(meta: Meta): Controls {
@@ -47,6 +48,8 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
   const [drawer, setDrawer] = useState<{ code: string; duration: number } | null>(null)
   const [ruleOpen, setRuleOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
   const query = useQuery({
@@ -110,19 +113,29 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
       return n
     })
 
-  const handleExport = async (format: 'csv' | 'pdf') => {
-    const locationId = controls?.location_id
-    const qs = locationId != null ? `?location_id=${locationId}` : ''
-    const res = await fetch(`/api/cross-tariff/export.${format}${qs}`)
-    if (res.status === 401) { onLogout(); return }
-    if (!res.ok) { setToast(`Error al exportar: HTTP ${res.status}`); return }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `tarifas.${format}`
-    a.click()
-    URL.revokeObjectURL(url)
+  const handleExport = async (format: 'csv' | 'pdf', zoneFrom: number, zoneTo: number) => {
+    if (exporting) return // guard against concurrent exports
+    setExporting(true)
+    try {
+      const params = new URLSearchParams()
+      if (controls?.location_id != null) params.set('location_id', String(controls.location_id))
+      params.set('zone_from', String(zoneFrom))
+      params.set('zone_to', String(zoneTo))
+      const res = await fetch(`/api/cross-tariff/export.${format}?${params}`)
+      if (res.status === 401) { onLogout(); return }
+      if (!res.ok) { setToast(`Error al exportar: HTTP ${res.status}`); return }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tarifas.${format}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setToast(`Error al exportar: ${(e as Error).message}`)
+    } finally {
+      setExporting(false)
+    }
   }
 
   // ── Loading (first load) ──
@@ -212,13 +225,8 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
         </div>
         <div className="floating-actions">
           <span title={dirty ? 'Guarda los precios antes de exportar' : ''}>
-            <button className="btn" disabled={dirty} onClick={() => handleExport('csv')}>
-              Exportar CSV
-            </button>
-          </span>
-          <span title={dirty ? 'Guarda los precios antes de exportar' : ''}>
-            <button className="btn" disabled={dirty} onClick={() => handleExport('pdf')}>
-              Exportar PDF
+            <button className="btn" disabled={dirty || exporting} onClick={() => setExportOpen(true)}>
+              {exporting ? <><span className="btn-spinner" />Exportando…</> : 'Exportar'}
             </button>
           </span>
           <button
@@ -275,6 +283,12 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
           }}
         />
       </Modal>
+      <ExportModal
+        open={exportOpen}
+        seasons={data.meta.seasons}
+        onClose={() => setExportOpen(false)}
+        onExport={handleExport}
+      />
       <CellDrawer data={data} selection={drawer} onClose={() => setDrawer(null)} />
       {toast && <div className="toast">{toast}</div>}
     </>

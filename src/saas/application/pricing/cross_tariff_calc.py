@@ -112,22 +112,39 @@ def collapse_intra_provider(
 
 def detect_anomalies(
     collapsed: dict[str, Decimal],
+    *,
+    inferred: dict[str, bool] | None = None,
+    master: str | None = None,
 ) -> dict[str, bool]:
     """Return {provider_code: is_anomaly}.
 
-    Requires ≥ 2 *other* providers as witnesses before marking any outlier.
-    With only 1 or 2 total providers no anomaly is ever flagged (insufficient
-    corroboration — we cannot tell which side is wrong).
-    """
-    if len(collapsed) < 3:
-        return {pk: False for pk in collapsed}
+    A provider is an outlier when its total deviates too far from the median of
+    the *witnesses*. Two rules keep that comparison trustworthy:
 
-    result: dict[str, bool] = {}
+    - Witnesses are only providers with a DIRECT price (``inferred`` is False).
+      An inferred price comes from a zone whose representative_date ≠ the
+      master's, so it may be seasonally shifted and must not vote on whether a
+      direct price is anomalous. We still require ≥ 2 such witnesses before
+      flagging anyone — with fewer we cannot tell which side is wrong.
+    - The ``master`` is never flagged: it sets the calendar, so it is the
+      reference, not a candidate to be discarded.
+
+    With no ``inferred`` map and no ``master`` this reduces to the previous
+    behaviour: every other provider is a witness and ≥ 3 providers are needed.
+    """
+    inferred = inferred or {}
+    result: dict[str, bool] = {pk: False for pk in collapsed}
     for pk, val in collapsed.items():
-        others = [float(v) for p, v in collapsed.items() if p != pk]
-        med = Decimal(str(statistics.median(others)))
+        if pk == master:                       # (2) master is the reference
+            continue
+        witnesses = [
+            float(v) for p, v in collapsed.items()
+            if p != pk and not inferred.get(p, False)   # (1) direct prices only
+        ]
+        if len(witnesses) < 2:                  # need ≥ 2 reliable witnesses
+            continue
+        med = Decimal(str(statistics.median(witnesses)))
         if med == 0:
-            result[pk] = False
             continue
         ratio = val / med
         result[pk] = ratio < _ANOMALY_LOW_RATIO or ratio > _ANOMALY_HIGH_RATIO
@@ -320,6 +337,7 @@ def compute_cell(
     rule_is_default: bool = True,
     total_providers: int = 0,
     provider_inferred: dict[str, bool] | None = None,
+    master: str | None = None,
 ) -> CellResult:
     """Compute the recommended price for one (acriss_code, duration) cell.
 
@@ -329,6 +347,8 @@ def compute_cell(
     missing_providers: provider_codes that have no offer for this cell.
     provider_inferred: {provider_code: True} when the price was derived from a zone
                        whose representative_date ≠ the master's representative_date.
+    master: the master provider_code — never flagged as an anomaly, and inferred
+            providers do not witness against direct prices (see detect_anomalies).
     """
     if provider_inferred is None:
         provider_inferred = {}
@@ -337,8 +357,8 @@ def compute_cell(
     # Step 1: intra-provider collapse
     collapsed = collapse_intra_provider(provider_groups)
 
-    # Step 2: anomaly detection
-    anomalies = detect_anomalies(collapsed)
+    # Step 2: anomaly detection (witnesses = direct prices only; master immune)
+    anomalies = detect_anomalies(collapsed, inferred=provider_inferred, master=master)
     present: list[ProviderContribution] = []
     dropped: list[DroppedProvider] = []
     degraded = False

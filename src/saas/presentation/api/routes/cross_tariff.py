@@ -5,8 +5,11 @@
   POST /api/cross-tariff/preview    — render from a config in the body, WITHOUT
                                       persisting (live editing in the front).
   PUT  /api/pricing-config          — validate + persist the tenant's config.
-  GET  /api/cross-tariff/export.csv — download all zones as wide-format CSV.
-  GET  /api/cross-tariff/export.pdf — download all zones as wide-format PDF.
+  GET  /api/cross-tariff/export.csv — download zones as wide-format CSV.
+  GET  /api/cross-tariff/export.pdf — download zones as wide-format PDF.
+                                      Both accept zone_from/zone_to (inclusive,
+                                      0-based) to export a season range; default
+                                      is all zones.
 
 The tenant comes from the session (get_current_tenant); everything runs inside
 tenant_context on the RLS engine. Calculation/naming/ordering live in
@@ -38,6 +41,7 @@ from src.saas.application.pricing.cross_tariff_assembler import (
     CrossTariffPayload,
     assemble_cross_tariff,
     prov_color,
+    season_ranges,
 )
 from src.saas.application.pricing.csv_exporter import CsvExporter
 from src.saas.application.pricing.export_service import PricingExportService
@@ -217,6 +221,7 @@ def _serialize(
     vigente_range: Optional[dict],
     all_providers: list[dict],
     active_providers: list[str],
+    seasons: list[dict],
 ) -> dict:
     return {
         "meta": {
@@ -224,6 +229,8 @@ def _serialize(
             "plan": plan,
             "location": location,
             "locations": locations,
+            # All master seasons with dates — drives the export season picker.
+            "seasons": seasons,
             "zone": {
                 "index": payload.zone.index,
                 "total": payload.zone.total,
@@ -373,6 +380,15 @@ def _compute_payload(
             data_gap = True
             vigente_range = vigente
 
+    seasons = [
+        {
+            "index": s["index"],
+            "date_from": s["date_from"].isoformat() if s["date_from"] else None,
+            "date_to": s["date_to"].isoformat() if s["date_to"] else None,
+        }
+        for s in season_ranges(df, master_code)
+    ]
+
     rules_out = {"_default": cfg["global_rule"], **cfg["category_rules"]}
     return _serialize(
         payload,
@@ -388,6 +404,7 @@ def _compute_payload(
         vigente_range=vigente_range,
         all_providers=all_provider_meta,
         active_providers=list(provider_codes),
+        seasons=seasons,
     )
 
 
@@ -442,12 +459,16 @@ def put_pricing_config(
 
 # ── Export endpoints ──────────────────────────────────────────────────────────
 
-def _export_result(session, tenant_id: uuid.UUID, location_id: Optional[int]):
+def _export_result(
+    session, tenant_id: uuid.UUID, location_id: Optional[int],
+    zone_from: Optional[int] = None, zone_to: Optional[int] = None,
+):
     """Shared data-fetch + assembly path for CSV and PDF exports.
 
     The DataFrame is fetched inside the caller's tenant_context session, then
-    PricingExportService iterates all zones over that in-memory df — no extra
-    queries per zone.
+    PricingExportService iterates the requested zone range over that in-memory
+    df — no extra queries per zone. zone_from/zone_to are inclusive 0-based and
+    clamped by the service.
     """
     active_codes = [code for code, _ in fetch_active_providers(session)]
     active_rule = PricingRuleRepository(session).get_active(tenant_id)
@@ -469,17 +490,21 @@ def _export_result(session, tenant_id: uuid.UUID, location_id: Optional[int]):
         category_rules=cfg["category_rules"],
         durations=list(DURATIONS),
         examples=examples,
+        zone_from=zone_from,
+        zone_to=zone_to,
     )
 
 
 @router.get("/api/cross-tariff/export.csv")
 def export_csv(
     location_id: Optional[int] = Query(default=None),
+    zone_from: Optional[int] = Query(default=None),
+    zone_to: Optional[int] = Query(default=None),
     tenant_id: uuid.UUID = Depends(get_current_tenant),
 ) -> Response:
     factory = make_session_factory(_get_engine())
     with tenant_context(factory, tenant_id) as session:
-        result = _export_result(session, tenant_id, location_id)
+        result = _export_result(session, tenant_id, location_id, zone_from, zone_to)
     csv_bytes = CsvExporter().export(result)
     return Response(
         content=csv_bytes,
@@ -491,13 +516,15 @@ def export_csv(
 @router.get("/api/cross-tariff/export.pdf")
 def export_pdf(
     location_id: Optional[int] = Query(default=None),
+    zone_from: Optional[int] = Query(default=None),
+    zone_to: Optional[int] = Query(default=None),
     tenant_id: uuid.UUID = Depends(get_current_tenant),
 ) -> Response:
     factory = make_session_factory(_get_engine())
     with tenant_context(factory, tenant_id) as session:
         trow = session.execute(text("SELECT name FROM tenants")).fetchone()
         tenant_name: str = trow.name if trow else ""
-        result = _export_result(session, tenant_id, location_id)
+        result = _export_result(session, tenant_id, location_id, zone_from, zone_to)
     pdf_bytes = PdfExporter().export(result, tenant_name=tenant_name)
     return Response(
         content=pdf_bytes,

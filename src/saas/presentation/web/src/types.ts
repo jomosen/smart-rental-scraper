@@ -37,11 +37,18 @@ export interface LocationOption {
   name: string
 }
 
+export interface Season {
+  index: number
+  date_from: string | null
+  date_to: string | null
+}
+
 export interface Meta {
   tenant_name: string
   plan: string | null
   location: LocationOption | null
   locations: LocationOption[]
+  seasons: Season[]
   zone: ZoneMeta
   master_rep_date: string | null
   durations: number[]

@@ -35,11 +35,35 @@ from ....saas.infrastructure.persistence.repositories import (
     ProviderVehicleCategoryRepository,
     ScrapeRunRepository,
 )
+from ....saas.infrastructure.persistence.repositories.provider_vehicle_category_repository import (
+    attributes_hash,
+)
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
 _PROBE_STOP_THRESHOLD = 3
+
+
+def _partition_for_classification(
+    new_hashes: Dict[str, str],
+    cached: Dict[str, Tuple[str, ClassificationResult]],
+) -> Tuple[Dict[str, ClassificationResult], List[str]]:
+    """Split groups into (reused results, names needing the LLM).
+
+    A group is reused when it has a cached classification AND its attributes
+    hash is unchanged. Everything else (new groups, changed attributes, or no
+    usable cached code) is sent to the classifier. Pure — no I/O.
+    """
+    reused: Dict[str, ClassificationResult] = {}
+    to_classify: List[str] = []
+    for name, h in new_hashes.items():
+        hit = cached.get(name)
+        if hit is not None and hit[0] == h:
+            reused[name] = hit[1]
+        else:
+            to_classify.append(name)
+    return reused, to_classify
 
 
 @dataclass
@@ -332,33 +356,82 @@ class SmartScraperOrchestrator:
         representative_prices: Dict[str, float],
         group_currency: Dict[str, str],
     ) -> Dict[str, ClassificationResult]:
-        """Batch-classify all cars seen in the probe phase.
+        """Classify probe cars, calling the LLM only for new/changed groups.
 
-        Returns a dict mapping group_name → ClassificationResult.
-        Empty dict when no probe cars were seen.
+        Groups whose attributes (example_models, seats, luggage) are unchanged
+        since the last run reuse the stored ACRISS code — no LLM call, no cost.
+        Returns a dict mapping group_name → ClassificationResult. Empty when no
+        probe cars were seen.
         """
         if not probe_cars:
             return {}
 
-        group_names = list(probe_cars.keys())
-        vehicles = [
-            VehicleClassificationInput(
-                external_code=name,
-                external_name=name,
-                example_models=probe_cars[name].example_models or "",
-                seats=probe_cars[name].seats,
-                luggage=probe_cars[name].luggage,
-                transmission=probe_cars[name].transmission,
-                fuel_type=None,
-                representative_price_7d=representative_prices.get(name),
-                representative_currency=group_currency.get(name),
-            )
-            for name in group_names
-        ]
-        results = self._classification_service.classify_provider_batch(
-            self._provider_code, vehicles
+        new_hashes = {
+            name: attributes_hash(car.example_models or "", car.seats, car.luggage)
+            for name, car in probe_cars.items()
+        }
+        cached = self._load_cached_classifications()
+        reused, to_classify = _partition_for_classification(new_hashes, cached)
+
+        logger.info(
+            "[%s] Classification: %d reused (cached), %d via LLM",
+            self._provider_code, len(reused), len(to_classify),
         )
-        return dict(zip(group_names, results))
+
+        fresh: Dict[str, ClassificationResult] = {}
+        if to_classify:
+            vehicles = [
+                VehicleClassificationInput(
+                    external_code=name,
+                    external_name=name,
+                    example_models=probe_cars[name].example_models or "",
+                    seats=probe_cars[name].seats,
+                    luggage=probe_cars[name].luggage,
+                    transmission=probe_cars[name].transmission,
+                    fuel_type=None,
+                    representative_price_7d=representative_prices.get(name),
+                    representative_currency=group_currency.get(name),
+                )
+                for name in to_classify
+            ]
+            results = self._classification_service.classify_provider_batch(
+                self._provider_code, vehicles
+            )
+            fresh = dict(zip(to_classify, results))
+
+        return {**reused, **fresh}
+
+    def _load_cached_classifications(
+        self,
+    ) -> Dict[str, Tuple[str, ClassificationResult]]:
+        """Map external_code → (attributes_hash, stored ClassificationResult).
+
+        Only includes active groups that already carry a real ACRISS code, so a
+        previous failure (null code / API error) is retried rather than cached.
+        """
+        out: Dict[str, Tuple[str, ClassificationResult]] = {}
+        with self._session_factory() as s:
+            repo = ProviderVehicleCategoryRepository(s)
+            existing = repo.list_active_for_tuple(
+                self._provider_id, self._provider_location_id, self._provider_rate_id,
+            )
+            for pvc in existing:
+                if pvc.external_code is None or pvc.acriss_category is None:
+                    continue
+                h = attributes_hash(pvc.example_models or "", pvc.seats, pvc.luggage)
+                out[pvc.external_code] = (
+                    h,
+                    ClassificationResult(
+                        acriss_category=pvc.acriss_category,
+                        acriss_body_type=pvc.acriss_body_type,
+                        acriss_transmission=pvc.acriss_transmission,
+                        acriss_fuel=pvc.acriss_fuel,
+                        confidence=pvc.classification_confidence or 0.0,
+                        pending_review=pvc.pending_review,
+                        rationale="reused: attributes unchanged since last run",
+                    ),
+                )
+        return out
 
     # ------------------------------------------------------------------
     # DB operations (sync — called from async context; fast enough for MVP)

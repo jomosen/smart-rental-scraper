@@ -14,6 +14,27 @@ from ....application.classification.dtos import ClassificationResult
 logger = logging.getLogger(__name__)
 
 
+def attributes_hash(
+    example_models: str,
+    seats: Optional[int],
+    luggage: Optional[int],
+) -> str:
+    """SHA256 truncated to 16 hex chars over stable vehicle identity attributes.
+
+    Shared with callers (e.g. the scraper orchestrator) that need to decide
+    whether a group's attributes changed since the last run — and therefore
+    whether it must be re-sent to the (paid) classifier — without re-deriving
+    the key format. Deliberately excludes price: a price move is not a reason
+    to reclassify.
+    """
+    key = "|".join([
+        example_models or "",
+        str(seats) if seats is not None else "",
+        str(luggage) if luggage is not None else "",
+    ])
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 class ProviderVehicleCategoryRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
@@ -124,13 +145,7 @@ class ProviderVehicleCategoryRepository:
         seats: Optional[int],
         luggage: Optional[int],
     ) -> str:
-        """SHA256 truncated to 16 hex chars over stable vehicle identity attributes."""
-        key = "|".join([
-            example_models or "",
-            str(seats) if seats is not None else "",
-            str(luggage) if luggage is not None else "",
-        ])
-        return hashlib.sha256(key.encode()).hexdigest()[:16]
+        return attributes_hash(example_models, seats, luggage)
 
     def _get_by_attributes_hash(
         self,

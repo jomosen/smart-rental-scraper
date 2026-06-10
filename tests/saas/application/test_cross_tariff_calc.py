@@ -78,6 +78,42 @@ class TestDetectAnomalies:
         result = detect_anomalies({"a": D("50")})
         assert result["a"] is False
 
+    def test_master_never_flagged(self):
+        # Master is cheap vs the others but must never be dropped (it sets the calendar).
+        result = detect_anomalies(
+            {"centauro": D("2"), "solcar": D("100"), "victoria": D("98")},
+            master="centauro",
+        )
+        assert result["centauro"] is False
+
+    def test_inferred_witnesses_do_not_vote(self):
+        # Centauro looks cheap only against inferred witnesses → not enough
+        # direct witnesses (need ≥ 2), so no anomaly is flagged.
+        result = detect_anomalies(
+            {"centauro": D("62"), "solcar": D("191"), "victoria": D("139")},
+            inferred={"solcar": True, "victoria": True},
+        )
+        assert not any(result.values())
+
+    def test_one_direct_witness_is_insufficient(self):
+        # Only one direct witness (solcar); victoria inferred → cannot judge.
+        result = detect_anomalies(
+            {"centauro": D("2"), "solcar": D("100"), "victoria": D("98")},
+            inferred={"victoria": True},
+        )
+        assert not any(result.values())
+
+    def test_cfar_regression_master_and_inferred(self):
+        # Real CFAR 1d shape: master (centauro) cheap, both rivals inferred.
+        # Either rule alone clears the false positive; together, definitely.
+        collapsed = {"centauro": D("62.43"), "solcar": D("191.25"), "victoria": D("139.50")}
+        result = detect_anomalies(
+            collapsed,
+            inferred={"solcar": True, "victoria": True},
+            master="centauro",
+        )
+        assert result["centauro"] is False
+
 
 # ── 3. Aggregation ───────────────────────────────────────────────────────────
 

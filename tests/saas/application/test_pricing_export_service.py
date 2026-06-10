@@ -11,6 +11,7 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
+from src.saas.application.pricing.cross_tariff_assembler import season_ranges
 from src.saas.application.pricing.export_service import (
     ExportResult,
     ExportRow,
@@ -185,6 +186,34 @@ class TestProviderPrices:
         assert row.provider_prices["solcar"]   is not None
 
 
+class TestProviderModelsAndBase:
+    def test_provider_models_populated(self):
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90),
+            _row("solcar",   "S1", JAN1, JAN31, JAN15, 3, 85),
+        )
+        row = _build(df).rows[0]
+        # example_models in the df fixture is "Ford Focus" for every group.
+        assert row.provider_models["centauro"] == "Ford Focus"
+        assert row.provider_models["solcar"] == "Ford Focus"
+
+    def test_base_provider_is_cheapest_under_min(self):
+        """base='min' → the cheapest provider's price is the base."""
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90),
+            _row("solcar",   "S1", JAN1, JAN31, JAN15, 3, 85),
+        )
+        assert _build(df, base="min").rows[0].base_provider == "solcar"
+
+    def test_no_base_provider_under_avg(self):
+        """base='avg' → no single provider is the base."""
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90),
+            _row("solcar",   "S1", JAN1, JAN31, JAN15, 3, 85),
+        )
+        assert _build(df, base="avg").rows[0].base_provider is None
+
+
 class TestRecommendedPrice:
     def test_recommended_total_and_per_day_populated(self):
         df = _df(
@@ -224,6 +253,47 @@ class TestEmptyInputs:
         df = _df(_row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90))
         result = _build(df, providers=[])
         assert result.rows == []
+
+
+class TestZoneRange:
+    def _three_zones(self):
+        return _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90),
+            _row("centauro", "C1", FEB1, FEB28, FEB14, 3, 95),
+            _row("centauro", "C1", MAR1, MAR31, MAR15, 3, 92),
+        )
+
+    def test_open_range_exports_all_zones(self):
+        result = _build(self._three_zones(), providers=["centauro"])
+        assert {r.zone_index for r in result.rows} == {0, 1, 2}
+        assert result.total_zones == 3
+
+    def test_subset_range_exports_only_requested(self):
+        result = _build(self._three_zones(), providers=["centauro"], zone_from=1, zone_to=1)
+        assert {r.zone_index for r in result.rows} == {1}
+        # Real total is preserved for "Temporada N de T".
+        assert result.total_zones == 3
+
+    def test_range_clamped_and_normalised(self):
+        # from past the end, to before the start → clamps then swaps to 0..2.
+        result = _build(self._three_zones(), providers=["centauro"], zone_from=5, zone_to=-3)
+        assert {r.zone_index for r in result.rows} == {0, 1, 2}
+
+
+class TestSeasonRanges:
+    def test_lists_master_seasons_with_dates(self):
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90),
+            _row("centauro", "C1", FEB1, FEB28, FEB14, 3, 95),
+            _row("solcar",   "S1", JAN1, JAN31, JAN15, 3, 85),  # not master
+        )
+        seasons = season_ranges(df, "centauro")
+        assert [s["index"] for s in seasons] == [0, 1]
+        assert (seasons[0]["date_from"], seasons[0]["date_to"]) == (JAN1, JAN31)
+        assert (seasons[1]["date_from"], seasons[1]["date_to"]) == (FEB1, FEB28)
+
+    def test_empty_df_returns_empty(self):
+        assert season_ranges(pd.DataFrame(columns=COLS), "centauro") == []
 
 
 class TestResultMetadata:

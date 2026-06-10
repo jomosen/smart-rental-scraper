@@ -37,17 +37,22 @@ JAN1  = date(2025, 1, 1);  JAN31 = date(2025, 1, 31)
 FEB1  = date(2025, 2, 1);  FEB28 = date(2025, 2, 28)
 
 
-def _row(zone_index=0, dur=3, *, zone_desde=JAN1, zone_hasta=JAN31) -> ExportRow:
+def _row(zone_index=0, dur=3, *, zone_desde=JAN1, zone_hasta=JAN31,
+         catalog_examples="", acriss="EDMR", categoria="Económico Manual",
+         provider_models=None, base_provider=None) -> ExportRow:
     return ExportRow(
         zone_index=zone_index,
         zone_desde=zone_desde,
         zone_hasta=zone_hasta,
-        acriss_code="EDMR",
-        categoria="Económico Manual",
+        acriss_code=acriss,
+        categoria=categoria,
         duracion_dias=dur,
         recomendado_total=D("84.15"),
         recomendado_per_day=D("28.05"),
         provider_prices={"centauro": D("90.00"), "solcar": D("85.00")},
+        catalog_examples=catalog_examples,
+        provider_models=provider_models or {},
+        base_provider=base_provider,
     )
 
 
@@ -103,6 +108,15 @@ class TestPdfContent:
         assert b"01/01/2025" in b
         assert b"31/01/2025" in b
 
+    def test_partial_export_heading_uses_real_total(self, uncompressed_pdf):
+        """Exporting one season still shows 'Temporada 2 de 12' (real total)."""
+        rows = [_row(zone_index=1, zone_desde=FEB1, zone_hasta=FEB28)]
+        res = ExportResult(
+            rows=rows, providers=["centauro", "solcar"], durations=[3], total_zones=12,
+        )
+        b = PdfExporter().export(res, tenant_name="X")
+        assert b"Temporada 2 de 12" in b
+
     def test_multiple_zones_both_dates_present(self, uncompressed_pdf):
         rows = [
             _row(zone_index=0, zone_desde=JAN1, zone_hasta=JAN31),
@@ -117,6 +131,66 @@ class TestPdfContent:
         b = _export(providers=["centauro", "solcar"])
         assert b"Centauro" in b
         assert b"Solcar" in b
+
+    def test_catalog_examples_in_stream(self, uncompressed_pdf):
+        """Model examples appear once in the category column, uppercased."""
+        b = _export([_row(catalog_examples="Fiat 500 o similar")])
+        assert b"FIAT 500 O SIMILAR" in b
+
+    def test_catalog_examples_rendered_once_per_group(self, uncompressed_pdf):
+        """The models sub-line shows on the first duration row only, not every row."""
+        rows = [_row(dur=d, catalog_examples="Fiat 500 o similar")
+                for d in [1, 2, 3, 7, 14]]
+        b = _export(rows)
+        assert b.count(b"FIAT 500 O SIMILAR") == 1
+
+    def test_acriss_code_printed_once_per_group(self, uncompressed_pdf):
+        """ACRISS code is merged across its duration rows — printed once, not per row."""
+        rows = [_row(dur=d, acriss="EDMR") for d in [1, 2, 3, 7, 14]]
+        b = _export(rows)
+        assert b.count(b"EDMR") == 1
+
+    def test_distinct_groups_each_print_their_code(self, uncompressed_pdf):
+        """Two categories → each ACRISS code appears exactly once."""
+        rows = (
+            [_row(dur=d, acriss="EDMR", categoria="Económico Manual") for d in [1, 3]]
+            + [_row(dur=d, acriss="MDMR", categoria="Pequeño Manual") for d in [1, 3]]
+        )
+        b = _export(rows)
+        assert b.count(b"EDMR") == 1
+        assert b.count(b"MDMR") == 1
+
+    def test_spanish_money_format_in_stream(self, uncompressed_pdf):
+        """Totals render with Spanish grouping: dot thousands, comma decimals."""
+        rows = [ExportRow(
+            zone_index=0, zone_desde=JAN1, zone_hasta=JAN31,
+            acriss_code="EDMR", categoria="Económico Manual", duracion_dias=28,
+            recomendado_total=D("1046.82"), recomendado_per_day=D("37.39"),
+            provider_prices={"centauro": D("1046.82"), "solcar": None},
+        )]
+        b = _export(rows)
+        assert b"1.046,82" in b
+        assert b"37,39" in b
+
+    def test_provider_model_in_stream(self, uncompressed_pdf):
+        """Provider model shows once per group, under its price."""
+        rows = [_row(dur=d, provider_models={"centauro": "VW Golf"})
+                for d in [1, 3, 7]]
+        b = _export(rows)
+        assert b.count(b"VW GOLF") == 1
+
+    def test_long_provider_model_truncated(self, uncompressed_pdf):
+        """An over-long provider model is truncated (and uppercased), not full."""
+        long_name = "Mercedes Benz GLA 250 AMG Line Premium"
+        b = _export([_row(provider_models={"centauro": long_name})])
+        assert long_name.encode() not in b
+        assert b"MERCEDES BENZ GLA" in b  # truncated, uppercased prefix survives
+
+    def test_base_provider_row_still_valid_pdf(self):
+        """A row flagging a base provider builds a valid PDF (bold price cell)."""
+        b = _export([_row(base_provider="solcar",
+                          provider_models={"solcar": "Seat Ibiza"})])
+        assert b[:4] == b"%PDF"
 
 
 class TestPdfWhiteLabel:
