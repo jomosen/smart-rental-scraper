@@ -21,6 +21,11 @@ _STABLE_ITERATIONS_NEEDED = 2
 _GLOBAL_TIMEOUT_MS = 60_000
 _POST_NAV_MIN_WAIT_MS = 20_000
 _IDLE_TIMEOUT_MS = 20_000
+# A "dom_stable" signal with ZERO price candidates this soon after navigation
+# is usually the page shell settling before the (XHR-loaded) result cards
+# arrive. Don't trust it until this grace passes — kept well under the idle/
+# global timeouts so price-undetectable pages still fall back afterwards.
+_POST_NAV_STABLE_GRACE_MS = 8_000
 
 # Multilingual "no results" keywords (lower-case)
 _EMPTY_KEYWORDS = [
@@ -257,7 +262,16 @@ async def wait_for_results(
             prev_dom_size = dom_size
 
             if stable_count >= _STABLE_ITERATIONS_NEEDED and spinner_gone:
-                signal = "dom_stable"
+                # Zero price candidates + stable shell right after navigation is
+                # usually the cards not having loaded yet (async XHR). Hold off
+                # on the dom_stable fallback until the grace passes so those
+                # cards can populate and fire `result_elements` instead; accept
+                # immediately once ≥1 price is present.
+                grace_passed = (
+                    elapsed_ms - url_changed_at >= _POST_NAV_STABLE_GRACE_MS
+                )
+                if candidate_count > 0 or grace_passed:
+                    signal = "dom_stable"
 
         # Track candidate growth as a progress signal
         if candidate_count != prev_candidate_count:
