@@ -19,11 +19,44 @@ Artifacts:
 
 ---
 
-## 1. Code + virtualenv
+## 0. Access the private repo on the VPS (one-time)
+
+`smart-rental-scraper` is a **private** GitHub repo, so the VPS needs read
+credentials to clone it. Recommended: a **read-only SSH deploy key** scoped to
+this repo (not your personal account).
 
 ```bash
+# On the VPS — dedicated key, no passphrase (for unattended git pulls):
+ssh-keygen -t ed25519 -C "rentradar-vps-deploy" -f ~/.ssh/rentradar_deploy -N ""
+cat ~/.ssh/rentradar_deploy.pub
+```
+
+Paste that public key in GitHub → repo **Settings → Deploy keys → Add deploy
+key**, leaving **"Allow write access" unchecked**. Then point the VPS at it and
+clone:
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+Host github-rentradar
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/rentradar_deploy
+EOF
+
 sudo mkdir -p /opt/rentradar && sudo chown $USER /opt/rentradar
-git clone <repo-url> /opt/rentradar
+git clone github-rentradar:jomosen/smart-rental-scraper.git /opt/rentradar
+```
+
+Future updates are then just `cd /opt/rentradar && git pull` (see "Redeploy").
+
+Alternative (quicker, less clean): a GitHub **Personal Access Token** with the
+`repo` scope over HTTPS —
+`git clone https://<PAT>@github.com/jomosen/smart-rental-scraper.git /opt/rentradar`.
+The deploy key is preferred: read-only and limited to this single repo.
+
+## 1. Virtualenv
+
+```bash
 cd /opt/rentradar
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
