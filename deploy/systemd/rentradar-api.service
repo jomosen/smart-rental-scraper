@@ -1,0 +1,36 @@
+# RentRadar SaaS API — systemd unit (uvicorn behind Apache reverse proxy).
+#
+# Install:
+#   sudo cp deploy/systemd/rentradar-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now rentradar-api
+#
+# Adjust User/paths to your server. Assumes the repo lives at /opt/rentradar
+# with a virtualenv at /opt/rentradar/.venv and a .env at the repo root
+# (load_dotenv() reads it from WorkingDirectory).
+
+[Unit]
+Description=RentRadar SaaS API (FastAPI/uvicorn)
+# If Postgres runs as a native service, use: After=network.target postgresql.service
+# If Postgres runs via Docker, use:          After=network.target docker.service
+After=network.target
+
+[Service]
+Type=simple
+User=rentradar
+Group=rentradar
+WorkingDirectory=/opt/rentradar
+# uvicorn binds to localhost only — Apache is the public edge (443).
+ExecStart=/opt/rentradar/.venv/bin/uvicorn src.saas.presentation.api.app:app \
+    --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=3
+
+# --- Hardening (safe because the app lives under /opt, not /home) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
