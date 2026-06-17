@@ -1,7 +1,7 @@
 """Assemble the cross-tariff grid from raw observations into a view model.
 
 This module holds the logic that is shared by every presentation of the
-cross-tariff grid (Streamlit back-office and the client API):
+cross-tariff grid (the client API/web dashboard and the CSV/PDF exports):
 
   - Naming derived from the ACRISS code (`code_label`) and the segment scale
     used to order categories (`TIER_ORDER`). Ref: docs/segmentos_acriss.md.
@@ -65,7 +65,7 @@ _VAN_NAMES: dict[str, str] = {
 # Fuel ordering within an otherwise-identical code: combustion < hybrid < electric.
 _FUEL_ORDER: dict[str, int] = {"R": 0, "D": 0, "H": 1, "I": 1, "E": 2, "C": 2}
 
-# Provider colors by selection order — mirrors the Streamlit palette.
+# Provider colors by selection order — the grid's stable palette.
 _PROV_PALETTE = ["#d63a4e", "#3a63d6", "#1f9d6b", "#f59e0b", "#7c3aed", "#0891b2"]
 
 
@@ -334,6 +334,10 @@ class CategoryView:
     flags: dict[str, bool]
     cells: list[SummaryCell]
     providers: list[ProviderRow]
+    # Silenced by the tenant: still rendered (dimmed, pushed to the bottom) in
+    # the grid, but excluded from CSV/PDF exports. Source of truth is the config
+    # list `muted_categories`; the flag is set here so every consumer agrees.
+    muted: bool = False
 
 
 @dataclass
@@ -500,6 +504,7 @@ def assemble_cross_tariff(
     category_rules: dict[str, dict],
     durations: list[int],
     examples: dict[str, list[str]],
+    muted_categories: Optional[list[str]] = None,
     zone_index: Optional[int] = None,
     today: Optional[date] = None,
 ) -> CrossTariffPayload:
@@ -553,9 +558,12 @@ def assemble_cross_tariff(
         base, global_rule, category_rules, round_mode,
     )
 
+    # Muted categories sort to the bottom (True > False) but keep their semantic
+    # order within the muted block; the rest are untouched.
+    muted_set = set(muted_categories or [])
     codes = sorted(
         zone_df["acriss_code"].unique(),
-        key=lambda c: category_sort_key(c, cell_results),
+        key=lambda c: (c in muted_set, category_sort_key(c, cell_results)),
     )
 
     categories: list[CategoryView] = []
@@ -620,6 +628,7 @@ def assemble_cross_tariff(
             },
             cells=summary_cells,
             providers=_build_provider_rows(code, zone_df, cell_results, providers, durations),
+            muted=code in muted_set,
         ))
 
     return CrossTariffPayload(

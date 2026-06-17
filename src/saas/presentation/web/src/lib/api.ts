@@ -15,6 +15,7 @@ export function controlsToConfig(c: Controls): PricingConfig {
       floor: c.rule_floor, ceiling: c.rule_ceiling,
     },
     category_rules: c.category_rules,
+    muted_categories: c.muted_categories,
   }
 }
 
@@ -25,7 +26,10 @@ export function configKey(c: Controls): string {
     acc[k] = cfg.category_rules[k]; return acc
   }, {})
   const radar = [...cfg.active_providers].sort()
-  return JSON.stringify({ ...cfg, active_providers: radar, category_rules: cats })
+  const muted = [...cfg.muted_categories].sort()
+  return JSON.stringify({
+    ...cfg, active_providers: radar, category_rules: cats, muted_categories: muted,
+  })
 }
 
 async function parse(res: Response): Promise<CrossTariffResponse> {

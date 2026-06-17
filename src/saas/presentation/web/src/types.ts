@@ -58,6 +58,7 @@ export interface Meta {
   base: string // effective base aggregation
   round: string // effective rounding mode
   rules: Rules
+  muted_categories: string[] // ACRISS codes silenced by the tenant
 }
 
 export interface SummaryCell {
@@ -110,6 +111,7 @@ export interface Category {
   acriss_code: string
   view_label: string
   catalog_examples: string
+  muted: boolean // silenced by the tenant: dimmed + last in grid, hidden from exports
   flags: CategoryFlags
   cells: SummaryCell[]
   providers: ProviderRow[]
@@ -134,6 +136,7 @@ export interface Controls {
   rule_floor: string
   rule_ceiling: string
   category_rules: Record<string, Rule>
+  muted_categories: string[]
 }
 
 // Body shape for POST /preview and PUT /pricing-config.
@@ -144,6 +147,7 @@ export interface PricingConfig {
   active_providers: string[]
   default_rule: Rule
   category_rules: Record<string, Rule>
+  muted_categories: string[]
   zone?: number | null
   location_id?: number | null
 }

@@ -11,7 +11,10 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 
-from src.saas.application.pricing.cross_tariff_assembler import season_ranges
+from src.saas.application.pricing.cross_tariff_assembler import (
+    assemble_cross_tariff,
+    season_ranges,
+)
 from src.saas.application.pricing.export_service import (
     ExportResult,
     ExportRow,
@@ -184,6 +187,47 @@ class TestProviderPrices:
         row = result.rows[0]
         assert row.provider_prices["centauro"] is not None
         assert row.provider_prices["solcar"]   is not None
+
+
+class TestMutedCategories:
+    def test_muted_category_excluded_from_rows(self):
+        """A silenced ACRISS code produces no export rows; the rest survive."""
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90, acriss="EDMR"),
+            _row("centauro", "C2", JAN1, JAN31, JAN15, 3, 120, acriss="CDMR"),
+        )
+        result = _build(df, providers=["centauro"], muted_categories=["CDMR"])
+
+        codes = {r.acriss_code for r in result.rows}
+        assert codes == {"EDMR"}
+
+    def test_no_muted_keeps_all_categories(self):
+        df = _df(
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90, acriss="EDMR"),
+            _row("centauro", "C2", JAN1, JAN31, JAN15, 3, 120, acriss="CDMR"),
+        )
+        result = _build(df, providers=["centauro"], muted_categories=[])
+
+        assert {r.acriss_code for r in result.rows} == {"EDMR", "CDMR"}
+
+    def test_muted_flagged_and_sorted_last_in_grid(self):
+        """In the grid (assembler) muted categories stay visible: flagged + last."""
+        df = _df(
+            # EDMR (Económico) normally sorts before CDMR (Compacto); muting it
+            # must push it to the bottom while CDMR stays first.
+            _row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90, acriss="EDMR"),
+            _row("centauro", "C2", JAN1, JAN31, JAN15, 3, 120, acriss="CDMR"),
+        )
+        payload = assemble_cross_tariff(
+            df=df, providers=["centauro"], master="centauro",
+            base="min", round_mode="0", global_rule=DEFAULT_RULE,
+            category_rules={}, durations=[3], examples={},
+            muted_categories=["EDMR"], zone_index=0, today=JAN15,
+        )
+        order = [c.acriss_code for c in payload.categories]
+        assert order == ["CDMR", "EDMR"]
+        flags = {c.acriss_code: c.muted for c in payload.categories}
+        assert flags == {"CDMR": False, "EDMR": True}
 
 
 class TestProviderModelsAndBase:

@@ -120,6 +120,7 @@ class PricingExportService:
         category_rules: dict[str, dict],
         durations: list[int],
         examples: dict[str, list[str]],
+        muted_categories: Optional[list[str]] = None,
         zone_from: Optional[int] = None,
         zone_to: Optional[int] = None,
     ) -> ExportResult:
@@ -128,7 +129,8 @@ class PricingExportService:
         The caller is responsible for fetching df once (e.g. via
         fetch_cross_tariff_dataframe); this method never touches the database.
         Cells where SummaryCell.empty=True (no data for that category+duration
-        in the zone) are omitted from the output.
+        in the zone) are omitted from the output. Categories listed in
+        muted_categories are silenced by the tenant and excluded entirely.
 
         zone_from / zone_to: inclusive 0-based zone range to export. None means
         the open end (first / last). Out-of-range values are clamped; a reversed
@@ -148,6 +150,7 @@ class PricingExportService:
             category_rules=category_rules,
             durations=durations,
             examples=examples,
+            muted_categories=muted_categories,
         )
 
         # One call to discover total zone count, then iterate the requested range.
@@ -170,6 +173,8 @@ class PricingExportService:
         for payload in payloads:
             zm = payload.zone
             for cat in payload.categories:
+                if cat.muted:  # silenced categories never reach the client export
+                    continue
                 for cell in cat.cells:
                     if cell.empty:
                         continue

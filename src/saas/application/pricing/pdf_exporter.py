@@ -261,7 +261,7 @@ class PdfExporter:
         col_widths = [_W_ACRISS, _W_CAT, _W_DIAS, _W_REC_T, _W_REC_D] + [prov_w] * n_prov
 
         col_headers = (
-            ["ACRISS", "Categoría", "Días", "Rec. total (€)", "Rec./día (€)"]
+            ["ACRISS", "Categoría", "Días", "Total (€)", "Día (€)"]
             + [p.capitalize() for p in result.providers]
         )
 

@@ -31,6 +31,7 @@ function controlsFromMeta(meta: Meta): Controls {
     rule_floor: r.floor,
     rule_ceiling: r.ceiling,
     category_rules,
+    muted_categories: meta.muted_categories ?? [],
   }
 }
 
@@ -111,6 +112,18 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
       const n = new Set(s)
       n.has(code) ? n.delete(code) : n.add(code)
       return n
+    })
+
+  // Silence / un-silence a category. Lives in controls so it counts toward the
+  // dirty check and persists on Save; the server re-sorts muted rows to the end.
+  const toggleMute = (code: string) =>
+    setControls((c) => {
+      if (!c) return c
+      const on = c.muted_categories.includes(code)
+      const next = on
+        ? c.muted_categories.filter((k) => k !== code)
+        : [...c.muted_categories, code]
+      return { ...c, muted_categories: next }
     })
 
   const handleExport = async (format: 'csv' | 'pdf', zoneFrom: number, zoneTo: number) => {
@@ -208,7 +221,9 @@ export default function RadarView({ onMeta, email, onLogout, onToggleSidebar }: 
           <PriceGrid
             data={data}
             openCats={openCats}
+            mutedCats={new Set(ctl.muted_categories)}
             onToggleCat={toggleCat}
+            onToggleMute={toggleMute}
             onCellClick={(code, duration) => setDrawer({ code, duration })}
           />
           {busy && (

@@ -5,17 +5,18 @@ interface Props {
   category: Category
   durations: number[]
   colorByKey: Record<string, string>
+  muted?: boolean
 }
 
 /** Provider sub-rows of one category (the accordion body). Returns a list of <tr>. */
-export default function ProviderRows({ category, durations, colorByKey }: Props) {
+export default function ProviderRows({ category, durations, colorByKey, muted }: Props) {
   return (
     <>
       {category.providers.map((pr, idx) => {
         const color = colorByKey[pr.provider_key] ?? '#97a0b0'
         const cellByDur = new Map(pr.cells.map((c) => [c.duration, c]))
         return (
-          <tr className="prov-row" key={`${pr.provider_key}-${pr.models}-${idx}`}>
+          <tr className={`prov-row${muted ? ' cat-muted' : ''}`} key={`${pr.provider_key}-${pr.models}-${idx}`}>
             <td className="cat">
               <span className="pdot" style={{ background: color }} />
               <span className="pname">{pr.provider_key.charAt(0).toUpperCase() + pr.provider_key.slice(1)}</span>

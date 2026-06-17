@@ -13,7 +13,7 @@
 
 The tenant comes from the session (get_current_tenant); everything runs inside
 tenant_context on the RLS engine. Calculation/naming/ordering live in
-application/pricing (shared with the Streamlit back-office); this route fetches,
+application/pricing (shared with the CSV/PDF exports); this route fetches,
 validates, configures and serializes.
 
 Overrides for live editing use the preview POST (not query params) because
@@ -64,8 +64,8 @@ from ..dependencies import get_current_tenant
 
 router = APIRouter()
 
-# Defaults mirror the Streamlit cross-tariff view, so an un-configured tenant
-# produces the same numbers as the back-office grid.
+# Defaults for an un-configured tenant — the baseline the pricing engine uses
+# until a tenant saves its own cross-tariff config.
 _DEFAULT_RULE = {"op": "sub", "val": 1.0, "mode": "pct", "floor": "auto", "ceiling": "max"}
 _DEFAULT_BASE = "min"
 _DEFAULT_ROUND = "0"
@@ -105,6 +105,9 @@ class PricingConfigBody(BaseModel):
     active_providers: Optional[list[str]] = None
     default_rule: RuleBody
     category_rules: dict[str, RuleBody] = Field(default_factory=dict)
+    # ACRISS codes the tenant has silenced: shown dimmed + last in the grid,
+    # excluded from exports. Validated against acriss_codes in _cfg_from_body.
+    muted_categories: list[str] = Field(default_factory=list)
     # Only meaningful for preview (ignored by PUT).
     zone: Optional[int] = None
     location_id: Optional[int] = None
@@ -133,6 +136,7 @@ def _resolve_saved_config(rule_formula: Optional[dict], active_providers: list[s
         "round_mode": f.get("rounding", _DEFAULT_ROUND),
         "global_rule": dict(f.get("global_rule", _DEFAULT_RULE)),
         "category_rules": f.get("category_overrides", {}),
+        "muted_categories": list(f.get("muted_categories", [])),
     }
 
 
@@ -169,17 +173,19 @@ def _cfg_from_body(body: PricingConfigBody, session, active_codes: list[str]) ->
             detail={"error": "The master provider cannot be removed from the radar"},
         )
 
-    if body.category_rules:
+    if body.category_rules or body.muted_categories:
         valid = {
             r[0] for r in session.execute(
                 text("SELECT code FROM acriss_codes WHERE active = TRUE")
             ).fetchall()
         }
-        unknown = [c for c in body.category_rules if c not in valid]
+        unknown = [
+            c for c in (*body.category_rules, *body.muted_categories) if c not in valid
+        ]
         if unknown:
             raise HTTPException(
                 status_code=422,
-                detail={"error": f"Unknown ACRISS code(s): {', '.join(sorted(unknown))}"},
+                detail={"error": f"Unknown ACRISS code(s): {', '.join(sorted(set(unknown)))}"},
             )
 
     return {
@@ -189,6 +195,7 @@ def _cfg_from_body(body: PricingConfigBody, session, active_codes: list[str]) ->
         "round_mode": body.round,
         "global_rule": body.default_rule.model_dump(),
         "category_rules": {k: v.model_dump() for k, v in body.category_rules.items()},
+        "muted_categories": list(dict.fromkeys(body.muted_categories)),
     }
 
 
@@ -201,6 +208,7 @@ def _formula_from_cfg(cfg: dict) -> dict:
         "rounding": cfg["round_mode"],
         "global_rule": cfg["global_rule"],
         "category_overrides": cfg["category_rules"],
+        "muted_categories": cfg["muted_categories"],
     }
 
 
@@ -217,6 +225,7 @@ def _serialize(
     base: str,
     round_mode: str,
     rules: dict,
+    muted_categories: list[str],
     data_gap: bool,
     vigente_range: Optional[dict],
     all_providers: list[dict],
@@ -252,6 +261,7 @@ def _serialize(
             "base": base,
             "round": round_mode,
             "rules": rules,
+            "muted_categories": muted_categories,
         },
         "categories": [
             {
@@ -259,6 +269,7 @@ def _serialize(
                 "view_label": c.view_label,
                 "catalog_examples": c.catalog_examples,
                 "flags": c.flags,
+                "muted": c.muted,
                 "cells": [
                     {
                         "duration": cell.duration,
@@ -364,6 +375,7 @@ def _compute_payload(
         category_rules=cfg["category_rules"],
         durations=list(DURATIONS),
         examples=examples,
+        muted_categories=cfg["muted_categories"],
         zone_index=zone,
         today=today,
     )
@@ -400,6 +412,7 @@ def _compute_payload(
         base=cfg["base"],
         round_mode=cfg["round_mode"],
         rules=rules_out,
+        muted_categories=list(cfg["muted_categories"]),
         data_gap=data_gap,
         vigente_range=vigente_range,
         all_providers=all_provider_meta,
@@ -490,6 +503,7 @@ def _export_result(
         category_rules=cfg["category_rules"],
         durations=list(DURATIONS),
         examples=examples,
+        muted_categories=cfg["muted_categories"],
         zone_from=zone_from,
         zone_to=zone_to,
     )

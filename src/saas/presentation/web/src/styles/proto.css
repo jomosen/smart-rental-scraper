@@ -272,9 +272,27 @@ tr.cat-head td {
   background: var(--blue-bg); padding: 10px 18px; text-align: left;
   font-weight: 600; color: var(--blue); border-top: 1px solid var(--blue-line);
 }
-tr.cat-head td.cat { white-space: nowrap; cursor: pointer; user-select: none; }
+tr.cat-head td.cat {
+  white-space: nowrap; cursor: pointer; user-select: none;
+  display: flex; align-items: center;
+}
 .chev2 { display: inline-block; transition: transform .18s ease; margin-right: 8px; vertical-align: -1px; }
 tr.cat-head.open .chev2 { transform: rotate(180deg); }
+
+/* Silenced categories: server sorts them last and drops them from exports; here
+   we just dim the band + summary so they read as "desactivado". Hovering brings
+   them back to legible so the user can re-activate without guessing. */
+tr.cat-muted td { opacity: .45; transition: opacity .15s ease; }
+tr.cat-muted:hover td { opacity: .85; }
+
+/* Per-row Silenciar/Activar toggle (eye icon) inside the category band. */
+.mute-btn {
+  background: none; border: 0; padding: 4px; margin-left: auto; line-height: 0;
+  cursor: pointer; color: var(--blue); opacity: .65; vertical-align: -3px;
+  border-radius: 5px; transition: opacity .15s ease, background .15s ease;
+}
+.mute-btn:hover { opacity: 1; background: rgba(0, 0, 0, .06); }
+.mute-btn[aria-pressed="true"] { color: var(--ink-faint); }
 tr.prov-row td { border-top: 1px solid var(--line-soft); padding: 8px 12px; font-size: 13px; }
 tr.prov-row td.cat { padding: 8px 14px 8px 30px; white-space: nowrap; text-align: left; }
 .pdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 7px; }

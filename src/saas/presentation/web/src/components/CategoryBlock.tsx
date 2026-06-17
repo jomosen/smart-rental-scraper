@@ -7,31 +7,55 @@ interface Props {
   durations: number[]
   colorByKey: Record<string, string>
   open: boolean
+  muted: boolean
   onToggle: (code: string) => void
+  onToggleMute: (code: string) => void
   onCellClick: (code: string, duration: number) => void
 }
 
 export default function CategoryBlock({
-  category, durations, colorByKey, open, onToggle, onCellClick,
+  category, durations, colorByKey, open, muted, onToggle, onToggleMute, onCellClick,
 }: Props) {
   const { flags } = category
   const cellByDur = new Map(category.cells.map((c) => [c.duration, c]))
+  const dim = muted ? ' cat-muted' : ''
 
   return (
     <>
       {/* Category band: name + per-column duration headers */}
-      <tr className={`cat-head${open ? ' open' : ''}`} onClick={() => onToggle(category.acriss_code)}>
+      <tr className={`cat-head${open ? ' open' : ''}${dim}`} onClick={() => onToggle(category.acriss_code)}>
         <td className="cat">
           <svg className="chev2" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           {category.view_label}
+          <button
+            type="button"
+            className="mute-btn"
+            aria-pressed={muted}
+            title={muted ? 'Activar categoría (se incluye en el export)' : 'Silenciar categoría (se excluye del export)'}
+            onClick={(e) => { e.stopPropagation(); onToggleMute(category.acriss_code) }}
+          >
+            {muted ? (
+              // Eye closed — silenced.
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            ) : (
+              // Eye open — active.
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            )}
+          </button>
         </td>
         {durations.map((d) => <td className="dur" key={d}>{d}d</td>)}
       </tr>
 
       {/* Single summary row: badges + examples on the left, total · €/d · range per cell */}
-      <tr className="rec-row">
+      <tr className={`rec-row${dim}`}>
         <td className="cat">
           <div className="rowbadges">
             <span className="acode">{category.acriss_code}</span>
@@ -57,7 +81,7 @@ export default function CategoryBlock({
         })}
       </tr>
 
-      {open && <ProviderRows category={category} durations={durations} colorByKey={colorByKey} />}
+      {open && <ProviderRows category={category} durations={durations} colorByKey={colorByKey} muted={muted} />}
     </>
   )
 }

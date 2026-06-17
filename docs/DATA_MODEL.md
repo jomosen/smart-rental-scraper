@@ -447,7 +447,11 @@ pricing_rules
   --     "rounding": "0|0.99|0.90|0.50|1",
   --     "global_rule":  {op:"sub|add", val:>=0, mode:"pct|abs",
   --                      floor:"auto|cost|none", ceiling:"max|none"},
-  --     "category_overrides": { "CFAR": {<same shape as global_rule>}, ... }
+  --     "category_overrides": { "CFAR": {<same shape as global_rule>}, ... },
+  --     "muted_categories": ["CFAR", ...]        -- ACRISS codes the tenant
+  --                                              -- silenced: shown dimmed and
+  --                                              -- last in the grid, excluded
+  --                                              -- from CSV/PDF exports
   --   }
   -- The column-level floor/ceiling stay NULL for these rules (the modes live
   -- inside the JSON). Live edits in the front use POST /api/cross-tariff/preview
