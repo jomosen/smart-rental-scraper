@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import delete, select
 
-from src.saas.application.catalog_sync import CatalogSyncService
 from src.saas.application.onboarding.config import ConfigError, OnboardingConfig, load_config
 from src.saas.application.onboarding.rollback import rollback_tenant
 from src.saas.application.onboarding.steps import (
@@ -45,6 +44,11 @@ from src.saas.infrastructure.persistence.models.tenant import (
     TenantVehicleGroup,
     TenantVehicleGroupMapping,
     User,
+)
+from src.saas.infrastructure.persistence.repositories import (
+    ProviderRepository,
+    ProviderLocationRepository,
+    ProviderRateRepository,
 )
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
@@ -94,9 +98,20 @@ _DUMMY_FACTORY = lambda *a, **kw: None  # noqa: E731 — never called when _run_
 
 
 def _setup_catalog(session) -> tuple[int, int, int]:
-    service = CatalogSyncService(session)
-    ids = service.sync_from_providers_json([_PROVIDER_ENTRY])
-    return ids["Onboard Test Provider"]
+    e = _PROVIDER_ENTRY
+    provider = ProviderRepository(session).get_or_create(
+        code=e["scraper"], display_name=e["name"],
+        scraper_key=e["scraper"], currency="EUR",
+    )
+    location = ProviderLocationRepository(session).get_or_create(
+        provider_id=provider.id,
+        location_code=e["location_id"], location_name=e["location_name"],
+    )
+    rate = ProviderRateRepository(session).get_or_create(
+        provider_id=provider.id,
+        rate_code="test_rate", rate_name=e["rate_name"],
+    )
+    return provider.id, location.id, rate.id
 
 
 def _setup_pvg(
@@ -522,8 +537,8 @@ def test_activates_subscription_when_partial_scope_declared_explicitly(
 def test_validate_catalog_handles_multiple_subscriptions_to_same_provider(
     super_db_session, tmp_path
 ):
-    # Build a provider with two locations manually (CatalogSyncService de-dupes by name,
-    # so we insert directly to get independent IDs back)
+    # Build a provider with two locations manually (the get_or_create repos de-dupe
+    # by code, so we insert directly to get independent IDs back)
     provider = Provider(
         code="onb_test_sc",
         display_name="Onboard Test Provider",

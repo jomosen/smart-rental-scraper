@@ -24,7 +24,8 @@ src/
 │   ├── infrastructure/  Playwright driver, concrete scrapers (provider_a, b, c).
 │   └── presentation/    CLI entry point, composition root (container.py).
 └── saas/          Future SaaS backend.
-    ├── application/         catalog_sync, orchestration of persistence.
+    ├── application/         onboarding, pricing, price_query, persistence orchestration.
+    ├── presentation/        FastAPI API + React web dashboard (web/).
     └── infrastructure/
         └── persistence/     SQLAlchemy models, sessions, repositories, engines.
 
@@ -217,22 +218,21 @@ The `-v` flag is destructive: it wipes all scraped data and forces the init scri
 
 ---
 
-## Streamlit dashboard
+## Web dashboard & API
 
-Para lanzar el dashboard local (requiere Postgres corriendo con datos de al menos un scrape):
+The client-facing dashboard is a React SPA served by the FastAPI app (it also
+exposes the JSON API and the cross-tariff CSV/PDF exports):
 
 ```bash
-streamlit run src/saas/presentation/streamlit/app.py
+# Build the front-end once (output: src/saas/presentation/web/dist/)
+npm --prefix src/saas/presentation/web run build
+# Run the API (serves the SPA from dist/)
+uvicorn src.saas.presentation.api.app:app --port 8000
 ```
 
-Abre <http://localhost:8501> en el navegador.
-
-El dashboard muestra los precios de la competencia agrupados por categoría ACRISS, con:
-
-- **Visión general** — tabla pivot con precio medio/día por categoría × provider; los grupos en revisión aparecen marcados con 🔍.
-- **Evolución temporal** — gráfico de líneas con la evolución del precio para una categoría a lo largo del periodo scrapeado.
-
-Los filtros de la barra lateral (fecha de pickup, duración, providers, categorías ACRISS, include pending review) actualizan ambas vistas. Los datos se cachean 60 segundos para evitar hits continuos a Postgres.
+Open <http://localhost:8000>. For hot-reload front-end development use
+`npm --prefix src/saas/presentation/web run dev` (Vite). See
+`src/saas/presentation/web/README.md` and `deploy/README.md` for details.
 
 ---
 
@@ -250,7 +250,6 @@ Unit tests (no external dependencies):
 Integration tests against the local Postgres (require Postgres running and migrations applied):
 
 - `tests/saas/infrastructure/persistence/test_repositories.py` — repository contracts.
-- `tests/saas/application/test_catalog_sync.py` — auto-creation of catalog rows.
 - `tests/saas/application/test_orchestrator_persistence.py` — orchestrator end-to-end with mocked scrapers.
 
 The integration tests use real Postgres with rollback-based isolation; they don't pollute the database between runs. The tests for tenant isolation (RLS) are part of "done" for any feature touching tenant-scoped tables.

@@ -239,11 +239,3 @@ class PricingOutput(Base):
     computed_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatibility aliases for code that uses the old class names.
-# Removed in prompt 4 when the scraper is refactored.
-# ---------------------------------------------------------------------------
-ClientVehicleGroup = TenantVehicleGroup
-VehicleGroupMapping = TenantVehicleGroupMapping

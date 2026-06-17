@@ -19,9 +19,6 @@ from .tenant import (
     TenantSubscription,
     PricingRule,
     PricingOutput,
-    # Backward-compatibility aliases (removed in prompt 4)
-    ClientVehicleGroup,
-    VehicleGroupMapping,
 )
 
 __all__ = [
@@ -43,7 +40,4 @@ __all__ = [
     "TenantSubscription",
     "PricingRule",
     "PricingOutput",
-    # Backward-compatibility aliases (removed in prompt 4)
-    "ClientVehicleGroup",
-    "VehicleGroupMapping",
 ]

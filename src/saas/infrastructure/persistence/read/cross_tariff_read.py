@@ -3,8 +3,8 @@
 These functions accept any object with an `.execute()` method that returns a
 SQLAlchemy Result — a Connection or a Session both work. This lets the same SQL
 serve:
-  - the Streamlit back-office (super_engine connection, BYPASSRLS), and
-  - the client API (app_engine session inside tenant_context, RLS-enforced).
+  - the client API (app_engine session inside tenant_context, RLS-enforced), and
+  - admin/back-office scripts (super_engine connection, BYPASSRLS).
 
 All tables read here (providers, provider_vehicle_categories, homogeneous_zones,
 price_observations, acriss_codes) are global catalog tables — not tenant-scoped,
@@ -19,8 +19,8 @@ from typing import Protocol
 import pandas as pd
 from sqlalchemy import text
 
-# Duration brackets shown across the grid. Single source of truth for the API;
-# mirrors DURATION_BRACKET in the Streamlit queries module.
+# Duration brackets shown across the grid. Single source of truth for the API
+# and the CSV/PDF exports.
 DURATIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
 
 CROSS_TARIFF_COLUMNS = [

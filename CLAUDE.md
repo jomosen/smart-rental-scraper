@@ -28,9 +28,20 @@ python -m src.scraper.presentation.cli.main
 
 # Tests (no browser required)
 pytest tests/
+
+# Front-end (RentRadar web UI under src/saas/presentation/web)
+npm --prefix src/saas/presentation/web run build   # rebuild dist/ (required to see changes)
+npm --prefix src/saas/presentation/web run dev      # Vite dev server with hot reload
 ```
 
 If you add a dependency, update `requirements.txt`. Do not introduce a new package manager (poetry, uv, etc.) without asking.
+
+**Front-end changes need a build to be visible.** The FastAPI app serves the
+**pre-built** bundle from `src/saas/presentation/web/dist/` (`api/app.py`), not the
+Vite dev server. Any edit under `web/` (TSX/CSS) only shows up after
+`npm --prefix src/saas/presentation/web run build` and a hard browser refresh — or
+while running `npm run dev` (Vite, hot reload). Don't expect TSX/CSS edits to appear
+just by restarting the API.
 
 ---
 
@@ -100,7 +111,6 @@ Each run creates a `scrape_runs` row on start (`ScrapeRunRepository.create`) and
   - `tests/test_season_analyzer.py` — unit tests for `SeasonAnalyzer`
   - `tests/test_price_point_extractor.py` — unit tests for `PricePointExtractor`
   - `tests/saas/infrastructure/persistence/test_repositories.py` — integration tests for all repositories (Hito 3)
-  - `tests/saas/application/test_catalog_sync.py` — integration tests for `CatalogSyncService` (Hito 4)
   - `tests/saas/application/test_orchestrator_persistence.py` — integration tests for `SmartScraperOrchestrator` DB persistence (Hito 4)
 - Tests under `tests/saas/` are integration tests against the local Postgres. They require the DB to be running and migrations to be applied. Run `docker compose up -d postgres && alembic upgrade head` before `pytest` if it's not already up.
 - When you add or modify logic in `scraper/application/smart_scraping/` or `scraper/application/services/`, add or update tests in the same PR. These are the modules with the most reasoning logic — they need coverage.

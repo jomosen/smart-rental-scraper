@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import delete, select
 
-from src.saas.application.catalog_sync import CatalogSyncService
 from tests.saas.application._fakes import StubClassificationService
 from src.scraper.application.factories.scraper_factory import ScraperFactory
 from src.scraper.infrastructure.builder.extraction.models import VehicleResult
@@ -32,6 +31,11 @@ from src.saas.infrastructure.persistence.models.catalog import (
     ProviderRate,
     ProviderVehicleCategory,
     ScrapeRun,
+)
+from src.saas.infrastructure.persistence.repositories import (
+    ProviderRepository,
+    ProviderLocationRepository,
+    ProviderRateRepository,
 )
 from src.saas.infrastructure.persistence.session import super_session
 from src.scraper.application.smart_scraping.price_point_extractor import PricePointExtractor
@@ -59,9 +63,20 @@ _PROVIDER_ENTRY = {
 
 def _setup_catalog(session) -> tuple[int, int, int]:
     """Upsert catalog rows and return (provider_id, location_id, rate_id)."""
-    service = CatalogSyncService(session)
-    ids = service.sync_from_providers_json([_PROVIDER_ENTRY])
-    return ids["Orch Test Provider"]
+    e = _PROVIDER_ENTRY
+    provider = ProviderRepository(session).get_or_create(
+        code=e["scraper"], display_name=e["name"],
+        scraper_key=e["scraper"], currency="EUR",
+    )
+    location = ProviderLocationRepository(session).get_or_create(
+        provider_id=provider.id,
+        location_code=e["location_id"], location_name=e["location_name"],
+    )
+    rate = ProviderRateRepository(session).get_or_create(
+        provider_id=provider.id,
+        rate_code="test_rate", rate_name=e["rate_name"],
+    )
+    return provider.id, location.id, rate.id
 
 
 def _cleanup_provider(session, provider_id: int) -> None:

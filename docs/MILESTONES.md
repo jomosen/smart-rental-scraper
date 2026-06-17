@@ -1411,3 +1411,46 @@ una regla con suelo, techo y redondeo, persistiendo esa configuración como
   requeriría cambiar a una fila por `acriss_code`, lo que es un cambio de modelo
   explícito, no algo soportado por el diseño actual. Registrado como limitación
   consciente; no silenciosa.
+
+---
+
+## Limpieza — Retirada de código muerto y del front Streamlit
+
+**Goal.** Eliminar código que dejó de tener consumidores tras la evolución del
+producto, ahora que el dashboard cliente es la SPA React (`web/`) servida por
+FastAPI y la API es la superficie de lectura.
+
+**What was removed.**
+
+- **Back-office en Streamlit** — todo `src/saas/presentation/streamlit/` (app,
+  filters, queries y las 4 vistas) y su suite `tests/saas/presentation/streamlit/`.
+  Superado por la SPA React + API. La lógica de cálculo de la tarifa cruzada ya
+  vivía en `application/pricing` (compartida), así que no se perdió negocio.
+- **Demo CLI** — `src/saas/application/demo/` (render Format A en terminal) y
+  `tests/saas/application/test_demo.py`. Utilidad de inspección superada por la web/API.
+- **`CatalogSyncService`** — `src/saas/application/catalog_sync.py` y
+  `test_catalog_sync.py`. No lo llamaba el orquestador de producción (su llamada
+  desde `providers.json` se quitó en D2.5); solo lo usaban tests como atajo para
+  sembrar catálogo. Los helpers `_setup_catalog` de `test_orchestrator_persistence`
+  y `test_onboarding` se reescribieron para usar los repos `get_or_create`
+  directamente (mismo resultado, sin la clase).
+- **Shims "removed in prompt 4"** que nunca se quitaron: el repositorio
+  `provider_vehicle_group.py` (re-export de `ProviderVehicleCategoryRepository`) y
+  los alias de modelo `ClientVehicleGroup` / `VehicleGroupMapping`. Cero importadores.
+- **Paquete vacío** `src/scraper/application/exporters/` (resto del Hito 4 tras
+  eliminar los exporters).
+- **Dependencias huérfanas** en `requirements.txt`: `streamlit`, `plotly` (solo las
+  vistas Streamlit) y `rich` (solo el Demo CLI).
+
+**Decisions taken.**
+
+- **Borrado, no deprecación.** Sin clientes en producción consumiendo estas piezas,
+  un periodo de deprecación no aporta; el historial de git conserva el código si
+  hiciera falta recuperarlo.
+- **Comentarios/docstrings actualizados** donde nombraban "Streamlit back-office"
+  como consumidor (assembler, `cross_tariff_read`, ruta `cross_tariff`) para no
+  dejar referencias a algo que ya no existe.
+
+**Closure.** `pytest tests/` pasa (386/386, sin cambio de cobertura real: solo se
+retiraron tests de código eliminado). Ninguna referencia a las piezas borradas
+queda en código (`git grep` limpio).
