@@ -26,7 +26,6 @@ from ...application.smart_scraping.season_analyzer import SeasonAnalyzer
 from ...application.smart_scraping.season_probe import SeasonProbe
 from ...application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
 from ...infrastructure.playwright.playwright_driver import PlaywrightDriver
-from ...infrastructure.scrapers.provider_a_scraper import ProviderAScraper
 from ...infrastructure.scrapers.victoria_scraper import VictoriaScraper
 from ...infrastructure.scrapers.victoria_url_scraper import VictoriaUrlScraper
 from ...infrastructure.scrapers.solcar_scraper import SolcarScraper
@@ -47,7 +46,6 @@ from ....saas.infrastructure.persistence.models.catalog import (
 # Maps providers.scraper_key to the concrete scraper class.
 # Add one line here when creating a new scraper class.
 SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
-    "provider_a": ProviderAScraper,
     "victoria":      VictoriaUrlScraper,
     "victoria_form": VictoriaScraper,
     "solcar": SolcarScraper,

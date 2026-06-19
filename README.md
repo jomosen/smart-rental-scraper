@@ -6,7 +6,7 @@ Rent-a-car competitor price monitoring system.
 
 The scraper extracts rates across a date range and rental durations from one or more rent-a-car providers. It uses a smart probing strategy that minimises browser sessions by detecting price seasons and only scraping the unique representative dates of each season, rather than every day in the period.
 
-Provider identities and URLs live in the `providers` DB table. Active scrapers: `provider_a`, `victoria`, `solcar`, `centauro`.
+Provider identities and URLs live in the `providers` DB table. Active scrapers: `victoria`, `solcar`, `centauro`.
 
 ---
 
@@ -21,7 +21,7 @@ src/
 ├── scraper/       Scraping engine. Clean architecture. Depends only on shared/.
 │   ├── domain/          Interfaces and re-exports from shared/.
 │   ├── application/     Use cases: smart_scraping/, factories/, filters/, models/.
-│   ├── infrastructure/  Playwright driver, concrete scrapers (provider_a, b, c).
+│   ├── infrastructure/  Playwright driver, concrete scrapers (victoria, solcar, centauro).
 │   └── presentation/    CLI entry point, composition root (container.py).
 └── saas/          Future SaaS backend.
     ├── application/         onboarding, pricing, price_query, persistence orchestration.

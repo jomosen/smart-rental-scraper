@@ -12,7 +12,7 @@ PoC stage, validated. Next phase: evolve into a multi-tenant SaaS pricing engine
 
 - **Architectural vision for the SaaS evolution lives in `docs/ROADMAP_ARCHITECTURE.md`.** Read it before proposing any structural change (multi-tenancy, API surface, persistence, deployment).
 - **Database schema and data-model decisions live in `docs/DATA_MODEL.md`.** This is the source of truth for tables, relationships, indexes, and modeling decisions. Do not change the schema without updating that document first.
-- Provider names are now real in the codebase: `provider_a`, `victoria`, `solcar`, `centauro`. Real URLs live in the `providers` DB table (never in source). Do not hardcode credentials or scraping internals specific to a provider in commit messages.
+- Provider names are now real in the codebase: `victoria`, `solcar`, `centauro`. Real URLs live in the `providers` DB table (never in source). Do not hardcode credentials or scraping internals specific to a provider in commit messages.
 
 ---
 
