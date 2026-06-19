@@ -53,3 +53,6 @@ htmlcov/
 
 # Local provider-catalog dumps (contain real provider URLs — never commit)
 *.local.sql
+
+# Real prod price dumps used as integration examples (business data)
+pricing_config.json
