@@ -23,7 +23,7 @@ import jwt
 from fastapi import HTTPException, Request
 from sqlalchemy import Engine, text
 
-from src.saas.infrastructure.auth.security import COOKIE_NAME, app_env, decode_session_jwt
+from src.saas.infrastructure.auth.security import COOKIE_NAME, app_env, decode_session_jwt, hash_token
 from src.saas.infrastructure.persistence.engine import super_engine
 from src.saas.infrastructure.persistence.session import super_session
 
@@ -95,3 +95,42 @@ def get_current_user(request: Request) -> dict:
     if claims is None:
         raise HTTPException(status_code=401, detail={"error": "Not authenticated"})
     return claims
+
+
+def _api_key_from_request(request: Request) -> str | None:
+    """Extract the API key from `Authorization: Bearer <key>` or `X-API-Key`."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):].strip()
+        return token or None
+    xkey = request.headers.get("X-API-Key", "").strip()
+    return xkey or None
+
+
+def get_tenant_from_api_key(request: Request) -> uuid.UUID:
+    """Resolve the tenant from a machine API key (public prices API).
+
+    The presented key is hashed and matched against api_keys. The lookup runs as
+    super (BYPASSRLS) because the request carries no tenant context yet. A
+    missing/invalid/revoked key yields 401. last_used_at is bumped on success.
+    """
+    raw = _api_key_from_request(request)
+    if not raw:
+        raise HTTPException(status_code=401, detail={"error": "Missing API key"})
+
+    key_hash = hash_token(raw)
+    with super_session(_get_engine()) as s:
+        row = s.execute(
+            text(
+                "SELECT tenant_id FROM api_keys "
+                "WHERE key_hash = :h AND revoked_at IS NULL"
+            ),
+            {"h": key_hash},
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail={"error": "Invalid or revoked API key"})
+        s.execute(
+            text("UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = :h"),
+            {"h": key_hash},
+        )
+    return row.tenant_id

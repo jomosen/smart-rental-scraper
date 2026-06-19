@@ -862,27 +862,34 @@ swap the cookie-JWT issuer for the IdP's, retire the password columns.
 
 ### Machine-to-machine authentication (API keys)
 
-Not in the model yet. Will appear when a customer wants to consume pricing outputs from their own system automatically.
+**Implemented** (migration `r0s1t2u3v4w5`). Backs the public prices API
+(`GET /api/v1/prices`) so a customer's own system can pull its configured prices
+automatically. Tenant-scoped, RLS-forced (mirrors `users`).
 
-**Trigger.** First customer requesting programmatic API access.
-
-**Expected shape (pre-decided to avoid surprises):**
 ```
 api_keys
   id UUID PK
   tenant_id UUID FK            -- keys belong to the tenant, not the user
-  name
-  key_hash                     -- never store the key in clear
-  key_prefix                   -- visible prefix for UI identification
-  scopes                       -- list of permissions (jsonb or array)
-  created_at
-  created_by_user_id FK
-  last_used_at
-  expires_at NULL
-  revoked_at NULL
+  name TEXT                    -- human label
+  key_prefix VARCHAR(16)       -- visible leading chars, for UI identification
+  key_hash TEXT                -- sha256 of the raw key; the raw is shown once, never stored
+  created_at TIMESTAMPTZ
+  last_used_at TIMESTAMPTZ NULL -- bumped on each successful auth
+  revoked_at TIMESTAMPTZ NULL   -- set to revoke without deleting the audit row
 ```
+Unique index on `key_hash` (a hash resolves to exactly one tenant with no tenant
+context). Auth flow: present `Authorization: Bearer <key>`; the server hashes it
+and looks it up **as `smart_rental_super` (BYPASSRLS)** because the request has no
+`app.tenant_id` yet (see `api/dependencies.get_tenant_from_api_key`). Keys are
+created/revoked via `scripts/create_api_key.py`.
 
 The key principle: API keys are tenant-scoped, not user-scoped. They survive user deactivation.
+
+**Deliberately omitted from the pre-decided shape (add when a need appears):**
+`scopes` (the only capability today is read-only prices), `expires_at` (lifecycle
+is covered by `revoked_at`), and `created_by_user_id` (keys are provisioned via the
+back-office script, not by an end user). Hashing uses sha256 rather than bcrypt
+because the key is a high-entropy random token, not a low-entropy password.
 
 ### Intermediate-duration calculation
 

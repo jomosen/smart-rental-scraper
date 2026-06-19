@@ -85,6 +85,22 @@ def hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+# ── API keys (machine-to-machine, public prices API) ─────────────────────────
+API_KEY_PREFIX = "rr_live_"
+_API_KEY_BYTES = 32  # 256 bits of entropy
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Return (raw_key, key_prefix, key_hash).
+
+    Persist only key_prefix (for display) + key_hash; show the raw key once.
+    Hashing reuses sha256 (hash_token): the key is a high-entropy random token,
+    so a fast hash is appropriate (unlike user passwords, which need bcrypt).
+    """
+    raw = API_KEY_PREFIX + secrets.token_urlsafe(_API_KEY_BYTES)
+    return raw, raw[:16], hash_token(raw)
+
+
 # ── Session JWT ──────────────────────────────────────────────────────────────
 
 def make_session_jwt(

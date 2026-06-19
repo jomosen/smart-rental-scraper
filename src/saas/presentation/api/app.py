@@ -44,8 +44,10 @@ def create_app() -> FastAPI:
     # Data + auth routers — registered before the /api/* catch-all and SPA fallback.
     from .routes import cross_tariff as cross_tariff_routes
     from .routes import auth as auth_routes
+    from .routes import public_prices as public_prices_routes
     app.include_router(cross_tariff_routes.router)
     app.include_router(auth_routes.router)
+    app.include_router(public_prices_routes.router)
 
     # Explicit /api/* 404 handler.
     # Registered BEFORE the SPA catch-all so undefined /api/<anything>

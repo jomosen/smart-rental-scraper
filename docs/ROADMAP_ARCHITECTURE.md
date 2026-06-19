@@ -30,6 +30,8 @@ El cliente define reglas tipo *"mi precio del grupo C en temporada alta = mínim
 
 Generar el pricing recomendado en un formato que el cliente pueda usar: CSV listo para importar en su sistema, o mejor, una API/webhook para que su sistema lo consuma. Sin esto el producto sigue siendo un dashboard.
 
+> **Entregado (parcial):** `GET /api/v1/prices` devuelve en JSON los precios finales del tenant (regla aplicada) por código ACRISS × zona × duración, autenticado con **API key por tenant** (tabla `api_keys`, `Authorization: Bearer <key>`). Es el mismo cálculo que el export CSV/PDF del dashboard. Webhook (push) sigue pendiente; hoy es pull.
+
 ### (5) Observabilidad de la ingesta
 
 Cuando un scraper se rompe (y se romperá), el cliente y el equipo tienen que enterarse antes de que se tomen decisiones de pricing con datos viejos. Alertas de staleness, gaps detectados, % de éxito por proveedor.

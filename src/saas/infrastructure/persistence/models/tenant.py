@@ -75,6 +75,30 @@ class User(Base):
     tenant: Mapped[Tenant] = relationship(back_populates="users")
 
 
+class ApiKey(Base):
+    """Hashed machine-to-machine API key for the public prices API.
+
+    The raw key is shown once at creation and never stored. `key_hash` is the
+    sha256 of the raw key (a high-entropy token, so a fast hash is sufficient).
+    `revoked_at` set = inactive. Lookup on each request runs as super (BYPASSRLS)
+    because the request has no tenant context yet — see api/dependencies.py.
+    """
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, server_default="gen_random_uuid()")
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", name="fk_api_keys_tenant", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    last_used_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class TenantVehicleGroup(Base):
     """Optional per-tenant vehicle taxonomy layer.
 
