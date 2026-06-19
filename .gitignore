@@ -50,3 +50,6 @@ htmlcov/
 
 # Mypy
 .mypy_cache/
+
+# Local provider-catalog dumps (contain real provider URLs — never commit)
+*.local.sql

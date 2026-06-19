@@ -136,3 +136,37 @@ sudo systemctl restart rentradar-api
 
 > Front-end edits (TSX/CSS) are invisible until you rebuild `dist/` AND restart
 > is not even needed for static assets — but a browser hard-refresh is.
+
+---
+
+## Scraping into production from a local machine
+
+The scraper runs **locally** (residential IP, Playwright) and writes to the
+**production** DB. Postgres on the VPS only listens on `127.0.0.1`, so the local
+scraper reaches it through an **ephemeral SSH tunnel** — opened per run, never
+left open.
+
+Helper scripts (Windows / PowerShell, under `deploy/`):
+
+- `run_scraper_prod.ps1` — opens the tunnel, runs the scraper against prod, then
+  closes the tunnel (even on failure). This is what the scheduled task invokes.
+- `test_prod_conn.ps1` — quick read-only connectivity check (lists providers).
+- `register_task.ps1` — registers the Task Scheduler job (Mon/Wed/Fri).
+
+All three read connection + tunnel settings from `.env.prod` (gitignored; it holds
+the prod DB URLs on the tunnel port and `VPS_SSH_HOST`/`VPS_SSH_USER`/`VPS_SSH_KEY`).
+
+**Guardrail:** the scripts abort unless `SUPER_DATABASE_URL` points at the tunnel
+port — this prevents accidentally scraping into the *local* DB while believing it
+is prod.
+
+**Provider catalog → prod:** new providers are provisioned by running the
+idempotent provisioning (`run_build_recipe.py` for recipe providers, manual rows
+for code scrapers) against each DB, or by copying the catalog tables
+(`providers`, `provider_locations`, `provider_rates`, `provider_recipes`) from a
+known-good DB with `pg_dump --inserts --on-conflict-do-nothing`. The dump
+contains real provider URLs — keep it gitignored (`*.local.sql`).
+
+The scheduled task uses `-LogonType S4U` (runs unattended, no stored password);
+SSH auth must be a **passphrase-less key** (or ssh-agent) and the machine must be
+awake at trigger time.
