@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
 from src.saas.infrastructure.persistence.engine import app_engine
+from src.saas.infrastructure.persistence.read.cross_tariff_read import fetch_catalog_examples
 from src.saas.infrastructure.persistence.session import make_session_factory, tenant_context
 
 from ..dependencies import get_tenant_from_api_key
@@ -34,7 +35,13 @@ def _money(value: Optional[Decimal]) -> Optional[float]:
     return float(value) if value is not None else None
 
 
-def _serialize(result, tenant_name: str, currency: str, location_id: Optional[int]) -> dict:
+def _serialize(
+    result,
+    tenant_name: str,
+    currency: str,
+    location_id: Optional[int],
+    examples: dict[str, list[str]],
+) -> dict:
     """Group ExportRows into one object per (acriss_code, zone) with price maps."""
     groups: dict[tuple, dict] = {}
     order: list[tuple] = []
@@ -45,6 +52,9 @@ def _serialize(result, tenant_name: str, currency: str, location_id: Optional[in
             g = {
                 "acriss_code": r.acriss_code,
                 "category": r.categoria,
+                # Curated example vehicle models for this category (catalog-level,
+                # constant across zones). [] when the catalog lists none.
+                "example_models": list(examples.get(r.acriss_code, [])),
                 "zone": {
                     "index": r.zone_index,
                     "date_from": r.zone_desde.isoformat() if r.zone_desde else None,
@@ -88,4 +98,5 @@ def get_prices(
         tenant_name = trow.name if trow else ""
         currency = trow.currency if trow else ""
         result = _export_result(session, tenant_id, location_id, zone_from, zone_to)
-    return _serialize(result, tenant_name, currency, location_id)
+        examples = fetch_catalog_examples(session)
+    return _serialize(result, tenant_name, currency, location_id, examples)
