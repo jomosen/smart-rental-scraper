@@ -1,0 +1,26 @@
+# Manually reviewed / accepted classifications.
+#
+# After reclassification (scripts/reclassify_all.py), any active PVC matching
+# (provider, external_code) whose RESULTING acriss_code equals the accepted code
+# below is auto-cleared of pending_review. If the resulting code differs from the
+# accepted one, the PVC is LEFT flagged so it gets re-reviewed.
+#
+# Use this for heterogeneous bundles or edge cases the LLM always flags but that
+# you have judged correct. Keyed by provider scraper_key + external_code.
+reviewed:
+  - provider: solcar
+    external_code: "Grupo D"
+    acriss_code: HDMR
+    note: "Audi A1 + Ford Focus + Opel Astra — priced to the premium A1 (most expensive)."
+  - provider: solcar
+    external_code: "Grupo EA"
+    acriss_code: CFAR
+    note: "Peugeot 2008 + Opel Astra — priced to the 2008 (compact SUV, dearer)."
+  - provider: solcar
+    external_code: "Grupo FA"
+    acriss_code: IFAR
+    note: "VW Tiguan + T-Roc — priced to the Tiguan (medium SUV, dearer)."
+  - provider: solcar
+    external_code: "Grupo K1"
+    acriss_code: RFAR
+    note: "Mercedes GLC 300 4MATIC Coupé — AWD drive code not materialized; RFAR accepted."

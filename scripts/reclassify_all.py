@@ -26,6 +26,8 @@ import logging
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
@@ -50,6 +52,22 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _YAML_PATH = Path(__file__).resolve().parent.parent / "acriss_codes.yaml"
+_REVIEWED_PATH = Path(__file__).resolve().parent.parent / "acriss_reviewed.yaml"
+
+
+def _load_reviewed() -> set[tuple[str, str, str]]:
+    """Load accepted (provider, external_code, acriss_code) triples.
+
+    A PVC the LLM re-flags as pending_review is auto-cleared only when its
+    resulting code still matches the accepted one — a changed code stays flagged.
+    """
+    if not _REVIEWED_PATH.exists():
+        return set()
+    data = yaml.safe_load(_REVIEWED_PATH.read_text(encoding="utf-8")) or {}
+    out: set[tuple[str, str, str]] = set()
+    for e in data.get("reviewed", []) or []:
+        out.add((e["provider"], e["external_code"], e["acriss_code"]))
+    return out
 
 
 def _old_code(pvc: ProviderVehicleCategory) -> str:
@@ -85,6 +103,7 @@ def reclassify_all(provider_filter: str | None = None, dry_run: bool = False) ->
     """Reclassify all active PVCs. Returns total PVC count processed (>= 0), or -1 on fatal error."""
     acriss_specs = load_acriss_specs(_YAML_PATH)
     service = GeminiClassificationService(acriss_types=acriss_specs)
+    reviewed = _load_reviewed()
 
     engine = super_engine()
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -92,6 +111,7 @@ def reclassify_all(provider_filter: str | None = None, dry_run: bool = False) ->
     total_processed = 0
     total_changed = 0
     total_pending = 0
+    total_autocleared = 0
     total_null = 0
     providers_failed: list[str] = []
 
@@ -187,8 +207,21 @@ def reclassify_all(provider_filter: str | None = None, dry_run: bool = False) ->
                     provider_changed += 1
                     total_changed += 1
 
+                autocleared = (
+                    result.pending_review
+                    and (provider.scraper_key, pvc.external_code, new) in reviewed
+                )
+                if autocleared:
+                    total_autocleared += 1
+                    logger.info(
+                        "      %s pending_review (in acriss_reviewed.yaml)",
+                        "WOULD auto-clear" if dry_run else "auto-cleared",
+                    )
+
                 if not dry_run:
                     _apply_result(pvc, result)
+                    if autocleared:
+                        pvc.pending_review = False
 
             total_processed += len(pvcs)
 
@@ -218,10 +251,11 @@ def reclassify_all(provider_filter: str | None = None, dry_run: bool = False) ->
 
     dry_tag = "  [DRY RUN — nothing committed]" if dry_run else ""
     logger.info(
-        "=== SUMMARY === processed=%d  changed=%d  pending_review=%d  unclassifiable=%d%s",
+        "=== SUMMARY === processed=%d  changed=%d  pending_review=%d (auto-cleared=%d)  unclassifiable=%d%s",
         total_processed,
         total_changed,
         total_pending,
+        total_autocleared,
         total_null,
         dry_tag,
     )
