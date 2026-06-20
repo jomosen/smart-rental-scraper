@@ -643,31 +643,33 @@ acriss_codes:
   - code: CMMR
     display_name: Monovolumen Compacto Manual
     description: >
-      Compact MPV (people-carrier), manual transmission, combustion engine.
-      Car-derived platform (low floor, car dynamics) — NOT a commercial van.
-      Tall roof, maximizes cabin space, family-oriented.
+      Compact MPV (people-carrier) on a CAR-derived platform, manual
+      transmission, combustion engine. Purpose-built MPV (low floor, car
+      dynamics) — NOT a van-derived ludospace (Kangoo/Berlingo/Doblo Passenger
+      → CVMR) and NOT a commercial/cargo van (→ CKMR).
     criteria:
-      - "MPV/people-carrier body (NOT SUV, NOT commercial van)"
-      - "Car-derived platform (low floor, car-like ride)"
-      - "Tall roof, prioritizes interior space"
+      - "Purpose-built MPV on a car platform (NOT van-derived)"
+      - "NOT a ludospace/leisure-activity van (Kangoo/Berlingo/Doblo → CVMR)"
+      - "Tall roof, prioritizes interior space, 5-7 seats"
       - "Manual transmission"
       - "Combustion engine"
       - "Mainstream brand"
     examples:
-      - "Peugeot Rifter"
-      - "Citroën Berlingo Passenger"
-      - "Renault Kangoo Passenger"
-      - "VW Caddy Passenger"
+      - "Renault Scénic"
+      - "Citroën C4 SpaceTourer"
+      - "Ford C-Max"
+      - "Opel Zafira"
 
   - code: CMAR
     display_name: Monovolumen Compacto Automático
     description: >
-      Compact MPV (people-carrier), automatic transmission, combustion engine.
-      Car-derived platform (low floor, car dynamics) — NOT a commercial van.
-      VW Touran is CMAR, not SVAR: car platform → M; van platform → V.
+      Compact MPV (people-carrier) on a CAR-derived platform, automatic
+      transmission, combustion engine. Purpose-built MPV — NOT a van-derived
+      ludospace (Kangoo/Berlingo/Doblo Passenger → CVAR) and NOT a
+      commercial/cargo van (→ CKAR). VW Touran is CMAR: car platform → M.
     criteria:
-      - "MPV/people-carrier body (NOT van, NOT SUV)"
-      - "Car-derived platform (low floor, car-like ride — NOT commercial-derived)"
+      - "Purpose-built MPV on a car platform (NOT van-derived)"
+      - "NOT a ludospace/leisure-activity van (Kangoo/Berlingo/Doblo → CVAR)"
       - "5-7 seats typical"
       - "Automatic transmission"
       - "Combustion engine"
@@ -677,6 +679,86 @@ acriss_codes:
       - "Citroën C4 SpaceTourer"
       - "Renault Scenic"
       - "Ford C-Max"
+
+  - code: CVMR
+    display_name: Furgoneta Pasajero Compacta Manual
+    description: >
+      Compact leisure-activity van / ludospace in PASSENGER trim (rear seats and
+      glazed sides), manual transmission, combustion engine. Van-derived
+      (commercial) platform — NOT a purpose-built car MPV (that is CMMR), NOT a
+      cargo van (that is CKMR). 5 seats typical; 7+ seat passenger vans are the
+      SV*/LV* codes.
+    criteria:
+      - "Van-derived (commercial platform) leisure-activity vehicle / ludospace"
+      - "Passenger trim: rear bench + glazed rear sides"
+      - "5 seats typical (7+ seats → SV*/LV* passenger-van codes)"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Renault Kangoo Passenger"
+      - "Citroën Berlingo Passenger"
+      - "Fiat Doblò Passenger"
+      - "Peugeot Rifter"
+      - "VW Caddy Passenger"
+
+  - code: CVAR
+    display_name: Furgoneta Pasajero Compacta Automático
+    description: >
+      Compact leisure-activity van / ludospace in PASSENGER trim (rear seats and
+      glazed sides), automatic transmission, combustion engine. Van-derived
+      (commercial) platform — NOT a purpose-built car MPV (that is CMAR), NOT a
+      cargo van (that is CKAR). 5 seats typical; 7+ seat passenger vans are the
+      SV*/LV* codes.
+    criteria:
+      - "Van-derived (commercial platform) leisure-activity vehicle / ludospace"
+      - "Passenger trim: rear bench + glazed rear sides"
+      - "5 seats typical (7+ seats → SV*/LV* passenger-van codes)"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Renault Kangoo Passenger"
+      - "Citroën Berlingo Passenger"
+      - "Fiat Doblò Passenger"
+      - "Peugeot Rifter"
+      - "VW Caddy Passenger"
+
+  - code: CKMR
+    display_name: Furgoneta Comercial Compacta Manual
+    description: >
+      Compact commercial/cargo van (panel van): 2-3 seats, cargo bay, typically
+      no glazed rear sides. Manual transmission, combustion engine. The passenger
+      ludospace version is CVMR.
+    criteria:
+      - "Commercial/cargo body (panel van): cargo bay, 2-3 seats"
+      - "Typically no rear seats / no glazed rear sides"
+      - "Compact car-derived commercial platform"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Renault Kangoo Furgón"
+      - "Citroën Berlingo Van"
+      - "Peugeot Partner Van"
+      - "Fiat Doblò Cargo"
+      - "Opel Combo Cargo"
+
+  - code: CKAR
+    display_name: Furgoneta Comercial Compacta Automático
+    description: >
+      Compact commercial/cargo van (panel van): 2-3 seats, cargo bay, typically
+      no glazed rear sides. Automatic transmission, combustion engine. The
+      passenger ludospace version is CVAR.
+    criteria:
+      - "Commercial/cargo body (panel van): cargo bay, 2-3 seats"
+      - "Typically no rear seats / no glazed rear sides"
+      - "Compact car-derived commercial platform"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Renault Kangoo Furgón"
+      - "Citroën Berlingo Van"
+      - "Peugeot Partner Van"
+      - "Fiat Doblò Cargo"
+      - "Opel Combo Cargo"
 
   - code: CWMR
     display_name: Compacto Familiar Manual
