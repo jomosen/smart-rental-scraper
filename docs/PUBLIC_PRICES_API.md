@@ -223,12 +223,40 @@ Patrón recomendado:
 
 ---
 
-## 9. Checklist de integración
+## 9. Ciclo de vida de los códigos ACRISS
+
+Los `acriss_code` son **identificadores estables** y la clave con la que debes
+mapear tus categorías. Garantías y matices:
+
+- **No se borran ni se reutilizan.** Un código nunca cambia de significado ni se
+  elimina; como mucho se "retira" (deja de asignarse). Puedes mapear por
+  `acriss_code` de forma permanente y fiarte de ello.
+- **Un código puede quedarse sin precio en una respuesta.** Dos causas, que desde
+  la API se ven igual (el código simplemente **no aparece** en `prices`):
+  (a) **transitorio** — ningún vehículo de esa clase disponible ese ciclo (vuelve
+  solo cuando reaparece); (b) **permanente** — el código se retiró del catálogo.
+- **El contenido de un código puede cambiar.** Una recategorización puede mover
+  modelos entre códigos (p. ej. un ludospace que antes salía en `CMAR` ahora sale
+  en `CVAR`). `CMAR` sigue existiendo, pero su conjunto de vehículos cambió. Mapea
+  contra el **código**, no contra "el modelo que esperabas ahí".
+
+**La detección de huecos es responsabilidad del consumidor** — tu mapping vive en
+tu sistema; RentRadar no lo conoce y no puede vigilarlo. Patrón recomendado:
+
+1. Mantén tu tabla `categoría_interna → acriss_code`.
+2. En cada sincronización, comprueba si el `acriss_code` de cada categoría mapeada
+   aparece en `prices`.
+3. Si **no** aparece: trátalo como **sin actualización** (mantén el último precio
+   publicado) y, opcionalmente, **alerta internamente** para revisar el mapping.
+   **Nunca** borres precios por una ausencia puntual.
+
+## 10. Checklist de integración
 
 - [ ] Recibir y guardar la API key de forma segura (no en el código fuente).
 - [ ] Implementar la llamada `GET /api/v1/prices` con la cabecera `Authorization`.
 - [ ] Mapear cada `acriss_code` a tu categoría interna de vehículo.
 - [ ] Resolver, por fecha de recogida, la **zona** que la cubre.
 - [ ] Leer `prices_total[str(duración)]`, tolerando duraciones ausentes.
+- [ ] Detectar categorías mapeadas cuyo `acriss_code` no viene en la respuesta (sin-dato → mantener último / alertar; nunca borrar). Ver §9.
 - [ ] Tratar `401` (key inválida/revocada) y reintentos/errores de red.
 - [ ] Programar la sincronización (p. ej. diaria) y registrar `generated_at`.
