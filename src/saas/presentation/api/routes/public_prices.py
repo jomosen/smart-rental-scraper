@@ -59,6 +59,10 @@ def _serialize(
                 # Curated example vehicle models for this category (catalog-level,
                 # constant across zones). [] when the catalog lists none.
                 "example_models": list(examples.get(r.acriss_code, [])),
+                # The actual model(s) each provider lists for this category,
+                # keyed by provider code — the real cars behind provenance's
+                # provider_totals. {} when none reported.
+                "provider_models": {},
                 "zone": {
                     "index": r.zone_index,
                     "date_from": r.zone_desde.isoformat() if r.zone_desde else None,
@@ -86,6 +90,11 @@ def _serialize(
             "base_total": provider_totals.get(r.base_provider) if r.base_provider else None,
             "provider_totals": provider_totals,
         }
+        # Per-provider model(s) for this category (constant across durations);
+        # merge the non-empty ones seen across the entry's rows.
+        for code, model in (r.provider_models or {}).items():
+            if model:
+                g["provider_models"][code] = model
 
     return {
         "tenant": tenant_name,

@@ -80,6 +80,7 @@ Para "copiar todo el calendario" no pases nada: `GET /api/v1/prices`.
 | `acriss_code` | string (4) | **Código ACRISS** de la categoría de vehículo (la clave para mapear a tus categorías). |
 | `category` | string | Nombre legible de la categoría (informativo). |
 | `example_models` | string[] | Modelos de ejemplo representativos de la categoría (p. ej. `["Fiat 500", "Opel Corsa", …]`). Lista del catálogo, constante entre temporadas; `[]` si no hay. Informativo (para mostrar "o similar"); no es la clave de mapeo. |
+| `provider_models` | objeto | `{ "<code>": "modelo(s)" }` — el/los modelo(s) que **cada proveedor** lista para esta categoría (los coches reales detrás de `provenance.provider_totals`, cruzados por `code`). `{}` si ninguno. |
 | `zone.index` | int | Índice de la temporada (0 = la más próxima). |
 | `zone.date_from` | date (`YYYY-MM-DD`) | Inicio de la temporada (inclusive). |
 | `zone.date_to` | date (`YYYY-MM-DD`) | Fin de la temporada (inclusive). |
@@ -163,6 +164,11 @@ curl -H "Authorization: Bearer rr_live_xxxxxxxxxxxxxxxx" \
       "acriss_code": "MDMR",
       "category": "Pequeño Manual",
       "example_models": ["Fiat 500", "Fiat Panda", "Kia Picanto", "Toyota Aygo", "VW up!"],
+      "provider_models": {
+        "centauro": "Fiat 500 / Kia Picanto",
+        "solcar": "Fiat Panda, Kia Picanto",
+        "victoria": "Fiat Panda Hybrid"
+      },
       "zone": { "index": 0, "date_from": "2026-06-21", "date_to": "2026-06-27" },
       "prices_total": {
         "1": 48.37, "2": 63.36, "3": 89.21, "4": 112.43, "5": 173.49,
