@@ -78,19 +78,6 @@ acriss_codes:
       - "VW up! Auto"
       - "Toyota Aygo Auto"
 
-  - code: MDMH
-    display_name: Mini Manual Híbrido
-    description: >
-      City car (A-segment), manual transmission, mild or full hybrid powertrain.
-      Same footprint as MDMR but with hybrid drivetrain.
-    criteria:
-      - "City car / A-segment (length ≤ 3,7 m)"
-      - "Manual transmission"
-      - "Hybrid powertrain (mild or full HEV)"
-      - "Mainstream brand"
-    examples:
-      - "Fiat Panda Hybrid"
-
   - code: MBAE
     display_name: Mini Eléctrico
     description: >
@@ -348,20 +335,6 @@ acriss_codes:
       - "Hyundai Kona Auto"
       - "Škoda Kamiq Auto"
 
-  - code: EFAH
-    display_name: SUV Urbano Híbrido Automático
-    description: >
-      Mini-SUV (~4,0–4,25 m), hybrid powertrain (HEV), automatic transmission.
-      Mainstream brand. Toyota Yaris Cross is almost always sold hybrid.
-    criteria:
-      - "Mini-SUV / urban crossover (length ~4,0–4,25 m)"
-      - "Hybrid powertrain (mild or full HEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Toyota Yaris Cross Hybrid"
-      - "Ford Puma Hybrid"
-
   - code: EFAE
     display_name: SUV Urbano Eléctrico
     description: >
@@ -563,20 +536,6 @@ acriss_codes:
       - "MG4"
       - "Renault Mégane E-Tech"
 
-  - code: CDAH
-    display_name: Compacto Híbrido Automático
-    description: >
-      C-segment compact, full hybrid (HEV), automatic transmission.
-      Mainstream brand. The most common compact hybrid in rental fleets.
-    criteria:
-      - "Compact / C-segment (~4,25–4,55 m)"
-      - "Full or mild hybrid powertrain (HEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Toyota Corolla Hybrid"
-      - "Honda Civic e:HEV"
-
   - code: CFMR
     display_name: SUV Compacto Manual
     description: >
@@ -612,21 +571,6 @@ acriss_codes:
       - "MG ZS"
       - "SEAT Ateca"
       - "Škoda Karoq"
-
-  - code: CFAH
-    display_name: SUV Compacto Híbrido Automático
-    description: >
-      Compact SUV (~4,25–4,45 m), hybrid powertrain (HEV/PHEV), automatic
-      transmission. Mainstream brand.
-    criteria:
-      - "Compact SUV (length ~4,25–4,45 m)"
-      - "Hybrid powertrain (HEV or PHEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Toyota C-HR Hybrid"
-      - "Hyundai Kona Hybrid"
-      - "Kia XCeed Hybrid"
 
   - code: CFAE
     display_name: SUV Compacto Eléctrico
@@ -881,23 +825,6 @@ acriss_codes:
       - "Mazda CX-5"
       - "DFSK 580"
 
-  - code: IFAH
-    display_name: SUV Mediano Híbrido Automático
-    description: >
-      Mid-size SUV (~4,45–4,7 m), hybrid powertrain (HEV/PHEV), automatic
-      transmission. Mainstream brand. Toyota RAV4 is almost always hybrid in
-      European fleets.
-    criteria:
-      - "Mid-size SUV (length ~4,45–4,7 m)"
-      - "Hybrid powertrain (HEV or PHEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Hyundai Tucson HEV/PHEV"
-      - "Ford Kuga PHEV"
-      - "Nissan Qashqai e-Power"
-      - "Toyota RAV4 Hybrid"
-
   - code: IFAE
     display_name: SUV Mediano Eléctrico
     description: >
@@ -1005,20 +932,6 @@ acriss_codes:
       - "Opel Insignia"
       - "Toyota Camry"
 
-  - code: SDAH
-    display_name: Estándar Híbrido Automático
-    description: >
-      Full-size standard sedan, hybrid powertrain (HEV), automatic transmission.
-      Mainstream brand. Toyota Camry is almost exclusively sold as hybrid in the
-      European market.
-    criteria:
-      - "Full-size sedan (~4,8–5,0 m)"
-      - "Hybrid powertrain (HEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Toyota Camry Hybrid"
-
   - code: SFAR
     display_name: SUV Grande Automático
     description: >
@@ -1037,20 +950,6 @@ acriss_codes:
       - "Kia Sorento"
       - "SEAT Tarraco"
       - "Peugeot 5008"
-
-  - code: SFAH
-    display_name: SUV Grande Híbrido Automático
-    description: >
-      Large 7-seat SUV (~4,7–5,0 m), hybrid powertrain (HEV/PHEV), automatic
-      transmission. Mainstream brand.
-    criteria:
-      - "Large SUV, typically 7 seats (~4,7–5,0 m)"
-      - "Hybrid powertrain (HEV or PHEV)"
-      - "Automatic transmission"
-      - "Mainstream brand"
-    examples:
-      - "Toyota Highlander Hybrid"
-      - "Hyundai Santa Fe Hybrid"
 
   - code: SWAR
     display_name: Estándar Familiar Automático

@@ -322,7 +322,7 @@ class TestAcrissLoader:
         yaml_path = Path(__file__).resolve().parents[3] / "acriss_codes.yaml"
         specs = load_acriss_specs(yaml_path)
 
-        assert len(specs) == 76
+        assert len(specs) == 69
         codes = {s.code for s in specs}
         assert "EDMR" in codes
         assert "EFMR" in codes

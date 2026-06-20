@@ -136,7 +136,7 @@ class TestListActive:
         assert "EDMR" in active_codes
         assert "EFMR" in active_codes
         assert "CGAR" not in active_codes  # body G dropped in the taxonomy redesign
-        assert len(active_codes) >= 70  # ~72 codes after the redesign
+        assert len(active_codes) >= 65  # ~69 codes (hybrids merged into R parent)
 
 
 # ---------------------------------------------------------------------------
