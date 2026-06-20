@@ -59,10 +59,6 @@ def _serialize(
                 # Curated example vehicle models for this category (catalog-level,
                 # constant across zones). [] when the catalog lists none.
                 "example_models": list(examples.get(r.acriss_code, [])),
-                # The actual model(s) each provider lists for this category,
-                # keyed by provider code — the real cars behind provenance's
-                # provider_totals. {} when none reported.
-                "provider_models": {},
                 "zone": {
                     "index": r.zone_index,
                     "date_from": r.zone_desde.isoformat() if r.zone_desde else None,
@@ -80,21 +76,23 @@ def _serialize(
         dur = str(r.duracion_dias)
         g["prices_per_day"][dur] = _money(r.recomendado_per_day)
         g["prices_total"][dur] = _money(r.recomendado_total)
+        models = r.provider_models or {}
         provider_totals = {
             code: _money(total)
             for code, total in (r.provider_prices or {}).items()
             if total is not None
         }
+        # Provenance per duration: which provider set the recommended price
+        # (base_provider/base_total) and, per provider, its total + the actual
+        # model it lists for this category.
         g["provenance"][dur] = {
             "base_provider": r.base_provider,
             "base_total": provider_totals.get(r.base_provider) if r.base_provider else None,
-            "provider_totals": provider_totals,
+            "by_provider": {
+                code: {"total": total, "model": (models.get(code) or None)}
+                for code, total in provider_totals.items()
+            },
         }
-        # Per-provider model(s) for this category (constant across durations);
-        # merge the non-empty ones seen across the entry's rows.
-        for code, model in (r.provider_models or {}).items():
-            if model:
-                g["provider_models"][code] = model
 
     return {
         "tenant": tenant_name,
