@@ -34,96 +34,75 @@ CRITICAL RULE FOR MIXED GROUPS:
 
 When a PVC groups multiple distinct vehicle models that map to DIFFERENT
 ACRISS codes, you MUST:
-  - Set acriss_code to the LOWEST-TIER code (NEVER null).
+  - Set acriss_code to the code of the model with the HIGHEST EXPECTED RENTAL
+    PRICE in the bundle (NEVER null).
   - Set pending_review = true.
   - Set confidence = 0.65.
   - In reasoning, explain which models are present, which codes they
-    individually map to, and which one was chosen as lowest tier.
+    individually map to, and which one you judged the most expensive (and why).
 
-STEP 0 — PREMIUM vs MAINSTREAM: In bundles mixing PREMIUM-brand and
-MAINSTREAM models, DISCARD the premium models first: a premium car is
-never the guaranteed floor of a mixed bundle ("or similar" will deliver
-the mainstream car, not the premium one). Apply the lowest-tier rule
-among the remaining mainstream models only. Only if ALL models in the
-bundle are premium-brand, apply the Elite scale among them.
+RATIONALE: a bundle means "<model> or similar"; the provider may deliver any of
+them, so we price to the MOST EXPENSIVE option offered — never undershoot. If the
+provider advertises the dearer car and then delivers a cheaper one, that is the
+provider's problem, not a pricing error on our side. (This is the OPPOSITE of a
+cheapest-wins rule: do NOT pick the floor of the bundle.)
 
-Premium brands (closed list): Audi, BMW, Mercedes-Benz, Volvo, Lexus,
-Mini, DS, Porsche, Land Rover, Jaguar. (Cupra = mainstream.)
+HOW TO PICK THE MOST EXPENSIVE MODEL — use your real-world knowledge of each
+model's market/rental positioning, weighing BOTH factors together:
+  - Segment / size: bigger usually costs more
+    (mini < economy < compact < intermediate < standard < fullsize …); within a
+    size, SUV/MPV/van ≳ wagon ≳ sedan/hatchback; automatic > manual; and
+    electric/hybrid usually carry a premium.
+  - Brand prestige: a PREMIUM brand usually costs more than a mainstream brand of
+    the same size. DO NOT discard premium models — they are often the dearest
+    option and may out-price a larger mainstream car.
+    Premium brands (closed list): Audi, BMW, Mercedes-Benz, Volvo, Lexus, Mini,
+    DS, Porsche, Land Rover, Jaguar. (Cupra = mainstream.)
+Judge which single model a customer would actually pay the most for, then return
+THAT model's exact ACRISS code (it must be one of the materialized codes).
 
-Tier order, complete scale (lowest to highest), Elites interleaved:
-  M < N < E < H < C < D < I < J < S < R < P < U < L < W
-  (Each Elite sits IMMEDIATELY above its mainstream counterpart and BELOW the next
-  mainstream size: H is above E but below C; D is above C but below I; etc.
-  The Elite scale applies only in all-premium bundles.)
+ABSOLUTE RULE: NEVER set acriss_code = null for a mixed group when at least one
+of the models matches a materialized code. This OVERRIDES the general "return
+null if no fit" guidance. Assign the most-expensive model's code and mark
+pending_review = true.
 
-If categories tie, prefer body types in ascending price prominence (lowest wins):
-  D (sedan) < W (wagon) < E (coupe) < T (convertible) < N (roadster)
-  < V (Van) < M (MPV) < F (SUV).
-  (G crossover body is not materialized; all SUVs use F)
-
-If body types tie, prefer M (Manual) < A (Auto) — manual is the cheaper variant.
-If transmissions tie, prefer R (combustion) over hybrid/electric.
-
-ABSOLUTE RULE: NEVER set acriss_code = null for a mixed group when at
-least one of the models in the group matches a materialized code. This
-rule OVERRIDES the general "return null if no fit" guidance. Always
-assign the lowest-tier code and mark pending_review = true.
-
-EXAMPLE 1 (canonical mixed-group case):
+EXAMPLE 1 (size drives price):
   Input PVC: example_models = "VW Tiguan, VW T-Roc"
-
-  Individual model classification:
-    - VW Tiguan → IFAR (Intermediate SUV, Auto, Combustion)
-    - VW T-Roc → CFAR (Compact SUV, Auto, Combustion)
-
-  Mixed group resolution:
-    - Categories differ: C (T-Roc) < I (Tiguan). Choose C.
-    - Body types tie: both F (SUV). No further tie-breaking needed.
-    - Transmissions tie: both A.
-    - Fuels tie: both R.
-    - Lowest-tier code: CFAR
-
+    - VW Tiguan → IFAR (Intermediate SUV)  ← larger, more expensive
+    - VW T-Roc  → CFAR (Compact SUV)
+  Most expensive: VW Tiguan → IFAR
   Correct response:
     {
-      "acriss_code": "CFAR",
-      "acriss_category": "C",
+      "acriss_code": "IFAR",
+      "acriss_category": "I",
       "acriss_body_type": "F",
       "acriss_transmission": "A",
       "acriss_fuel": "R",
       "confidence": 0.65,
       "pending_review": true,
-      "reasoning": "Mixed group of VW Tiguan (IFAR, Intermediate SUV)
-                    and VW T-Roc (CFAR, Compact SUV). Both are body F;
-                    selected CFAR as the lowest-tier model (C < I)."
+      "reasoning": "Mixed group: VW Tiguan (IFAR) vs VW T-Roc (CFAR). The Tiguan
+                    is the larger, pricier SUV — priced to it (IFAR)."
     }
 
-EXAMPLE 2 (premium discarded in mixed bundle):
+EXAMPLE 2 (premium counts — do NOT discard it):
   Input PVC: example_models = "Audi A1, Ford Focus, Opel Astra"
-
-  Individual model classification:
-    - Audi A1    → HDMR (Economy Elite, PREMIUM brand)
-    - Ford Focus → CDMR (Compact, mainstream)
-    - Opel Astra → CDMR (Compact, mainstream)
-
-  Mixed group resolution:
-    - STEP 0: Audi A1 is premium in a mixed bundle → DISCARD.
-    - Remaining mainstream: Focus (CDMR), Astra (CDMR).
-    - Categories tie: both C. Body types tie: both D.
-    - Transmissions tie: both M. Fuels tie: both R.
-    - Lowest-tier code: CDMR
-
+    - Audi A1    → HDMR (premium supermini)
+    - Ford Focus → CDMR (mainstream compact)
+    - Opel Astra → CDMR (mainstream compact)
+  Judgement: the premium Audi A1 rents above the mainstream compacts, so it is
+  the most expensive option → HDMR.
   Correct response:
     {
-      "acriss_code": "CDMR",
-      "acriss_category": "C",
+      "acriss_code": "HDMR",
+      "acriss_category": "H",
       "acriss_body_type": "D",
       "acriss_transmission": "M",
       "acriss_fuel": "R",
       "confidence": 0.65,
       "pending_review": true,
-      "reasoning": "Mixed bundle: Audi A1 (premium) discarded per STEP 0.
-                    Remaining mainstream models (Focus, Astra) both map to
-                    CDMR. Selected CDMR."
+      "reasoning": "Mixed bundle: premium Audi A1 (HDMR) judged dearer than the
+                    mainstream Focus/Astra (CDMR); priced to the most expensive,
+                    HDMR."
     }
 
   INCORRECT response (do NOT do this):
@@ -299,7 +278,7 @@ class GeminiClassificationService(ClassificationService):
         - acriss_code absent or null → pending_review, null attrs
         - acriss_code not in catalog → pending_review (hallucination), confidence zeroed
         - acriss_code valid, LLM set pending_review=true → preserve code, pending_review=true
-          (mixed-group case: lowest-tier code chosen, operator review needed)
+          (mixed-group case: most-expensive code chosen, operator review needed)
         - acriss_code valid, confidence < 0.70 → pending_review, null attrs (poor fit)
         - acriss_code valid, confidence ≥ 0.70 → derive 4 attrs from code chars,
           correcting any inconsistency the LLM may have introduced
@@ -336,7 +315,7 @@ class GeminiClassificationService(ClassificationService):
             )
 
         # LLM explicitly set pending_review (e.g. mixed group per MIXED_GROUPS_REMINDER).
-        # Preserve the code as the lowest-tier best guess; flag for operator review.
+        # Preserve the code as the most-expensive best guess; flag for operator review.
         if llm_pending_review:
             return ClassificationResult(
                 acriss_category=acriss_code[0],
