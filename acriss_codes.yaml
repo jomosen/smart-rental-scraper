@@ -297,12 +297,12 @@ acriss_codes:
   - code: EFMR
     display_name: SUV Urbano Manual
     description: >
-      Mini-SUV / urban crossover (~4,0–4,25 m), manual transmission, combustion
-      engine. Supermini-based platform (B-segment). Entry-level SUV peldaño:
-      below the Compact SUV tier (T-Roc/Kona = CFMR). Mainstream brand.
+      Small SUV / crossover up to ~4,25 m overall length, manual transmission,
+      combustion engine. Tier is by LENGTH, not by platform or marketing segment —
+      the Compact SUV tier (CFMR) starts above ~4,25 m. Mainstream brand.
     criteria:
-      - "Mini-SUV / urban crossover (length ~4,0–4,25 m)"
-      - "Supermini-based platform (B-segment)"
+      - "Small SUV / crossover, overall length ≤ ~4,25 m"
+      - "Tiered by LENGTH, not by platform/marketing segment"
       - "Raised driving position, soft-roader"
       - "Manual transmission"
       - "Combustion engine"
@@ -318,15 +318,19 @@ acriss_codes:
       - "Nissan Juke"
       - "Renault Captur"
       - "Toyota Aygo X"
+      - "VW T-Roc"
+      - "Hyundai Kona"
+      - "Škoda Kamiq"
 
   - code: EFAR
     display_name: SUV Urbano Automático
     description: >
-      Mini-SUV / urban crossover (~4,0–4,25 m), automatic transmission,
-      combustion engine. Mainstream brand. Entry-level SUV peldaño.
+      Small SUV / crossover up to ~4,25 m overall length, automatic transmission,
+      combustion engine. Tier is by LENGTH, not by platform/marketing segment.
+      Mainstream brand.
     criteria:
-      - "Mini-SUV / urban crossover (length ~4,0–4,25 m)"
-      - "Supermini-based platform (B-segment)"
+      - "Small SUV / crossover, overall length ≤ ~4,25 m"
+      - "Tiered by LENGTH, not by platform/marketing segment"
       - "Automatic transmission"
       - "Combustion engine"
       - "Mainstream brand"
@@ -340,6 +344,9 @@ acriss_codes:
       - "Toyota Aygo X Auto"
       - "Nissan Juke Auto"
       - "Renault Captur Auto"
+      - "VW T-Roc Auto"
+      - "Hyundai Kona Auto"
+      - "Škoda Kamiq Auto"
 
   - code: EFAH
     display_name: SUV Urbano Híbrido Automático
@@ -573,42 +580,38 @@ acriss_codes:
   - code: CFMR
     display_name: SUV Compacto Manual
     description: >
-      Compact SUV (~4,25–4,45 m), manual transmission, combustion engine.
-      C-segment platform (Golf/i30/Scala base). Second SUV peldaño above EF
-      (mini-SUV, Arona/Bayon tier). Mainstream brand.
+      Compact SUV ~4,25–4,45 m overall length, manual transmission, combustion
+      engine. Tier is by LENGTH, not by platform/marketing segment — sits between
+      EF (small SUV, ≤ ~4,25 m) and IF (medium SUV). Mainstream brand.
     criteria:
-      - "Compact SUV (length ~4,25–4,45 m)"
-      - "C-segment platform (Golf/Corolla/i30 base)"
+      - "Compact SUV, overall length ~4,25–4,45 m"
+      - "Tiered by LENGTH, not by platform/marketing segment"
       - "Manual transmission"
       - "Combustion engine"
       - "Mainstream brand"
     examples:
-      - "VW T-Roc (manual)"
-      - "Hyundai Kona (manual)"
-      - "Škoda Kamiq (manual)"
       - "Peugeot 2008 (manual)"
       - "MG ZS (manual)"
       - "SEAT Ateca (manual)"
+      - "Škoda Karoq (manual)"
 
   - code: CFAR
     display_name: SUV Compacto Automático
     description: >
-      Compact SUV (~4,25–4,45 m), automatic transmission, combustion engine.
-      Mainstream brand. Second SUV peldaño. Escalón SEAT: Arona→EF, Ateca→CF,
-      Tarraco→SF. Escalón VW: T-Cross→EF, T-Roc→CF, Tiguan→IF.
+      Compact SUV ~4,25–4,45 m overall length, automatic transmission, combustion
+      engine. Tier is by LENGTH, not by platform/marketing segment. Escalón SEAT:
+      Arona→EF, Ateca→CF, Tarraco→SF. Escalón VW: T-Cross/T-Roc→EF, Tiguan→IF.
     criteria:
-      - "Compact SUV (length ~4,25–4,45 m)"
-      - "C-segment platform"
+      - "Compact SUV, overall length ~4,25–4,45 m"
+      - "Tiered by LENGTH, not by platform/marketing segment"
       - "Automatic transmission"
       - "Combustion engine"
       - "Mainstream brand"
     examples:
-      - "VW T-Roc"
-      - "Hyundai Kona"
-      - "Škoda Kamiq"
       - "Peugeot 2008"
       - "MG ZS"
       - "SEAT Ateca"
+      - "Škoda Karoq"
 
   - code: CFAH
     display_name: SUV Compacto Híbrido Automático
