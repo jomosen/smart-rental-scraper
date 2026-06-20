@@ -20,7 +20,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
 from src.saas.infrastructure.persistence.engine import app_engine
-from src.saas.infrastructure.persistence.read.cross_tariff_read import fetch_catalog_examples
+from src.saas.infrastructure.persistence.read.cross_tariff_read import (
+    fetch_active_providers,
+    fetch_catalog_examples,
+)
 from src.saas.infrastructure.persistence.session import make_session_factory, tenant_context
 
 from ..dependencies import get_tenant_from_api_key
@@ -41,6 +44,7 @@ def _serialize(
     currency: str,
     location_id: Optional[int],
     examples: dict[str, list[str]],
+    providers: list[tuple[str, str]],
 ) -> dict:
     """Group ExportRows into one object per (acriss_code, zone) with price maps."""
     groups: dict[tuple, dict] = {}
@@ -62,11 +66,26 @@ def _serialize(
                 },
                 "prices_per_day": {},
                 "prices_total": {},
+                # Provenance per duration: which provider set the recommended
+                # price (base_provider), its actual total before the tenant's
+                # rule (base_total), and every provider's total for that cell.
+                "provenance": {},
             }
             groups[key] = g
             order.append(key)
-        g["prices_per_day"][str(r.duracion_dias)] = _money(r.recomendado_per_day)
-        g["prices_total"][str(r.duracion_dias)] = _money(r.recomendado_total)
+        dur = str(r.duracion_dias)
+        g["prices_per_day"][dur] = _money(r.recomendado_per_day)
+        g["prices_total"][dur] = _money(r.recomendado_total)
+        provider_totals = {
+            code: _money(total)
+            for code, total in (r.provider_prices or {}).items()
+            if total is not None
+        }
+        g["provenance"][dur] = {
+            "base_provider": r.base_provider,
+            "base_total": provider_totals.get(r.base_provider) if r.base_provider else None,
+            "provider_totals": provider_totals,
+        }
 
     return {
         "tenant": tenant_name,
@@ -74,6 +93,8 @@ def _serialize(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "location_id": location_id,
         "durations": list(DURATIONS),
+        # Providers in the radar (the codes used in each entry's provenance).
+        "providers": [{"code": code, "name": name} for code, name in providers],
         "total_zones": result.total_zones,
         "prices": [groups[k] for k in order],
     }
@@ -99,4 +120,5 @@ def get_prices(
         currency = trow.currency if trow else ""
         result = _export_result(session, tenant_id, location_id, zone_from, zone_to)
         examples = fetch_catalog_examples(session)
-    return _serialize(result, tenant_name, currency, location_id, examples)
+        providers = fetch_active_providers(session)
+    return _serialize(result, tenant_name, currency, location_id, examples, providers)

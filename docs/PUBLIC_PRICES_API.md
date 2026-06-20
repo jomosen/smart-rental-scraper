@@ -70,6 +70,7 @@ Para "copiar todo el calendario" no pases nada: `GET /api/v1/prices`.
 | `location_id` | int \| null | El filtro aplicado (null = todas). |
 | `durations` | int[] | Duraciones (días) que el sistema maneja: `[1,2,3,4,5,6,7,14,21,28]`. |
 | `total_zones` | int | Nº total de temporadas disponibles (independiente del rango pedido). |
+| `providers` | objeto[] | Proveedores en el radar: `[{code, name}]`. Son los `code` que aparecen en `provenance`. |
 | `prices` | objeto[] | Lista de precios. Ver abajo. |
 
 ### Respuesta — cada elemento de `prices`
@@ -84,6 +85,15 @@ Para "copiar todo el calendario" no pases nada: `GET /api/v1/prices`.
 | `zone.date_to` | date (`YYYY-MM-DD`) | Fin de la temporada (inclusive). |
 | `prices_total` | objeto | `{ "<días>": precio_total }` — **precio total del alquiler** para esa duración. |
 | `prices_per_day` | objeto | `{ "<días>": precio_por_día }` — precio por día (= total / días). |
+| `provenance` | objeto | **Procedencia** por duración: `{ "<días>": { base_provider, base_total, provider_totals } }`. De dónde sale cada precio recomendado (ver abajo). |
+
+**Procedencia (`provenance[<días>]`)** — para informar al cliente del origen de cada precio, igual que el SaaS:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `base_provider` | string \| null | `code` del proveedor cuyo precio fija la base del recomendado. `null` si la base es una agregación sin un proveedor único (p. ej. media). |
+| `base_total` | number \| null | Precio total de ese `base_provider` (antes de aplicar tu regla de pricing). |
+| `provider_totals` | objeto | `{ "<code>": total }` — precio total de **cada** proveedor del radar para esa categoría/temporada/duración (solo los que tienen dato). |
 
 Hay **una entrada por cada (categoría ACRISS × temporada)**. En el ejemplo real:
 437 entradas = 32 categorías a lo largo de 15 temporadas.
@@ -143,6 +153,11 @@ curl -H "Authorization: Bearer rr_live_xxxxxxxxxxxxxxxx" \
   "location_id": null,
   "durations": [1, 2, 3, 4, 5, 6, 7, 14, 21, 28],
   "total_zones": 15,
+  "providers": [
+    { "code": "centauro", "name": "Centauro" },
+    { "code": "solcar", "name": "Solcar" },
+    { "code": "victoria", "name": "Victoria Rent a Car" }
+  ],
   "prices": [
     {
       "acriss_code": "MDMR",
@@ -157,6 +172,13 @@ curl -H "Authorization: Bearer rr_live_xxxxxxxxxxxxxxxx" \
         "1": 48.37, "2": 31.68, "3": 29.736666666666668, "4": 28.1075,
         "5": 34.698, "6": 32.87166666666667, "7": 32.871428571428574,
         "14": 34.527857142857144, "21": 35.908095238095235, "28": 36.598571428571425
+      },
+      "provenance": {
+        "7": {
+          "base_provider": "centauro",
+          "base_total": 230.10,
+          "provider_totals": { "centauro": 230.10, "solcar": 255.85, "victoria": 238.00 }
+        }
       }
     }
   ]
