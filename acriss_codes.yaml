@@ -655,10 +655,8 @@ acriss_codes:
       - "Combustion engine"
       - "Mainstream brand"
     examples:
-      - "Renault Scénic"
-      - "Citroën C4 SpaceTourer"
-      - "Ford C-Max"
-      - "Opel Zafira"
+      - "VW Touran"
+      - "Dacia Jogger"
 
   - code: CMAR
     display_name: Monovolumen Compacto Automático
@@ -676,9 +674,7 @@ acriss_codes:
       - "Mainstream brand"
     examples:
       - "VW Touran"
-      - "Citroën C4 SpaceTourer"
-      - "Renault Scenic"
-      - "Ford C-Max"
+      - "Dacia Jogger"
 
   - code: CVMR
     display_name: Furgoneta Pasajero Compacta Manual
