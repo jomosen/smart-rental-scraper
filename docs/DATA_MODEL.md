@@ -610,9 +610,20 @@ homogeneous_zones
   start_date DATE
   end_date DATE
   representative_date DATE
+  reference_price NUMERIC(10,2) NULL  -- guide-group price/day that defined the zone
   detected_at
   active BOOLEAN
   -- Partial index: WHERE active = true
+  --
+  -- Season-start stability (carry-forward): the scrape window starts at
+  -- today+PERIOD_OFFSET, so a re-scrape would otherwise re-anchor the FIRST zone's
+  -- start_date to the moving window edge — making the same season appear to "start"
+  -- a day later each run. To keep season identity stable, on persist the new leading
+  -- zone inherits the previously-active leading zone's start_date when their
+  -- reference_price matches within SEASON_PRICE_THRESHOLD (same relative test the
+  -- analyzer uses for boundaries). reference_price is persisted for this comparison
+  -- (and makes a zone self-describing for history). Implemented in
+  -- smart_orchestrator (carry_forward_leading_start) + HomogeneousZoneRepository.
   --
   -- Derivation rule (read side): a zone is backed by the observation at its
   -- representative_date; if that exact observation is missing (the chosen

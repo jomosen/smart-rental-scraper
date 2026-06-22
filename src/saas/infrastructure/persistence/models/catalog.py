@@ -272,6 +272,9 @@ class HomogeneousZone(Base):
     start_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     end_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     representative_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    # Guide-group price/day that defined the zone. Used to carry forward a
+    # season's start_date across scrapes when the leading zone is price-continuous.
+    reference_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     detected_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )

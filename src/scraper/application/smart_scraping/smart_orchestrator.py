@@ -5,6 +5,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Tuple
 
 from ...domain.interfaces.scraper_factory import IScraperFactory
@@ -43,6 +44,31 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
 _PROBE_STOP_THRESHOLD = 3
+
+
+def carry_forward_leading_start(
+    new_zones: List[HomogeneousZone],
+    old_leading_start: Optional[date],
+    old_leading_price: Optional[Decimal],
+    threshold: float,
+) -> List[HomogeneousZone]:
+    """Keep a season's start_date stable across scrapes.
+
+    The scrape window starts at today+offset, so the new leading zone would
+    otherwise re-anchor to the moving window edge, making the same season appear
+    to start a day later each run. If the new leading zone is price-continuous
+    with the previously-active leading zone (same relative test the analyzer uses
+    for boundaries) and the old start is earlier, the new leading zone inherits
+    the old start_date. Pure: no I/O.
+    """
+    if not new_zones or old_leading_start is None or old_leading_price is None:
+        return new_zones
+    lead = new_zones[0]
+    base = max(float(old_leading_price), 0.01)
+    change = abs(float(lead.reference_price) - float(old_leading_price)) / base
+    if change <= threshold and old_leading_start < lead.start_date:
+        return [replace(lead, start_date=old_leading_start), *new_zones[1:]]
+    return new_zones
 
 
 def _partition_for_classification(
@@ -115,6 +141,7 @@ class SmartScraperOrchestrator:
         rate_filter: Optional[RateFilter] = None,
         pickup_hour: int = 10,
         extraction_durations: Optional[List[int]] = None,
+        season_threshold: float = 0.05,
     ) -> None:
         self._factory = factory
         self._probe = probe
@@ -132,6 +159,7 @@ class SmartScraperOrchestrator:
         self._rate_filter = rate_filter
         self._pickup_hour = pickup_hour
         self._extraction_durations = extraction_durations or _DEFAULT_EXTRACTION_DURATIONS
+        self._season_threshold = season_threshold
 
     async def run(
         self,
@@ -509,6 +537,28 @@ class SmartScraperOrchestrator:
                 )
                 return 0
 
+            # Keep the leading season's start_date stable across scrapes: if the
+            # new leading zone is price-continuous with the previously-active one,
+            # inherit its (earlier) start instead of the moving window edge. Read
+            # before replace_zones_for_tuple deactivates the old rows.
+            old_lead = zone_repo.leading_active_zone(
+                self._provider_id,
+                self._provider_location_id,
+                self._provider_rate_id,
+            )
+            if old_lead is not None:
+                adjusted = carry_forward_leading_start(
+                    provider_zones, old_lead[0], old_lead[1], self._season_threshold,
+                )
+                if adjusted and provider_zones and adjusted[0].start_date != provider_zones[0].start_date:
+                    logger.info(
+                        "[%s] Leading season start carried forward: %s -> %s",
+                        self._provider_code,
+                        provider_zones[0].start_date,
+                        adjusted[0].start_date,
+                    )
+                provider_zones = adjusted
+
             total_rows = 0
             for vg in active_groups:
                 orm_zones = [
@@ -520,6 +570,7 @@ class SmartScraperOrchestrator:
                         start_date=z.start_date,
                         end_date=z.end_date,
                         representative_date=z.representative_date,
+                        reference_price=z.reference_price,
                         active=True,
                     )
                     for z in provider_zones

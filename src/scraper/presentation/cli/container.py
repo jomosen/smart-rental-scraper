@@ -197,6 +197,7 @@ def build_container(
                 rate_code=rate_row.rate_code,
                 rate_filter=rate_filter,
                 pickup_hour=pickup_hour,
+                season_threshold=threshold,
             )
             orchestrators.append((provider, location, location, orch))
 
