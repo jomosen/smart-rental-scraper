@@ -49,7 +49,7 @@ logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 # --- Scraping period ---
 PERIOD_DAYS = 300 
-PERIOD_OFFSET_DAYS = 2
+PERIOD_OFFSET_DAYS = 1
 PICKUP_HOUR = 10
 
 _now = datetime.now().replace(hour=PICKUP_HOUR, minute=0, second=0, microsecond=0)
