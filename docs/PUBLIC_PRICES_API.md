@@ -1,13 +1,20 @@
-# RentRadar — API de Precios (v1) · Guía de integración
+# RentRadar — API (v1) · Guía de integración
 
-Documento único y autocontenido para implementar el **consumidor** de la API:
-el sistema externo que va a **copiar los precios** calculados por RentRadar e
+Documento único y autocontenido para implementar el **consumidor** de la API: el
+sistema externo que va a **copiar los precios** calculados por RentRadar e
 inyectarlos en su propio motor (booking, ERP, web, etc.).
 
-> **TL;DR:** haces un `GET` autenticado con una API key, recibes un JSON con los
-> precios finales de venta por **categoría de vehículo (ACRISS) × temporada ×
-> duración**, y los aplicas en tu sistema. Es de **solo lectura** y *pull* (lo
-> consultas cuando quieras; no hay push/webhook).
+> **TL;DR:** todo se consume con un `GET` autenticado por API key, en JSON, de
+> **solo lectura** (*pull*; no hay push/webhook).
+
+### Endpoints
+
+| Endpoint | Para qué | Sección |
+|----------|----------|---------|
+| `GET /api/v1/prices` | Precios finales de venta por **categoría ACRISS × temporada × duración**, con procedencia. | §1–§10 |
+| `GET /api/v1/classify` | Clasifica un **modelo en texto libre** ("Peugeot 208 Manual") a su código ACRISS. | §11 |
+
+Ambos comparten **autenticación** (§2) y el concepto de **código ACRISS** (§4, §9).
 
 ---
 
