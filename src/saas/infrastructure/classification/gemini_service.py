@@ -27,6 +27,11 @@ from src.saas.application.classification.service import ClassificationService
 _CONFIDENCE_THRESHOLD = 0.85
 _FLASH_MODEL = "gemini-2.5-flash"
 _PRO_MODEL = "gemini-2.5-pro"
+
+# Bump when the classification PROMPT/logic changes (mixed-group rule, fuel
+# fallback, tie-breaks…). Combined with a hash of acriss_codes.yaml, it forms the
+# classifier_version that invalidates the model_classifications cache.
+PROMPT_VERSION = "1"
 _REFERENCE_PATH = Path(__file__).parents[4] / "docs" / "acriss_reference.md"
 
 _MIXED_GROUPS_REMINDER = """\

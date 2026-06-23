@@ -902,6 +902,30 @@ is covered by `revoked_at`), and `created_by_user_id` (keys are provisioned via 
 back-office script, not by an end user). Hashing uses sha256 rather than bcrypt
 because the key is a high-entropy random token, not a low-entropy password.
 
+### Ad-hoc classification cache (`model_classifications`)
+
+**Implemented** (migration `t2u3v4w5x6y7`). Read-through cache for the `GET
+/api/v1/classify?model=…` endpoint, which classifies a free-text model to an
+ACRISS code via the LLM. Catalog scope (no `tenant_id`, no RLS — a model
+classifies the same for everyone).
+
+```
+model_classifications
+  normalized_model   TEXT   -- input lowercased + whitespace-collapsed
+  classifier_version TEXT   -- sha1(acriss_codes.yaml)[:12] + ":" + PROMPT_VERSION
+  acriss_code        TEXT NULL  -- NULL = unclassifiable
+  confidence         NUMERIC(4,3)
+  pending_review     BOOLEAN
+  created_at, last_used_at, hit_count
+  PK (normalized_model, classifier_version)
+```
+The LLM is hit only on a cache miss. `classifier_version` is part of the key, so a
+catalog change (the YAML hash moves) or a prompt change (bump `PROMPT_VERSION` in
+`gemini_service`) makes old rows stop matching — stale classifications are never
+served and the cache re-fills lazily. The scraper's own PVC-level reuse cache is
+separate and not reusable here (its rows are provider *group* bundles whose code
+follows group rules, not single-model mappings).
+
 ### Intermediate-duration calculation
 
 The model stores prices for the bracket `{1,2,3,4,5,6,7,14,21,28}`. Durations not in the bracket (e.g. 10 days) are not stored.

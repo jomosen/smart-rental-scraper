@@ -371,3 +371,26 @@ class ProviderRecipe(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )
+
+
+class ModelClassification(Base):
+    """Cache of ad-hoc free-text model → ACRISS classification (/api/v1/classify).
+
+    Catalog scope (no tenant_id, no RLS). Keyed by (normalized_model,
+    classifier_version); classifier_version invalidates rows when the catalog or
+    prompt changes. acriss_code is NULL for an unclassifiable input.
+    """
+    __tablename__ = "model_classifications"
+
+    normalized_model: Mapped[str] = mapped_column(Text, primary_key=True)
+    classifier_version: Mapped[str] = mapped_column(Text, primary_key=True)
+    acriss_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False, server_default="0")
+    pending_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    last_used_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

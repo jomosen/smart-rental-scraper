@@ -286,3 +286,44 @@ tu sistema; RentRadar no lo conoce y no puede vigilarlo. Patrón recomendado:
 - [ ] Detectar categorías mapeadas cuyo `acriss_code` no viene en la respuesta (sin-dato → mantener último / alertar; nunca borrar). Ver §9.
 - [ ] Tratar `401` (key inválida/revocada) y reintentos/errores de red.
 - [ ] Programar la sincronización (p. ej. diaria) y registrar `generated_at`.
+
+---
+
+## 11. Endpoint auxiliar: clasificar un modelo
+
+**`GET /api/v1/classify?model=<texto>`** — dado un modelo en texto libre, devuelve su
+**código ACRISS** + descripción + ejemplos. Misma autenticación (API key Bearer).
+
+### Petición
+```bash
+curl -H "Authorization: Bearer rr_live_xxxx" \
+     "https://radar.mardrive.com/api/v1/classify?model=Peugeot%20208%20Manual"
+```
+
+### Respuesta 200
+```json
+{
+  "model": "Peugeot 208 Manual",
+  "acriss_code": "EDMR",
+  "description": "Económico Manual",
+  "example_models": ["VW Polo", "Opel Corsa", "Renault Clio"],
+  "confidence": 0.95,
+  "pending_review": false,
+  "cached": true
+}
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `acriss_code` | string \| null | Código ACRISS clasificado; `null` si no se pudo clasificar. |
+| `description` | string \| null | Nombre legible de la categoría (igual que el `category` de `/prices`). |
+| `example_models` | string[] | Modelos de ejemplo del catálogo para ese código. |
+| `confidence` | number | Certeza del clasificador (0–1). |
+| `pending_review` | bool | `true` si la clasificación es dudosa (revisión recomendada). |
+| `cached` | bool | `true` si vino de la cache (sin coste de LLM). |
+
+Notas:
+- El `model` va **URL-encoded** (espacios, acentos…).
+- `400` si `model` falta o está vacío; `401` si falta/ es inválida la API key.
+- **Cacheado:** la primera consulta de un modelo llama al LLM; las siguientes salen
+  de cache hasta que cambie el catálogo o el clasificador. Es de **solo lectura**.
