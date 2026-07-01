@@ -154,6 +154,8 @@ def build_recipe(
     log_dir: Path,
     repo: "ProviderRecipeRepository",
     provider_id: int,
+    refine_url: str | None = None,
+    refine_strategy: str = "none",
 ) -> Recipe:
     """Build a Recipe from a ScrapeResult and persist it to the database.
 
@@ -162,11 +164,17 @@ def build_recipe(
 
     Parameters
     ----------
-    provider_key:   Logical key (e.g. 'centauro') matching providers.code.
-    scrape_result:  Output of scrape() from scraper_engine (duck-typed).
-    log_dir:        Directory where form_widget_infos.json was written.
-    repo:           ProviderRecipeRepository bound to an open Session.
-    provider_id:    DB id of the providers row for this provider_key.
+    provider_key:    Logical key (e.g. 'centauro') matching providers.code.
+    scrape_result:   Output of scrape() from scraper_engine (duck-typed).
+    log_dir:         Directory where form_widget_infos.json was written.
+    repo:            ProviderRecipeRepository bound to an open Session.
+    provider_id:     DB id of the providers row for this provider_key.
+    refine_url:      Deep-link to the provider's "edit search" page. When set
+                     with refine_strategy='navigate_and_change_dates', searches
+                     after the first change only the dates on that page instead
+                     of re-filling the whole form on the homepage. See
+                     RecipeScraper._refine_form and recipe_executor.refine_dates.
+    refine_strategy: 'navigate_and_change_dates' | 'in_place' | 'none'.
 
     Returns the Recipe that was saved.
     """
@@ -269,8 +277,8 @@ def build_recipe(
         card_source="mark_valid_cards",
         field_extractors=extractors,
         price_strategy=price_strategy,
-        refine_url=None,
-        refine_strategy="none",
+        refine_url=refine_url,
+        refine_strategy=refine_strategy,
     )
 
     repo.save_recipe(provider_id=provider_id, recipe=recipe)

@@ -634,14 +634,63 @@ async def _refine_in_place(
 ) -> ScrapeResult:
     """Change dates on the current results page without navigating away.
 
-    Not implemented: no active recipe uses this strategy yet.  Will be
-    implemented when a provider is confirmed to keep the form calendar
-    accessible on its results page.
+    Precondition: the session is on the provider's results page and that page
+    embeds the search form using the recipe's own date-field and submit
+    selectors. Fills only the dates, resubmits in place, waits and extracts.
+    Cookies are NOT re-closed — the persistent session already accepted them.
     """
-    raise NotImplementedError(
-        "refine_strategy='in_place' is not yet implemented. "
-        "Use 'navigate_and_change_dates' (with refine_url) or 'none'."
-    )
+    t0 = time.monotonic()
+    logger = SessionLogger(log_dir)
+    dom_vehicles: list[VehicleResult] = []
+    scroll_rounds = 0
+    scroll_final_count = 0
+    has_empty_page = False
+
+    def _elapsed() -> float:
+        return time.monotonic() - t0
+
+    def _make_result(fp: str | None, err: str | None, success: bool = False) -> ScrapeResult:
+        logger.log("scrape_complete", mode="refine_in_place", success=success,
+                   failed_phase=fp, llm_calls=0, duration_s=round(_elapsed(), 2),
+                   dom_vehicles=len(dom_vehicles), scroll_rounds=scroll_rounds,
+                   scroll_final_count=scroll_final_count)
+        return ScrapeResult(
+            url=session.get_url(),
+            targets={"pickup_date": pickup_date, "return_date": return_date},
+            success=success, failed_phase=fp, error=err, vehicles=[],
+            dom_vehicles=dom_vehicles, form_fields=None, results_structure=None,
+            verification=None, duration_seconds=_elapsed(), cost_estimate_eur=0.0,
+            llm_calls=0, scroll_rounds=scroll_rounds,
+            scroll_final_count=scroll_final_count, has_empty_page=has_empty_page,
+        )
+
+    # The embedded search form must expose the recipe's pickup_date field.
+    pickup_rf = recipe.form_fields.get("pickup_date")
+    if pickup_rf and pickup_rf.selector:
+        if not await session.wait_for_selector(pickup_rf.selector):
+            return _make_result(
+                "refine_in_place",
+                f"Date field {pickup_rf.selector!r} not present on results page",
+            )
+
+    try:
+        await _fill_date_fields(session, recipe, pickup_date, return_date, logger)
+    except Exception as exc:
+        logger.log("scrape_phase_error", phase="refine_in_place", error=str(exc))
+        return _make_result("refine_in_place", f"Date fill exception: {exc}")
+
+    out = await _submit_wait_extract(session, recipe, logger)
+    dom_vehicles = out.dom_vehicles
+    scroll_rounds = out.scroll_rounds
+    scroll_final_count = out.scroll_final_count
+    has_empty_page = out.has_empty_page
+    if out.failed_phase:
+        return _make_result(out.failed_phase, out.error)
+    if not dom_vehicles:
+        if has_empty_page:
+            return _make_result(None, None, success=True)
+        return _make_result("extraction", "DOM extraction returned no vehicles")
+    return _make_result(None, None, success=True)
 
 
 # ── Public dispatcher ─────────────────────────────────────────────────────────

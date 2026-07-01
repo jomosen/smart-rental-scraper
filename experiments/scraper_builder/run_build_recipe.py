@@ -30,8 +30,13 @@ if str(_PROJECT_ROOT) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv()
 
+from dataclasses import replace
+
 from src.scraper.infrastructure.builder.location_explorer import create_log_dir
 from src.scraper.infrastructure.builder.scraper_engine import scrape
+from src.scraper.infrastructure.builder.browser_session import BrowserSession
+from src.scraper.infrastructure.builder.recipe_executor import run_recipe
+from src.scraper.infrastructure.builder.refine_discovery import discover_refine_link
 
 from src.scraper.application.builder.build_recipe import build_recipe
 from src.scraper.application.builder.provision import ProviderProvisioningService
@@ -74,7 +79,42 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropoff-time", default="10:00")
     p.add_argument("--provider-key", default=None,
                    help="providers.code for this site (default: site name)")
+    p.add_argument("--url", default=None,
+                   help="Build an ad-hoc provider at this URL (requires --provider-key). "
+                        "Default: the built-in TEST_CASES.")
+    # ── Refine (searches after the first change only the dates) ──────────────
+    p.add_argument("--refine-url", default=None,
+                   help="Explicit 'edit search' deep-link. Skips auto-discovery.")
+    p.add_argument("--refine-strategy", default="navigate_and_change_dates",
+                   choices=["navigate_and_change_dates", "in_place", "none"],
+                   help="Strategy to pair with --refine-url (default: navigate_and_change_dates)")
+    p.add_argument("--no-auto-refine", dest="auto_refine", action="store_false",
+                   help="Disable LLM auto-discovery of the edit-search deep-link")
+    p.set_defaults(auto_refine=True)
     return p.parse_args()
+
+
+async def _auto_discover_refine(
+    recipe, targets: dict, headless: bool, provider_name: str
+) -> tuple[str | None, str]:
+    """Reach the results page with *recipe*, then probe for the refine strategy
+    (navigate_and_change_dates | in_place). Best-effort — never raises.
+    Returns (refine_url, strategy)."""
+    log_dir = create_log_dir(provider_name, suffix="_refine_probe")
+    bs = BrowserSession(headless=headless)
+    await bs.__aenter__()
+    try:
+        res = await run_recipe(recipe, targets, log_dir, session=bs)
+        if not res.success:
+            print(f"  [auto-refine] could not reach results "
+                  f"(phase={res.failed_phase!r}) — skipping")
+            return None, "none"
+        return await discover_refine_link(bs, recipe, targets, log_dir)
+    except Exception as exc:  # noqa: BLE001 — probe must never break the build
+        print(f"  [auto-refine] probe error: {exc}")
+        return None, "none"
+    finally:
+        await bs.__aexit__(None, None, None)
 
 
 async def main() -> None:
@@ -84,7 +124,11 @@ async def main() -> None:
     engine = app_engine()
     factory = make_session_factory(engine)
 
-    for name, url in TEST_CASES:
+    if args.url and not args.provider_key:
+        raise SystemExit("--url requires --provider-key (used as providers.code)")
+    cases = [(args.provider_key, args.url)] if args.url else TEST_CASES
+
+    for name, url in cases:
         provider_key = args.provider_key or name
         log_dir = create_log_dir(name, suffix="_build_recipe")
         print(f"\n=== {name} | {provider_key} -> {targets} ===")
@@ -103,6 +147,11 @@ async def main() -> None:
             print(f"  error: {result.error}")
             continue
 
+        # Explicit --refine-url wins; otherwise start at 'none' and let the
+        # Level-2 auto-discovery below fill it in.
+        refine_url = args.refine_url
+        refine_strategy = args.refine_strategy if args.refine_url else "none"
+
         session = factory()
         try:
             # 1. Ensure provider + location + rate rows exist (idempotent)
@@ -115,7 +164,10 @@ async def main() -> None:
 
             # 2. Build recipe from discovery result and save to DB
             repo = ProviderRecipeRepository(session)
-            recipe = build_recipe(provider_key, result, log_dir, repo, prov.provider_id)
+            recipe = build_recipe(
+                provider_key, result, log_dir, repo, prov.provider_id,
+                refine_url=refine_url, refine_strategy=refine_strategy,
+            )
             session.commit()
         except Exception:
             session.rollback()
@@ -127,6 +179,36 @@ async def main() -> None:
         print(f"  form_fields:      {list(recipe.form_fields)}")
         print(f"  field_extractors: {[e.field for e in recipe.field_extractors]}")
         print(f"  card_source:      {recipe.card_source}")
+        print(f"  refine:           strategy={recipe.refine_strategy!r} url={recipe.refine_url!r}")
+
+        # 3. Level-2: auto-discover the edit-search deep-link when not supplied.
+        #    Runs one extra search + one LLM call. Best-effort: on any failure
+        #    the recipe simply keeps its full-resubmit behaviour.
+        if not args.refine_url and args.auto_refine:
+            print("  [auto-refine] probing results page for an edit-search deep-link…")
+            disc_url, disc_strategy = await _auto_discover_refine(
+                recipe, targets, not args.visible, name
+            )
+            if disc_url:
+                session = factory()
+                try:
+                    repo = ProviderRecipeRepository(session)
+                    active = repo.get_active_recipe(prov.provider_id)
+                    updated = replace(
+                        active, refine_url=disc_url, refine_strategy=disc_strategy
+                    )
+                    row = repo.save_recipe(prov.provider_id, updated)
+                    session.commit()
+                    print(f"  [auto-refine] OK -> recipe v{row.version}  "
+                          f"strategy={disc_strategy!r}  url={disc_url}")
+                except Exception:
+                    session.rollback()
+                    raise
+                finally:
+                    session.close()
+            else:
+                print("  [auto-refine] no edit-search deep-link found — "
+                      "recipe uses full re-submit")
 
 
 if __name__ == "__main__":
