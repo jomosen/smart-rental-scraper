@@ -46,6 +46,17 @@ _DEFAULT_EXTRACTION_DURATIONS = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28]
 _PROBE_STOP_THRESHOLD = 3
 
 
+class EmptyProbeError(RuntimeError):
+    """Raised when the probe phase yields no usable price points.
+
+    Aborts the run *before* Phase 2 so a failed scrape (e.g. every probe
+    search erroring out) can never overwrite the existing homogeneous_zones
+    calendar with the degenerate single-zone fallback the analyzer produces
+    from empty input. The run is marked ``failed`` and prior zones are left
+    untouched.
+    """
+
+
 def carry_forward_leading_start(
     new_zones: List[HomogeneousZone],
     old_leading_start: Optional[date],
@@ -206,6 +217,24 @@ class SmartScraperOrchestrator:
             # ── PHASE 2: Analysis ─────────────────────────────────────────
             logger.info("[%s] Phase 2 — Zone analysis", self._provider_code)
             price_points = self._extractor.extract(probe_searches, probe_results)
+
+            # Guard: a probe that FAILED to scrape (searches erroring out) must
+            # NOT proceed to zone persistence. With no price points the analyzer
+            # emits a single fallback zone spanning the whole window, and
+            # replace_zones_for_tuple would overwrite the previously-valid
+            # multi-season calendar with it — silently destroying real data while
+            # the run reports success (exactly what a broken provider recipe did).
+            # A confirmed-empty probe (no inventory, no errors) is a legitimate
+            # case and keeps the legacy single-zone behaviour; only fire when the
+            # emptiness is caused by scraping errors.
+            n_errored = sum(1 for r in probe_results if r is not None and r.errors)
+            if not price_points and n_errored:
+                raise EmptyProbeError(
+                    f"[{self._provider_code}] Probe produced no usable price points "
+                    f"({n_errored}/{len(probe_results)} searches errored) — aborting "
+                    f"before zone persistence to preserve the existing "
+                    f"homogeneous_zones calendar."
+                )
 
             # When the probe stopped early, limit zone detection to the range
             # actually covered so the last zone doesn't extend to the period end.

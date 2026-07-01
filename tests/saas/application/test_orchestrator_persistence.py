@@ -42,7 +42,10 @@ from src.scraper.application.smart_scraping.price_point_extractor import PricePo
 from src.scraper.application.smart_scraping.search_plan_builder import SearchPlanBuilder
 from src.scraper.application.smart_scraping.season_analyzer import SeasonAnalyzer
 from src.scraper.application.smart_scraping.season_probe import SeasonProbe
-from src.scraper.application.smart_scraping.smart_orchestrator import SmartScraperOrchestrator
+from src.scraper.application.smart_scraping.smart_orchestrator import (
+    EmptyProbeError,
+    SmartScraperOrchestrator,
+)
 from src.scraper.domain.models.booking_provider import BookingProvider
 from src.shared.domain.models.result import BookingResult, Car, Rate
 from src.shared.domain.models.search import Location
@@ -129,6 +132,18 @@ def _empty_results(requests, should_stop=None):
     return [BookingResult(provider_name="Orch Test Provider", cars=[]) for _ in requests]
 
 
+def _errored_results(requests, should_stop=None):
+    """Return one errored BookingResult per request (scraping failed, no cars).
+
+    Mirrors what BaseScraper.scrape_session appends when every attempt for a
+    search fails: a BookingResult carrying `errors` and no cars.
+    """
+    return [
+        BookingResult(provider_name="Orch Test Provider", errors=["All attempts failed"])
+        for _ in requests
+    ]
+
+
 def _results_with_groups(requests, groups: list[str], rate_name: str = "Test Rate"):
     """Return one BookingResult per request, each containing one Car per group."""
     cars = [
@@ -191,6 +206,86 @@ class TestOrchestratorFailure:
             assert runs, "A ScrapeRun should have been created"
             assert runs[0].status == "failed"
             assert "simulated scraper failure" in (runs[0].error or "")
+        finally:
+            _cleanup_provider(super_db_session, provider_id)
+
+
+class TestOrchestratorEmptyProbeGuard:
+    """A probe whose searches all error out must NOT overwrite existing zones."""
+
+    async def test_errored_probe_aborts_and_preserves_existing_zones(
+        self, super_db_session
+    ):
+        provider_id, location_id, rate_id = _setup_catalog(super_db_session)
+        # Pre-existing "good calendar": one active PVC with two active zones.
+        pvc = ProviderVehicleCategory(
+            provider_id=provider_id,
+            provider_location_id=location_id,
+            provider_rate_id=rate_id,
+            external_code="ECMR",
+            external_name="Economy",
+            example_models="",
+            active=True,
+        )
+        super_db_session.add(pvc)
+        super_db_session.flush()  # assign pvc.id
+        good_zones = [
+            HzOrm(
+                provider_id=provider_id,
+                provider_location_id=location_id,
+                provider_rate_id=rate_id,
+                provider_vehicle_category_id=pvc.id,
+                start_date=datetime.date(2026, 6, 1),
+                end_date=datetime.date(2026, 6, 4),
+                representative_date=datetime.date(2026, 6, 1),
+                reference_price=Decimal("40.00"),
+                active=True,
+            ),
+            HzOrm(
+                provider_id=provider_id,
+                provider_location_id=location_id,
+                provider_rate_id=rate_id,
+                provider_vehicle_category_id=pvc.id,
+                start_date=datetime.date(2026, 6, 5),
+                end_date=datetime.date(2026, 6, 10),
+                representative_date=datetime.date(2026, 6, 5),
+                reference_price=Decimal("80.00"),
+                active=True,
+            ),
+        ]
+        super_db_session.add_all(good_zones)
+        super_db_session.commit()
+        session_factory = partial(super_session, super_engine())
+        try:
+            orch = _make_orchestrator(provider_id, location_id, rate_id, session_factory)
+            provider = BookingProvider(name="Orch Test Provider", base_url="https://x.com")
+            location = Location(canonical_id="ORC", display_name="Orch Test Location")
+
+            with pytest.raises(EmptyProbeError):
+                with patch.object(SmartScraperOrchestrator, "_run_session",
+                                  new=AsyncMock(side_effect=_errored_results)):
+                    await orch.run(provider, location, location, _PERIOD_START, _PERIOD_END)
+
+            # The two pre-existing zones must still be active and untouched —
+            # the failed scrape must not have replaced them with a fallback zone.
+            super_db_session.rollback()  # refresh read view
+            active = super_db_session.scalars(
+                select(HzOrm)
+                .where(HzOrm.provider_id == provider_id, HzOrm.active.is_(True))
+            ).all()
+            assert len(active) == 2
+            assert {z.end_date for z in active} == {
+                datetime.date(2026, 6, 4), datetime.date(2026, 6, 10),
+            }
+
+            # The run must be recorded as failed, not success.
+            runs = super_db_session.scalars(
+                select(ScrapeRun)
+                .where(ScrapeRun.provider_id == provider_id)
+                .order_by(ScrapeRun.started_at.desc())
+            ).all()
+            assert runs and runs[0].status == "failed"
+            assert "no usable price points" in (runs[0].error or "")
         finally:
             _cleanup_provider(super_db_session, provider_id)
 
