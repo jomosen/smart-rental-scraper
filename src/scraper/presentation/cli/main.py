@@ -13,8 +13,11 @@ if hasattr(sys.stdout, "reconfigure"):
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.saas.infrastructure.persistence.engine import super_engine
+from src.saas.infrastructure.persistence.engine import super_engine, admin_engine
 from src.saas.infrastructure.persistence.session import super_session
+from src.saas.infrastructure.persistence.partitions import (
+    ensure_price_observation_partitions,
+)
 from src.scraper.presentation.cli.container import build_container
 
 
@@ -78,6 +81,19 @@ async def main() -> None:
         f"({PERIOD_START.strftime('%d/%m/%Y')} -> {PERIOD_END.strftime('%d/%m/%Y')}) ---"
     )
     print(f"Start: {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
+
+    # Ensure the current + next month partitions of price_observations exist
+    # before any write — otherwise Phase 3 INSERTs fail with "no partition
+    # found" once observed_at crosses into an unseeded month. Runs as the table
+    # owner (admin). Best-effort: a failure here shouldn't abort the whole run.
+    adm = admin_engine()
+    try:
+        ensured = ensure_price_observation_partitions(adm)
+        logging.info("price_observations partitions ensured: %s", ", ".join(ensured))
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("Could not ensure price_observations partitions: %s", exc)
+    finally:
+        adm.dispose()
 
     engine = super_engine()
     session_factory = partial(super_session, engine)
