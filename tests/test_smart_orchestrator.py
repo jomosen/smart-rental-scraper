@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,7 +23,7 @@ from src.saas.application.classification.dtos import ClassificationResult
 from src.saas.infrastructure.persistence.repositories.provider_vehicle_category_repository import (
     attributes_hash,
 )
-from src.shared.domain.models.result import BookingResult
+from src.shared.domain.models.result import BookingResult, Car
 from src.shared.domain.models.search import BookingSearch, Location
 from src.shared.domain.models.season import HomogeneousZone
 
@@ -396,3 +396,60 @@ class TestMakeProbeStopperTests:
         stop = self._stopper()
         for _ in range(10):
             assert stop(_ok()) is False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _retry_errored_searches
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _errored(msg: str = "All attempts failed") -> BookingResult:
+    return BookingResult(provider_name="centauro", errors=[msg])
+
+
+def _with_cars(group: str = "A") -> BookingResult:
+    return BookingResult(
+        provider_name="centauro",
+        cars=[Car(model="Fiat 500", group=group, description="", example_models="")],
+    )
+
+
+def _confirmed_empty() -> BookingResult:
+    return BookingResult(provider_name="centauro", is_confirmed_empty=True)
+
+
+class TestRetryErroredSearches:
+    async def test_recovers_errored_and_leaves_others(self):
+        orch = _make_orchestrator()
+        requests = ["r0", "r1", "r2"]
+        good, empty = _with_cars(), _confirmed_empty()
+        results = [_errored(), good, empty]
+        recovered = _with_cars()
+        orch._run_session = AsyncMock(return_value=[recovered])
+
+        out = await orch._retry_errored_searches(requests, results)
+
+        # Only the errored search (index 0) is retried
+        orch._run_session.assert_awaited_once_with(["r0"])
+        assert out[0] is recovered   # replaced with the recovered result
+        assert out[1] is good        # a good result is untouched
+        assert out[2] is empty       # confirmed-empty is NOT retried
+
+    async def test_no_retry_when_nothing_errored(self):
+        orch = _make_orchestrator()
+        results = [_with_cars(), _confirmed_empty()]
+        orch._run_session = AsyncMock()
+
+        out = await orch._retry_errored_searches(["r0", "r1"], results)
+
+        orch._run_session.assert_not_awaited()
+        assert out == results
+
+    async def test_retry_that_still_fails_keeps_original(self):
+        orch = _make_orchestrator()
+        original = _errored()
+        results = [original]
+        orch._run_session = AsyncMock(return_value=[_errored("still broken")])
+
+        out = await orch._retry_errored_searches(["r0"], results)
+
+        assert out[0] is original    # not replaced by another errored result

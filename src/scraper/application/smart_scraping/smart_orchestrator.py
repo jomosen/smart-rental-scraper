@@ -303,6 +303,9 @@ class SmartScraperOrchestrator:
             short_requests = [SearchRequest(search=s, rate_filter=self._rate_filter)
                               for s in short_searches]
             short_results = await self._run_session(short_requests)
+            short_results = await self._retry_errored_searches(
+                short_requests, short_results
+            )
 
             inserted, skipped = self._persist_observations(
                 short_requests, short_results, run_id, code_to_classification
@@ -753,3 +756,43 @@ class SmartScraperOrchestrator:
         should_stop: Optional[Callable[[BookingResult], bool]] = None,
     ) -> List[Optional[BookingResult]]:
         return await run_session(self._factory, requests, should_stop=should_stop)
+
+    async def _retry_errored_searches(
+        self,
+        requests: List[SearchRequest],
+        results: List[Optional[BookingResult]],
+    ) -> List[Optional[BookingResult]]:
+        """Re-run extraction searches that ERRORED, once, in a fresh session.
+
+        The provider form is intermittently flaky (e.g. the location dropdown
+        occasionally fails to open, even on a fresh browser), and a failed search
+        yields no cars — leaving that (pickup_date, duration) cell without a fresh
+        observation, so the read layer falls back to a stale price. A single retry
+        pass (new scraper/session via run_session) recovers most transient
+        failures. Only ERRORED results are retried; a confirmed-empty result (no
+        inventory) is left as-is. Returns the merged results list.
+        """
+        errored = [
+            i for i, r in enumerate(results)
+            if r is not None and r.errors and not r.cars
+        ]
+        if not errored:
+            return results
+
+        logger.info(
+            "[%s] Retrying %d errored extraction search(es) in a fresh session",
+            self._provider_code, len(errored),
+        )
+        retry_results = await self._run_session([requests[i] for i in errored])
+
+        recovered = 0
+        for j, i in enumerate(errored):
+            rr = retry_results[j] if j < len(retry_results) else None
+            if rr is not None and rr.cars:
+                results[i] = rr
+                recovered += 1
+        logger.info(
+            "[%s] Recovered %d/%d errored extraction search(es) on retry",
+            self._provider_code, recovered, len(errored),
+        )
+        return results
