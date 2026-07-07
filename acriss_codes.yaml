@@ -349,6 +349,20 @@ acriss_codes:
       - "Jeep Avenger Electric"
       - "Fiat 600e"
 
+  - code: EFAH
+    display_name: SUV Urbano Híbrido Automático
+    description: >
+      Mini-SUV (~4,0–4,25 m), self-charging hybrid (HEV: combustion + electric,
+      refuels petrol — NOT plug-in), automatic transmission. Mainstream brand.
+    criteria:
+      - "Mini-SUV / urban crossover (length ~4,0–4,25 m)"
+      - "Self-charging hybrid (HEV) — refuels petrol, NOT plug-in (PHEV)"
+      - "Automatic transmission"
+      - "Mainstream brand"
+    examples:
+      - "Toyota Yaris Cross"
+      - "Hyundai Kona HEV"
+
   # ──────────────────────────────────────────────────────────────
   # COMPACT ELITE (D) — Premium-brand compact: turismo, SUV, MPV, cabrio
   # ──────────────────────────────────────────────────────────────
@@ -586,6 +600,22 @@ acriss_codes:
     examples:
       - "Hyundai Kona Electric"
       - "Kia Niro EV"
+
+  - code: CFAH
+    display_name: SUV Compacto Híbrido Automático
+    description: >
+      Compact SUV (~4,25–4,45 m), self-charging hybrid (HEV: combustion +
+      electric, refuels petrol — NOT plug-in), automatic transmission.
+      Mainstream brand.
+    criteria:
+      - "Compact SUV (length ~4,25–4,45 m)"
+      - "Self-charging hybrid (HEV) — refuels petrol, NOT plug-in (PHEV)"
+      - "Automatic transmission"
+      - "Mainstream brand"
+    examples:
+      - "Toyota C-HR"
+      - "Kia XCeed HEV"
+      - "Nissan Qashqai e-Power"
 
   - code: CMMR
     display_name: Monovolumen Compacto Manual
@@ -841,6 +871,24 @@ acriss_codes:
       - "VW ID.4"
       - "Kia EV6"
 
+  - code: IFAH
+    display_name: SUV Mediano Híbrido Automático
+    description: >
+      Mid-size SUV (~4,45–4,7 m), self-charging hybrid (HEV: combustion +
+      electric, refuels petrol — NOT plug-in), automatic transmission.
+      Mainstream brand. The most common hybrid rental SUV category.
+    criteria:
+      - "Mid-size SUV (length ~4,45–4,7 m)"
+      - "Self-charging hybrid (HEV) — refuels petrol, NOT plug-in (PHEV)"
+      - "Automatic transmission"
+      - "Mainstream brand"
+    examples:
+      - "Toyota RAV4"
+      - "Hyundai Tucson HEV"
+      - "Ford Kuga HEV"
+      - "Kia Sportage HEV"
+      - "Nissan X-Trail e-Power"
+
   - code: IWMR
     display_name: Intermedio Familiar Manual
     description: >
@@ -951,6 +999,22 @@ acriss_codes:
       - "SEAT Tarraco"
       - "Peugeot 5008"
 
+  - code: SFAH
+    display_name: SUV Grande Híbrido Automático
+    description: >
+      Large 7-seat SUV (~4,7–5,0 m), self-charging hybrid (HEV: combustion +
+      electric, refuels petrol — NOT plug-in), automatic transmission.
+      Mainstream brand.
+    criteria:
+      - "Large SUV, typically 7 seats (length ~4,7–5,0 m)"
+      - "Self-charging hybrid (HEV) — refuels petrol, NOT plug-in (PHEV)"
+      - "Automatic transmission"
+      - "Mainstream brand"
+    examples:
+      - "Kia Sorento HEV"
+      - "Hyundai Santa Fe HEV"
+      - "Toyota Highlander"
+
   - code: SWAR
     display_name: Estándar Familiar Automático
     description: >
@@ -1008,6 +1072,22 @@ acriss_codes:
       - "Audi Q5"
       - "Volvo XC60"
       - "Lexus NX"
+
+  - code: RFAH
+    display_name: SUV Mediano Premium Híbrido Automático
+    description: >
+      Mid-to-large premium SUV (~4,6–4,9 m), self-charging hybrid (HEV:
+      combustion + electric, refuels petrol — NOT plug-in), automatic
+      transmission. Standard Elite tier.
+    criteria:
+      - "Mid-to-large premium SUV (~4,6–4,9 m)"
+      - "Premium brand (Lexus, BMW, Audi, Mercedes, Volvo)"
+      - "Self-charging hybrid (HEV) — refuels petrol, NOT plug-in (PHEV)"
+      - "Automatic transmission"
+    examples:
+      - "Lexus NX 350h"
+      - "Lexus RX"
+      - "Volvo XC60 (hybrid)"
 
   - code: RVAR
     display_name: Furgoneta Pasajero Premium 7 Plazas Automático
