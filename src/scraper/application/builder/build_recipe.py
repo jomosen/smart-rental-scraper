@@ -69,6 +69,8 @@ def recipe_to_dict(recipe: Recipe) -> dict:
         "price_strategy": recipe.price_strategy,
         "refine_url": recipe.refine_url,
         "refine_strategy": recipe.refine_strategy,
+        "cookie_accept_selector": recipe.cookie_accept_selector,
+        "cookie_accept_selector_type": recipe.cookie_accept_selector_type,
     }
 
 
@@ -121,6 +123,8 @@ def recipe_from_dict(data: dict) -> Recipe:
         price_strategy=data.get("price_strategy", ""),
         refine_url=data.get("refine_url"),
         refine_strategy=data.get("refine_strategy", "none"),
+        cookie_accept_selector=data.get("cookie_accept_selector"),
+        cookie_accept_selector_type=data.get("cookie_accept_selector_type", "css"),
     )
 
 

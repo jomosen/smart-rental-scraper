@@ -248,6 +248,11 @@ async def _poll_for_banner_signal(
         poll_n += 1
 
 
+# Heuristic accept-button polling — the banner may inject a beat after load.
+_HEURISTIC_WAIT_S = 6.0    # total budget to wait for an accept control to appear
+_HEURISTIC_POLL_S = 0.5    # pause between scans
+
+
 async def _close_banner_heuristic(
     session: BrowserSession,
     logger: SessionLogger,
@@ -255,24 +260,38 @@ async def _close_banner_heuristic(
     """
     Click the first visible accept-like button without LLM.
 
-    Scans the live DOM for buttons/links matching multilingual accept patterns.
-    Returns True if a button was found and clicked.
+    Matches multilingual accept phrases on **whole-word boundaries** so short
+    tokens can never match unintended text — e.g. "ok" must not match
+    "co<ok>ies", which previously made the closer follow a "cookie policy"
+    link and navigate off the search page.
+
+    Scans repeatedly for up to _HEURISTIC_WAIT_S because CMPs inject their
+    banner asynchronously: the real accept button often renders slightly after
+    the page settles. Returns True if a button was found and clicked.
     """
-    for text in _ACCEPT_TEXTS:
-        try:
-            loc = (
-                session.page
-                .locator('button, a, [role="button"]')
-                .filter(has_text=re.compile(text, re.IGNORECASE))
-                .first
-            )
-            if await loc.is_visible():
-                await loc.click(timeout=2_000)
-                logger.log("heuristic_banner_click", matched_text=text)
-                return True
-        except Exception:
-            continue
-    logger.log("heuristic_banner_click_failed")
+    deadline = time.monotonic() + _HEURISTIC_WAIT_S
+    round_n = 0
+    while True:
+        for text in _ACCEPT_TEXTS:
+            try:
+                pattern = re.compile(r"\b" + re.escape(text) + r"\b", re.IGNORECASE)
+                loc = (
+                    session.page
+                    .locator('button, a, [role="button"]')
+                    .filter(has_text=pattern)
+                    .first
+                )
+                if await loc.is_visible():
+                    await loc.click(timeout=2_000)
+                    logger.log("heuristic_banner_click", matched_text=text, round=round_n)
+                    return True
+            except Exception:
+                continue
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(_HEURISTIC_POLL_S)
+        round_n += 1
+    logger.log("heuristic_banner_click_failed", rounds=round_n)
     return False
 
 

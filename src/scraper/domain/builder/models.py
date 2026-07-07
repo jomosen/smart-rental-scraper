@@ -57,3 +57,10 @@ class Recipe:
     # ── Refine strategy (operator-set, not LLM-discovered) ──────────────────
     refine_url: str | None = None
     refine_strategy: str = "none"   # "navigate_and_change_dates" | "in_place" | "none"
+    # ── Cookie-accept control (build-discovered, deterministic) ─────────────
+    # When set, the runtime clicks this selector directly (waiting for it to
+    # appear) before falling back to the multilingual text heuristic. This
+    # avoids the heuristic mis-clicking a "cookie policy" link on CMPs that
+    # inject their banner asynchronously. See recipe_executor.run_recipe.
+    cookie_accept_selector: str | None = None
+    cookie_accept_selector_type: str = "css"

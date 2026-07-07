@@ -74,6 +74,48 @@ async def _dismiss(session: BrowserSession) -> None:
         pass
 
 
+async def _close_cookies_recipe(
+    session: BrowserSession,
+    recipe: Recipe,
+    log_dir: Path,
+    logger: SessionLogger,
+) -> None:
+    """Close the cookie banner for a recipe run.
+
+    Prefer the recipe's deterministic accept selector: wait for it to appear
+    (CMPs inject their banner asynchronously) and click it. Only if the recipe
+    has no selector, or the selector never shows / fails to clear the banner,
+    fall back to the multilingual text heuristic. This avoids the heuristic
+    mis-clicking a "cookie policy" link before the real accept button renders.
+    """
+    sel = recipe.cookie_accept_selector
+    if sel:
+        try:
+            appeared = await session.wait_for_selector(sel, timeout_ms=8_000)
+            if appeared:
+                clicked = await session.click_selector(
+                    sel, recipe.cookie_accept_selector_type
+                )
+                await asyncio.sleep(0.5)
+                still_visible = await session.is_visible(
+                    sel, recipe.cookie_accept_selector_type
+                )
+                logger.log("cookie_recipe_selector_click", selector=sel,
+                           clicked=clicked, banner_gone=not still_visible)
+                if clicked and not still_visible:
+                    return
+            else:
+                logger.log("cookie_recipe_selector_absent", selector=sel)
+        except Exception as exc:
+            logger.log("cookie_recipe_selector_error", selector=sel, error=str(exc))
+
+    # Fallback — heuristic accept-button click (no LLM).
+    cookie_result = await close_cookies_in_session(
+        session, log_dir, heuristic_only=True
+    )
+    logger.log("cookie_closer_invoked", success=cookie_result.success, llm_calls=0)
+
+
 def _make_identified_field(rf) -> IdentifiedField:
     return IdentifiedField(
         selector=rf.selector,
@@ -322,13 +364,9 @@ async def run_recipe(
             await session.navigate(recipe.url)
             logger.log("navigate_complete", url=recipe.url)
 
-            # ── 2. Close cookies (heuristic, no LLM) ─────────────────────────
+            # ── 2. Close cookies (recipe selector first, heuristic fallback) ──
             try:
-                cookie_result = await close_cookies_in_session(
-                    session, log_dir, heuristic_only=True
-                )
-                logger.log("cookie_closer_invoked",
-                           success=cookie_result.success, llm_calls=0)
+                await _close_cookies_recipe(session, recipe, log_dir, logger)
             except Exception as exc:
                 logger.log("cookie_closer_error", error=str(exc))
 
