@@ -103,11 +103,19 @@ try {
 
     # ── 5. Correr el scraper ──────────────────────────────────────────────────
     Set-Location $Repo
+    # El scraper (o un debugger enganchado, p.ej. debugpy "Debugger attached.")
+    # puede escribir en stderr. Con ErrorActionPreference='Stop' + 2>&1, una sola
+    # línea de stderr se convierte en NativeCommandError y abortaría el run (y
+    # cerraría el túnel). El éxito/fallo se decide por el exit code, así que
+    # relajamos la política solo durante la ejecución del scraper.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $Python -m src.scraper.presentation.cli.main 2>&1 | ForEach-Object {
         Write-Host $_
         Add-Content -Path $Log -Value $_ -Encoding UTF8
     }
     $code = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
     Write-Log "Scraper finalizó con código $code"
     exit $code
 }
