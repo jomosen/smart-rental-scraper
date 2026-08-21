@@ -101,13 +101,29 @@ Para "copiar todo el calendario" no pases nada: `GET /api/v1/prices`.
 |-------|------|-------------|
 | `base_provider` | string \| null | `code` del proveedor cuyo precio fija la base del recomendado. `null` si la base es una agregación sin un proveedor único (p. ej. media). |
 | `base_total` | number \| null | Precio total de ese `base_provider` (antes de aplicar tu regla de pricing). |
-| `by_provider` | objeto | `{ "<code>": { total, model, external_code } }` — por **cada** proveedor con dato en esa celda: su precio `total`, el/los `model`(s) reales que lista para la categoría (`null` si no reporta modelo), y el `external_code` del grupo al que corresponde ese `total`. |
+| `by_provider` | objeto | `{ "<code>": { total, model, external_code, groups } }` — por **cada** proveedor con dato en esa celda: su precio `total`, el/los `model`(s) que lista para la categoría, el `external_code` del grupo al que corresponde ese `total`, y `groups`: el desglose sin colapsar (ver abajo). |
 
 > **Sobre `external_code`.** Es el código propio del proveedor para el grupo
 > ("Grupo A", "FR", "D2"). Un proveedor puede tener **varios grupos** dentro de
 > la misma categoría ACRISS: en ese caso `total` es el del más barato y
 > `external_code` nombra ese grupo, mientras que `model` sigue listando los
 > modelos de todos. Es `null` si el proveedor no expone códigos de grupo.
+
+**Desglose por grupo (`by_provider[<code>].groups`)** — la vista sin colapsar:
+una entrada por cada grupo del proveedor con precio en esa celda, **el más
+barato primero**. Úsala para leer el precio de un grupo concreto aunque no sea
+el más barato de su proveedor (imprescindible si tu sistema empareja contra
+grupos específicos):
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `group_key` | string | Identificador estable del grupo — el mismo que devuelve `/api/v1/provider-groups` (§12). |
+| `models` | string[] | Modelos que el proveedor lista para **ese** grupo. |
+| `total` / `per_day` | number | Precio de ese grupo (antes de tu regla de pricing). |
+| `is_base` | boolean | `true` en el grupo del que se derivó el precio recomendado. |
+
+> **Compatibilidad:** `total`, `model` y `external_code` no han cambiado;
+> `groups` es un campo añadido — un consumidor existente puede ignorarlo.
 
 Hay **una entrada por cada (categoría ACRISS × temporada)**. En el ejemplo real:
 437 entradas = 32 categorías a lo largo de 15 temporadas.
@@ -192,9 +208,21 @@ curl -H "Authorization: Bearer rr_live_xxxxxxxxxxxxxxxx" \
           "base_provider": "centauro",
           "base_total": 230.10,
           "by_provider": {
-            "centauro": { "total": 230.10, "model": "Fiat 500 / Kia Picanto", "external_code": "Grupo A" },
-            "solcar":   { "total": 255.85, "model": "Fiat Panda, Kia Picanto", "external_code": "Grupo B" },
-            "victoria": { "total": 238.00, "model": "Fiat Panda Hybrid", "external_code": "FR" }
+            "centauro": {
+              "total": 230.10, "model": "Fiat 500 / Kia Picanto", "external_code": "Grupo A",
+              "groups": [
+                { "group_key": "Grupo A",  "models": ["Fiat 500"],
+                  "total": 230.10, "per_day": 32.87, "is_base": true },
+                { "group_key": "Grupo A1", "models": ["Kia Picanto"],
+                  "total": 236.48, "per_day": 33.78, "is_base": false }
+              ]
+            },
+            "solcar":   { "total": 255.85, "model": "Fiat Panda, Kia Picanto", "external_code": "Grupo B",
+                          "groups": [ { "group_key": "Grupo B", "models": ["Fiat Panda", "Kia Picanto"],
+                                        "total": 255.85, "per_day": 36.55, "is_base": false } ] },
+            "victoria": { "total": 238.00, "model": "Fiat Panda Hybrid", "external_code": "FR",
+                          "groups": [ { "group_key": "FR", "models": ["Fiat Panda Hybrid"],
+                                        "total": 238.00, "per_day": 34.00, "is_base": false } ] }
           }
         }
       }

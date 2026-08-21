@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
 from src.saas.infrastructure.persistence.engine import app_engine
+from src.saas.infrastructure.persistence.read.catalog_read import split_models
 from src.saas.infrastructure.persistence.read.cross_tariff_read import (
     fetch_active_providers,
     fetch_catalog_examples,
@@ -91,6 +92,13 @@ def _serialize(
         # When a provider splits the category into several groups, `total` is the
         # cheapest and external_code names that group, while `model` still lists
         # every group's models — so the two can describe different tiers.
+        #
+        # `groups` is the un-collapsed view: one entry per group of the provider
+        # with a price at this duration, cheapest first, each with the identity
+        # to reference it (`group_key`, same rule as /api/v1/provider-groups)
+        # and its own price. This is what lets a consumer read the price of a
+        # specific group even when it is not the provider's cheapest.
+        group_lists = r.provider_groups or {}
         g["provenance"][dur] = {
             "base_provider": r.base_provider,
             "base_total": provider_totals.get(r.base_provider) if r.base_provider else None,
@@ -99,6 +107,16 @@ def _serialize(
                     "total": total,
                     "model": (models.get(code) or None),
                     "external_code": codes.get(code),
+                    "groups": [
+                        {
+                            "group_key": grp.group_key,
+                            "models": split_models(grp.models),
+                            "total": _money(grp.total),
+                            "per_day": _money(grp.per_day),
+                            "is_base": grp.is_base,
+                        }
+                        for grp in group_lists.get(code, [])
+                    ],
                 }
                 for code, total in provider_totals.items()
             },

@@ -24,6 +24,24 @@ from .cross_tariff_assembler import CategoryView, CrossTariffPayload, assemble_c
 
 
 @dataclass
+class ProviderGroupPrice:
+    """One provider group's price for a cell, before the per-provider collapse.
+
+    The collapsed fields reduce a provider's groups to one number (the minimum)
+    and one concatenated model string; this keeps each group's own price next
+    to its identity so a consumer can read the price of a specific group.
+    """
+    # external_code, or attributes_hash for providers exposing no codes — the
+    # same identity rule as the /api/v1/provider-groups catalog.
+    group_key: Optional[str]
+    models: str
+    total: Decimal
+    per_day: Optional[Decimal]
+    # True when this group's price is the one the recommendation was derived from.
+    is_base: bool
+
+
+@dataclass
 class ExportRow:
     zone_index: int
     zone_desde: Optional[date]
@@ -51,6 +69,10 @@ class ExportRow:
     # provider_key. Varies per duration (the cheapest group can differ), unlike
     # provider_models. None when the provider has no data for the cell.
     provider_external_codes: dict[str, Optional[str]] = field(default_factory=dict)
+    # Un-collapsed breakdown, keyed by provider_key: every group of the provider
+    # with a price at this duration, cheapest first. [] when it has none.
+    # CSV/PDF ignore this; the JSON API nests it under each by_provider entry.
+    provider_groups: dict[str, list[ProviderGroupPrice]] = field(default_factory=dict)
 
 
 @dataclass
@@ -105,6 +127,34 @@ def _min_price_group_for_provider(
                     best = pcell.total
                     best_code = prow.external_code
     return best_code
+
+
+def _group_prices_for_provider(
+    category: CategoryView,
+    provider_key: str,
+    duration: int,
+) -> list[ProviderGroupPrice]:
+    """Every group of provider_key with a price at this duration, cheapest first.
+
+    Groups whose cell is missing are skipped — a group with no observation
+    contributes no price to the cell.
+    """
+    out: list[ProviderGroupPrice] = []
+    for prow in category.providers:
+        if prow.provider_key != provider_key:
+            continue
+        cell = next((c for c in prow.cells if c.duration == duration), None)
+        if cell is None or cell.missing or cell.total is None:
+            continue
+        out.append(ProviderGroupPrice(
+            group_key=prow.external_code or prow.attributes_hash,
+            models=prow.models,
+            total=cell.total,
+            per_day=cell.per_day,
+            is_base=cell.is_base,
+        ))
+    out.sort(key=lambda g: (g.total, g.group_key or ""))
+    return out
 
 
 def _models_for_provider(category: CategoryView, provider_key: str) -> str:
@@ -229,6 +279,10 @@ class PricingExportService:
                         },
                         provider_external_codes={
                             pkey: _min_price_group_for_provider(cat, pkey, cell.duration)
+                            for pkey in providers
+                        },
+                        provider_groups={
+                            pkey: _group_prices_for_provider(cat, pkey, cell.duration)
                             for pkey in providers
                         },
                         base_provider=_base_provider_for(cat, cell.duration),
