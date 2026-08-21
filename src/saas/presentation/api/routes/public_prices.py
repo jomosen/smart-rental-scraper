@@ -77,6 +77,7 @@ def _serialize(
         g["prices_per_day"][dur] = _money(r.recomendado_per_day)
         g["prices_total"][dur] = _money(r.recomendado_total)
         models = r.provider_models or {}
+        codes = r.provider_external_codes or {}
         provider_totals = {
             code: _money(total)
             for code, total in (r.provider_prices or {}).items()
@@ -85,11 +86,20 @@ def _serialize(
         # Provenance per duration: which provider set the recommended price
         # (base_provider/base_total) and, per provider, its total + the actual
         # model it lists for this category.
+        #
+        # external_code is the provider's own code for the group behind `total`.
+        # When a provider splits the category into several groups, `total` is the
+        # cheapest and external_code names that group, while `model` still lists
+        # every group's models — so the two can describe different tiers.
         g["provenance"][dur] = {
             "base_provider": r.base_provider,
             "base_total": provider_totals.get(r.base_provider) if r.base_provider else None,
             "by_provider": {
-                code: {"total": total, "model": (models.get(code) or None)}
+                code: {
+                    "total": total,
+                    "model": (models.get(code) or None),
+                    "external_code": codes.get(code),
+                }
                 for code, total in provider_totals.items()
             },
         }

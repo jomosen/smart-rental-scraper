@@ -294,11 +294,6 @@ def _serialize(
                 "providers": [
                     {
                         "provider_key": pr.provider_key,
-                        # Identity of the provider's own group behind this row.
-                        # One row = one group, so a provider with two groups in
-                        # this ACRISS code appears twice, distinguishable here.
-                        "external_code": pr.external_code,
-                        "attributes_hash": pr.attributes_hash,
                         "models": pr.models,
                         "transmission": pr.transmission,
                         "inferred": pr.inferred,

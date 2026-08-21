@@ -46,12 +46,10 @@ def create_app() -> FastAPI:
     from .routes import auth as auth_routes
     from .routes import public_prices as public_prices_routes
     from .routes import classify as classify_routes
-    from .routes import catalog as catalog_routes
     app.include_router(cross_tariff_routes.router)
     app.include_router(auth_routes.router)
     app.include_router(public_prices_routes.router)
     app.include_router(classify_routes.router)
-    app.include_router(catalog_routes.router)
 
     # Explicit /api/* 404 handler.
     # Registered BEFORE the SPA catch-all so undefined /api/<anything>

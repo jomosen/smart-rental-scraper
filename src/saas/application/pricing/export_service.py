@@ -47,6 +47,10 @@ class ExportRow:
     # the assembler), or None when no single provider is the base (e.g. avg/med
     # aggregation). The PDF bolds this provider's price.
     base_provider: Optional[str] = None
+    # The provider's own code for the group behind provider_prices, keyed by
+    # provider_key. Varies per duration (the cheapest group can differ), unlike
+    # provider_models. None when the provider has no data for the cell.
+    provider_external_codes: dict[str, Optional[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,6 +78,33 @@ def _min_price_for_provider(
                 if best is None or pcell.total < best:
                     best = pcell.total
     return best
+
+
+def _min_price_group_for_provider(
+    category: CategoryView,
+    provider_key: str,
+    duration: int,
+) -> Optional[str]:
+    """external_code of the group whose price _min_price_for_provider reports.
+
+    A provider may split one ACRISS category into several groups (price tiers),
+    and the collapsed provider column shows the cheapest. This returns the code
+    of that same group, so the reported price and code describe the same tier.
+
+    None when the provider has no data for the cell, or when the winning group
+    exposes no code (identity then lives in attributes_hash, not surfaced here).
+    """
+    best: Optional[Decimal] = None
+    best_code: Optional[str] = None
+    for prow in category.providers:
+        if prow.provider_key != provider_key:
+            continue
+        for pcell in prow.cells:
+            if pcell.duration == duration and not pcell.missing and pcell.total is not None:
+                if best is None or pcell.total < best:
+                    best = pcell.total
+                    best_code = prow.external_code
+    return best_code
 
 
 def _models_for_provider(category: CategoryView, provider_key: str) -> str:
@@ -194,6 +225,10 @@ class PricingExportService:
                         },
                         provider_models={
                             pkey: _models_for_provider(cat, pkey)
+                            for pkey in providers
+                        },
+                        provider_external_codes={
+                            pkey: _min_price_group_for_provider(cat, pkey, cell.duration)
                             for pkey in providers
                         },
                         base_provider=_base_provider_for(cat, cell.duration),

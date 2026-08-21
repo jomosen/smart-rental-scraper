@@ -352,3 +352,43 @@ class TestResultMetadata:
         )
         assert result.providers == ["centauro", "solcar", "victoria"]
         assert result.durations == [3, 7, 14]
+
+
+class TestProviderExternalCodes:
+    """external_code accompanying each provider's collapsed price."""
+
+    def test_code_matches_the_group_of_the_reported_price(self):
+        """Two groups, one ACRISS code: the code must name the cheaper group."""
+        df = _df(
+            _row("centauro", "Grupo A", JAN1, JAN31, JAN15, 3, 90),
+            _row("centauro", "Grupo A1", JAN1, JAN31, JAN15, 3, 120),
+        )
+        row = _build(df).rows[0]
+
+        assert row.provider_prices["centauro"] == D("90")
+        assert row.provider_external_codes["centauro"] == "Grupo A"
+
+    def test_single_group_provider_reports_its_code(self):
+        df = _df(_row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90))
+        row = _build(df).rows[0]
+
+        assert row.provider_external_codes["centauro"] == "C1"
+
+    def test_provider_without_data_has_no_code(self):
+        df = _df(_row("centauro", "C1", JAN1, JAN31, JAN15, 3, 90))
+        row = _build(df, providers=["centauro", "solcar"]).rows[0]
+
+        assert row.provider_prices["solcar"] is None
+        assert row.provider_external_codes["solcar"] is None
+
+    def test_existing_fields_are_unchanged(self):
+        df = _df(
+            _row("centauro", "Grupo A", JAN1, JAN31, JAN15, 3, 90),
+            _row("centauro", "Grupo A1", JAN1, JAN31, JAN15, 3, 120),
+        )
+        row = _build(df).rows[0]
+
+        # The fixture gives both groups the same model string, so the collapsed
+        # model field stays a single name — and the price stays the minimum.
+        assert row.provider_models["centauro"] == "Ford Focus"
+        assert row.provider_prices["centauro"] == D("90")

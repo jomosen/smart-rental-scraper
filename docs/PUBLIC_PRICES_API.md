@@ -100,7 +100,13 @@ Para "copiar todo el calendario" no pases nada: `GET /api/v1/prices`.
 |-------|------|-------------|
 | `base_provider` | string \| null | `code` del proveedor cuyo precio fija la base del recomendado. `null` si la base es una agregación sin un proveedor único (p. ej. media). |
 | `base_total` | number \| null | Precio total de ese `base_provider` (antes de aplicar tu regla de pricing). |
-| `by_provider` | objeto | `{ "<code>": { total, model } }` — por **cada** proveedor con dato en esa celda: su precio `total` y el/los `model`(s) reales que lista para la categoría (`null` si no reporta modelo). |
+| `by_provider` | objeto | `{ "<code>": { total, model, external_code } }` — por **cada** proveedor con dato en esa celda: su precio `total`, el/los `model`(s) reales que lista para la categoría (`null` si no reporta modelo), y el `external_code` del grupo al que corresponde ese `total`. |
+
+> **Sobre `external_code`.** Es el código propio del proveedor para el grupo
+> ("Grupo A", "FR", "D2"). Un proveedor puede tener **varios grupos** dentro de
+> la misma categoría ACRISS: en ese caso `total` es el del más barato y
+> `external_code` nombra ese grupo, mientras que `model` sigue listando los
+> modelos de todos. Es `null` si el proveedor no expone códigos de grupo.
 
 Hay **una entrada por cada (categoría ACRISS × temporada)**. En el ejemplo real:
 437 entradas = 32 categorías a lo largo de 15 temporadas.
@@ -185,9 +191,9 @@ curl -H "Authorization: Bearer rr_live_xxxxxxxxxxxxxxxx" \
           "base_provider": "centauro",
           "base_total": 230.10,
           "by_provider": {
-            "centauro": { "total": 230.10, "model": "Fiat 500 / Kia Picanto" },
-            "solcar":   { "total": 255.85, "model": "Fiat Panda, Kia Picanto" },
-            "victoria": { "total": 238.00, "model": "Fiat Panda Hybrid" }
+            "centauro": { "total": 230.10, "model": "Fiat 500 / Kia Picanto", "external_code": "Grupo A" },
+            "solcar":   { "total": 255.85, "model": "Fiat Panda, Kia Picanto", "external_code": "Grupo B" },
+            "victoria": { "total": 238.00, "model": "Fiat Panda Hybrid", "external_code": "FR" }
           }
         }
       }
