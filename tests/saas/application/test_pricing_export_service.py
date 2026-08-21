@@ -36,7 +36,8 @@ DEFAULT_RULE = {
 
 COLS = [
     "acriss_code", "acriss_display_name", "provider_code", "external_code",
-    "example_models", "transmission", "acriss_transmission", "pending_review",
+    "attributes_hash", "example_models", "transmission", "acriss_transmission",
+    "pending_review",
     "start_date", "end_date", "representative_date",
     "duration_days", "price_per_day", "total_price",
 ]
@@ -60,6 +61,7 @@ def _row(
         "acriss_display_name": "Economy Manual",
         "provider_code": provider,
         "external_code": ext_code,
+        "attributes_hash": None,
         "example_models": "Ford Focus",
         "transmission": "M",
         "acriss_transmission": "M",

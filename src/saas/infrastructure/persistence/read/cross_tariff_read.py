@@ -25,7 +25,7 @@ DURATIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 14, 21, 28)
 
 CROSS_TARIFF_COLUMNS = [
     "acriss_code", "acriss_display_name",
-    "provider_code", "external_code", "example_models",
+    "provider_code", "external_code", "attributes_hash", "example_models",
     "transmission", "acriss_transmission", "pending_review",
     "start_date", "end_date", "representative_date",
     "duration_days", "price_per_day", "total_price",
@@ -93,6 +93,7 @@ def fetch_cross_tariff_dataframe(
             SELECT pvc.acriss_code,
                    ac.display_name  AS acriss_display_name,
                    pvc.external_code,
+                   pvc.attributes_hash,
                    pvc.example_models,
                    pvc.transmission,
                    pvc.acriss_transmission,
@@ -138,6 +139,7 @@ def fetch_cross_tariff_dataframe(
                z.acriss_display_name,
                z.provider_code,
                z.external_code,
+               z.attributes_hash,
                z.example_models,
                z.transmission,
                z.acriss_transmission,
@@ -175,6 +177,91 @@ def fetch_active_providers(conn: _Executor) -> list[tuple[str, str]]:
     """)
     rows = conn.execute(sql).fetchall()
     return [(r[0], r[1]) for r in rows]
+
+
+def fetch_provider_groups(
+    conn: _Executor,
+    provider_codes: tuple[str, ...] | None = None,
+    location_id: int | None = None,
+) -> list[dict]:
+    """Every active vehicle group of the active providers — the matching catalog.
+
+    One entry per *logical* group, not per `provider_vehicle_categories` row: a
+    PVC is identified by (provider, location, rate, external_code), so the same
+    group appears once per office/rate.  Grouping on the identity key collapses
+    those into a single selectable entry and reports the canonical markets it was
+    seen in via `location_ids`.
+
+    Unlike every other read here, groups with `acriss_code IS NULL` are NOT
+    filtered out: group-to-group matching does not go through ACRISS, so an
+    unclassified group is still a valid target.  Callers that need the ACRISS
+    layer can filter on the nullable `acriss_code` / `pending_review` fields.
+    """
+    params: dict = {}
+    provider_clause = ""
+    if provider_codes is not None:
+        if not provider_codes:
+            return []
+        provider_clause = "AND p.code = ANY(:provider_codes)"
+        params["provider_codes"] = list(provider_codes)
+
+    location_clause = ""
+    if location_id is not None:
+        location_clause = "AND pl.location_id = :location_id"
+        params["location_id"] = location_id
+
+    sql = text(f"""
+        SELECT p.code                                              AS provider_code,
+               p.display_name                                      AS provider_name,
+               COALESCE(pvc.external_code, pvc.attributes_hash)     AS group_key,
+               MAX(pvc.external_code)                              AS external_code,
+               MAX(pvc.attributes_hash)                            AS attributes_hash,
+               MAX(pvc.external_name)                              AS external_name,
+               MAX(pvc.example_models)                             AS example_models,
+               MAX(pvc.transmission)                               AS transmission,
+               MAX(pvc.acriss_code)                                AS acriss_code,
+               BOOL_OR(pvc.pending_review)                         AS pending_review,
+               ARRAY_REMOVE(ARRAY_AGG(DISTINCT pl.location_id), NULL) AS location_ids
+        FROM   provider_vehicle_categories pvc
+        JOIN   providers p ON p.id = pvc.provider_id
+        JOIN   provider_locations pl ON pl.id = pvc.provider_location_id
+        WHERE  pvc.active = TRUE
+          AND  p.status = 'active'
+          {provider_clause}
+          {location_clause}
+        GROUP  BY p.code, p.display_name,
+                  COALESCE(pvc.external_code, pvc.attributes_hash)
+        ORDER  BY p.code, group_key
+    """)
+    return [
+        {
+            "provider_code": r.provider_code,
+            "provider_name": r.provider_name,
+            # Stable identity of the group within its provider: the provider's own
+            # code when it exposes one, else the attributes hash.  This is what a
+            # tenant→group mapping should persist.
+            "group_key": r.group_key,
+            "external_code": r.external_code,
+            "attributes_hash": r.attributes_hash,
+            "external_name": r.external_name,
+            "models": _split_models(r.example_models),
+            "transmission": r.transmission,
+            "acriss_code": r.acriss_code,
+            "pending_review": r.pending_review,
+            "location_ids": list(r.location_ids or []),
+        }
+        for r in conn.execute(sql, params).fetchall()
+    ]
+
+
+def _split_models(example_models: str | None) -> list[str]:
+    """Split the free-text `example_models` into individual model names.
+
+    Providers list several models per group comma-separated ("FIAT PANDA, KIA
+    PICANTO").  The column is free text, so this is a presentation convenience,
+    not a parse with guarantees.
+    """
+    return [m.strip() for m in (example_models or "").split(",") if m.strip()]
 
 
 def fetch_catalog_examples(conn: _Executor) -> dict[str, list[str]]:

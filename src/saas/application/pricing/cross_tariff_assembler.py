@@ -201,10 +201,16 @@ def filter_zone(
         covering["_dist"] = (
             pd.to_datetime(covering["representative_date"]) - pd.Timestamp(master_rep_date)
         ).abs()
+        # Same group identity rule as _build_provider_rows: dedup on the
+        # provider's own code, falling back to the attributes hash, so groups
+        # from a provider that exposes no codes are not collapsed into one.
+        covering["_gk"] = covering["external_code"].where(
+            covering["external_code"].notna(), covering.get("attributes_hash")
+        )
         return (
             covering.sort_values("_dist")
-            .drop_duplicates(subset=["acriss_code", "external_code", "duration_days"])
-            .drop(columns=["_dist"])
+            .drop_duplicates(subset=["acriss_code", "_gk", "duration_days"])
+            .drop(columns=["_dist", "_gk"])
         )
 
     parts = [master_rows]
@@ -299,6 +305,14 @@ class ProviderRow:
     transmission: Optional[str]   # "manual" | "automatic" | None
     inferred: bool
     cells: list[ProviderCell]
+    # Identity of the provider's own vehicle group behind this row. A row is one
+    # group, not one provider — a provider with two groups in the same ACRISS
+    # code yields two rows. `external_code` is the provider's code when it
+    # exposes one; `attributes_hash` is the fallback identity when it does not.
+    # Consumers that persist a reference to this group should use whichever is
+    # non-null (external_code first).
+    external_code: Optional[str] = None
+    attributes_hash: Optional[str] = None
     # Provenance (category-level: same zone for every duration in the row).
     observation_date: Optional[date] = None   # representative_date the price comes from
     zone_from: Optional[date] = None           # the provider's homogeneous zone covering master_rep_date
@@ -425,11 +439,19 @@ def _build_provider_rows(
 
     # Stable group order: provider position, then model name.
     prov_order = {p: i for i, p in enumerate(providers)}
+    # Group identity: the provider's own code, or the attributes hash when it
+    # exposes none. Deduplicating on external_code alone would collapse every
+    # code-less group of a provider into one row (NaN == NaN in pandas).
+    code_df = code_df.assign(
+        _group_key=code_df["external_code"].where(
+            code_df["external_code"].notna(), code_df["attributes_hash"]
+        )
+    )
     groups = (
-        code_df[["provider_code", "external_code", "example_models",
-                 "transmission", "acriss_transmission",
+        code_df[["provider_code", "external_code", "attributes_hash", "_group_key",
+                 "example_models", "transmission", "acriss_transmission",
                  "start_date", "end_date", "representative_date"]]
-        .drop_duplicates(["provider_code", "external_code"])
+        .drop_duplicates(["provider_code", "_group_key"])
         .copy()
     )
     groups["_pi"] = groups["provider_code"].map(lambda p: prov_order.get(p, 999))
@@ -439,7 +461,7 @@ def _build_provider_rows(
     rows: list[ProviderRow] = []
     for _, grp in groups.iterrows():
         pcode = str(grp["provider_code"])
-        ext_code = grp["external_code"]
+        group_key = grp["_group_key"]
         model_name = (
             _strip_transmission(str(grp["example_models"]).strip())
             if pd.notna(grp["example_models"]) else ""
@@ -449,7 +471,7 @@ def _build_provider_rows(
         for dur in durations:
             row_data = code_df[
                 (code_df["provider_code"] == pcode)
-                & (code_df["external_code"] == ext_code)
+                & (code_df["_group_key"] == group_key)
                 & (code_df["duration_days"] == dur)
             ]
             if row_data.empty:
@@ -481,8 +503,13 @@ def _build_provider_rows(
         def _as_date(v):
             return pd.Timestamp(v).date() if pd.notna(v) else None
 
+        def _as_str(v):
+            return str(v) if pd.notna(v) else None
+
         rows.append(ProviderRow(
             provider_key=pcode,
+            external_code=_as_str(grp.get("external_code")),
+            attributes_hash=_as_str(grp.get("attributes_hash")),
             models=model_name,
             transmission=_derive_transmission(grp.get("transmission"), grp.get("acriss_transmission")),
             inferred=inferred_by_provider.get(pcode, False),
@@ -514,6 +541,10 @@ def assemble_cross_tariff(
     covering `today` (or `date.today()`), falling back to the first zone.
     """
     today = today or date.today()
+    # `attributes_hash` joined CROSS_TARIFF_COLUMNS after this function shipped;
+    # tolerate frames built without it rather than failing on a missing column.
+    if "attributes_hash" not in df.columns:
+        df = df.assign(attributes_hash=None)
     prov_meta = [
         ProviderMeta(key=p, name=p, color=prov_color(p, providers), is_master=(p == master))
         for p in providers
