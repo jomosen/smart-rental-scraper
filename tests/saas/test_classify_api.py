@@ -102,6 +102,47 @@ def test_unclassifiable_returns_null(super_db_session):
         _cleanup(super_db_session, ids, models=[_normalize(model)])
 
 
+def test_llm_transport_error_returns_502_and_is_not_cached(super_db_session):
+    """An errored classification surfaces the upstream message and never caches.
+
+    The regression this pins: a Gemini outage (e.g. 'User location is not
+    supported') used to be cached as a null classification, so the model kept
+    returning null from cache after the outage ended.
+    """
+    ids, raw = _seed_tenant_key(super_db_session)
+    error_result = ClassificationResult(
+        acriss_category=None, acriss_body_type=None, acriss_transmission=None,
+        acriss_fuel=None, confidence=0.0, pending_review=True,
+        rationale="Flash call failed: 400 FAILED_PRECONDITION",
+        error="400 FAILED_PRECONDITION. User location is not supported for the API use.",
+    )
+    fake = _FakeClassifier(error_result)
+    model = "Transport Error Vehicle Test"
+    try:
+        client = TestClient(_app_with(fake))
+        h = {"Authorization": f"Bearer {raw}"}
+
+        r1 = client.get("/api/v1/classify", params={"model": model}, headers=h)
+        assert r1.status_code == 502
+        detail = r1.json()["detail"]
+        assert detail["error"] == "classification_unavailable"
+        assert "User location is not supported" in detail["message"]
+
+        # Nothing persisted for this model — the outage left no residue.
+        row = super_db_session.execute(
+            text("SELECT 1 FROM model_classifications WHERE normalized_model = :m"),
+            {"m": _normalize(model)},
+        ).fetchone()
+        assert row is None
+
+        # A later request retries the classifier instead of serving a cached null.
+        r2 = client.get("/api/v1/classify", params={"model": model}, headers=h)
+        assert r2.status_code == 502
+        assert fake.calls == 2
+    finally:
+        _cleanup(super_db_session, ids, models=[_normalize(model)])
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _seed_tenant_key(s):

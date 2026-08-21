@@ -178,8 +178,13 @@ class GeminiClassificationService(ClassificationService):
             flash_results = self._call_flash_batch(provider_code, vehicles)
         except Exception as exc:
             logger.warning("Gemini Flash batch call failed: %s", exc)
+            # Transport-level failure: no classification happened. `error` lets
+            # consumers (the classify API) distinguish this from a genuine
+            # can't-classify outcome and avoid caching it.
             return [
-                self._pending_review_result(rationale=f"Flash call failed: {exc}")
+                self._pending_review_result(
+                    rationale=f"Flash call failed: {exc}", error=str(exc)
+                )
                 for _ in vehicles
             ]
 
@@ -374,7 +379,7 @@ class GeminiClassificationService(ClassificationService):
         return result
 
     def _pending_review_result(
-        self, rationale: str | None = None
+        self, rationale: str | None = None, error: str | None = None
     ) -> ClassificationResult:
         return ClassificationResult(
             acriss_category=None,
@@ -384,6 +389,7 @@ class GeminiClassificationService(ClassificationService):
             confidence=0.0,
             pending_review=True,
             rationale=rationale,
+            error=error,
         )
 
     def _build_batch_prompt(

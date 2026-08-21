@@ -55,3 +55,8 @@ class ClassificationResult:
     confidence: float
     pending_review: bool
     rationale: str | None = None
+    # Set ONLY when the classification never happened — the LLM call itself
+    # failed (network, quota, region block). Distinct from a real "could not
+    # classify" outcome: consumers must not cache or persist an errored result
+    # as a classification. None for every genuine outcome, however uncertain.
+    error: str | None = None

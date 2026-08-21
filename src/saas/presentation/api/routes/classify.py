@@ -108,6 +108,18 @@ def classify(
                     representative_currency=None,
                 )],
             )[0]
+            # Transport-level failure (network, quota, region block): the LLM
+            # was never reached, so there is nothing to cache — persisting it
+            # would poison the cache and keep serving null after the outage.
+            # Surface the upstream message so the operator can see WHY.
+            if result.error:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": "classification_unavailable",
+                        "message": result.error,
+                    },
+                )
             code = _compose_code(result)
             confidence = result.confidence
             pending = result.pending_review

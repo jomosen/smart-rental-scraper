@@ -194,6 +194,9 @@ class TestFlashFails:
         assert results[0].acriss_category is None
         assert results[0].pending_review is True
         assert results[0].confidence == 0.0
+        # Transport failure is marked as such — consumers use this to avoid
+        # caching an outage as a classification.
+        assert results[0].error == "network error"
         mock_pro.assert_not_called()
 
 
@@ -216,6 +219,9 @@ class TestProFallbackFails:
         assert results[0].acriss_body_type == "D"
         assert results[0].pending_review is True
         assert results[0].confidence == pytest.approx(0.70)
+        # Flash DID answer — this is a real (low-confidence) classification,
+        # not a transport failure: cacheable, so no error mark.
+        assert results[0].error is None
 
 
 # ---------------------------------------------------------------------------
