@@ -13,6 +13,7 @@ inyectarlos en su propio motor (booking, ERP, web, etc.).
 |----------|----------|---------|
 | `GET /api/v1/prices` | Precios finales de venta por **categoría ACRISS × temporada × duración**, con procedencia. | §1–§10 |
 | `GET /api/v1/classify` | Clasifica un **modelo en texto libre** ("Peugeot 208 Manual") a su código ACRISS. | §11 |
+| `GET /api/v1/provider-groups` | **Catálogo** de grupos de proveedor con su **cobertura** de precios hacia delante. | §12 |
 
 Ambos comparten **autenticación** (§2) y el concepto de **código ACRISS** (§4, §9).
 
@@ -340,3 +341,59 @@ Notas:
 - `400` si `model` falta o está vacío; `401` si falta/ es inválida la API key.
 - **Cacheado:** la primera consulta de un modelo llama al LLM; las siguientes salen
   de cache hasta que cambie el catálogo o el clasificador. Es de **solo lectura**.
+
+---
+
+## 12. Endpoint de catálogo: grupos de proveedor y cobertura
+
+`GET /api/v1/provider-groups` — misma autenticación por API key que el resto.
+
+Mientras `/prices` responde "cuánto cuestan", este endpoint responde "**qué
+grupos existen y cuántos días de precios tienen por delante**". Es la base para
+emparejar grupos propios contra grupos concretos de un competidor y para
+validar periódicamente esos emparejamientos.
+
+### Parámetros (query string, todos opcionales)
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `provider` | Restringir a un proveedor (`?provider=centauro`). |
+| `location_id` | Restringir a un mercado canónico. `404` si no existe. |
+| `duration` | Duración de referencia (días) para el calendario de cobertura. Default `7`. Debe ser uno de los brackets (`1,2,3,4,5,6,7,14,21,28`); si no, `422`. |
+
+### Respuesta
+
+Nivel raíz: `provider`, `location_id`, `duration` (eco de los parámetros),
+`generated_at`, `total` y `groups[]`. Cada elemento de `groups`:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `provider_code` / `provider_name` | string | Proveedor al que pertenece el grupo. |
+| `group_key` | string | **Identificador estable** del grupo dentro de su proveedor: el `external_code` del proveedor, o `attributes_hash` cuando no expone códigos. Es el valor a persistir si tu sistema referencia un grupo. |
+| `external_code` / `attributes_hash` | string \| null | Las dos identidades por separado (exactamente una respalda a `group_key`). |
+| `models` | string[] | Modelos que el proveedor lista para el grupo. |
+| `transmission` | string \| null | Transmisión observada. |
+| `acriss_code` | string \| null | Clasificación ACRISS. **Puede ser `null`** (grupo pendiente de clasificar): sigue siendo un target válido para emparejamiento directo. |
+| `pending_review` | bool | Clasificación dudosa. |
+| `location_ids` | int[] | Mercados canónicos donde se ha visto el grupo. Hay **una entrada por grupo lógico**, no por oficina. |
+| `coverage` | objeto | Cobertura de precios hacia delante (ver abajo). |
+
+### `coverage` — semántica
+
+Calculada contra **hoy** en cada petición: no la cachees más de un día.
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `from` | string | Hoy (inicio de la ventana). |
+| `through` | string \| null | Último día con precio real a la duración de referencia. `null` si ninguna temporada tiene precio. |
+| `covered_days` | int | Días con precio real desde hoy (inclusive), a la duración de referencia. |
+| `horizon_days` | int | Días desde hoy hasta `through` (inclusive). **`covered_days < horizon_days` significa huecos**: hay temporadas detectadas sin precio que las respalde. |
+| `by_duration` | objeto | `covered_days` recalculado por cada bracket. La cobertura **varía por duración** — un grupo puede tener 236 días a 7d y 208 a 28d, u otro 6 días a 1d y **cero** a 7d+. |
+| `ranges` | objeto[] | Las temporadas desde hoy: `{from, through, priced}`. Con esto se pinta un calendario de disponibilidad; `priced` refleja la duración de referencia. |
+| `last_observed_at` | string \| null | Cuándo se observó por última vez un precio de este grupo (frescura — independiente de la cobertura). |
+
+Notas:
+- Un grupo sin ninguna temporada vigente o futura devuelve la forma vacía
+  (`covered_days: 0`, `ranges: []`), no desaparece del catálogo.
+- Emparejar contra un grupo con `covered_days` bajo es posible pero arriesgado:
+  decide con el calendario delante.
