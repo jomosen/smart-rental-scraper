@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from anthropic import AsyncAnthropic
 
@@ -77,7 +78,13 @@ Sin markdown, sin bloques de código. La primera línea debe empezar con `{`.
 
 
 def _parse_json_response(raw: str) -> dict:
-    """Extract a JSON object from *raw*, tolerating markdown code fences."""
+    """Extract a JSON object from *raw*, tolerating markdown code fences.
+
+    Also tolerates un-escaped backslashes: this classifier's response embeds
+    regex extraction strategies ("regex:\\d+"), and the LLM regularly emits
+    the pattern with single backslashes — invalid JSON escapes. On that
+    failure, retry with lone backslashes doubled.
+    """
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -87,7 +94,13 @@ def _parse_json_response(raw: str) -> dict:
     end = text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError(f"No JSON object found in LLM response: {raw[:200]!r}")
-    return json.loads(text[start : end + 1])
+    payload = text[start : end + 1]
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        # Double any backslash not starting a valid JSON escape sequence.
+        fixed = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", payload)
+        return json.loads(fixed)
 
 
 async def classify_results_structure(

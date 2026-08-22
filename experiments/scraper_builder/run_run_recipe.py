@@ -111,11 +111,12 @@ def print_recipe_report(
     if result.failed_phase:
         print(f"  failed_phase:    {result.failed_phase}")
 
-    print(f"  vehicles:        {len(result.vehicles)}")
+    extracted = result.vehicles or list(result.dom_vehicles or [])
+    print(f"  vehicles:        {len(extracted)}")
     print(f"  scroll:          rounds={result.scroll_rounds}  "
           f"final_count={result.scroll_final_count}")
 
-    sample = result.vehicles[:3]
+    sample = extracted[:3]
     if sample:
         print(f"  sample (first 3):")
         for v in sample:

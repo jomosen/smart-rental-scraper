@@ -40,6 +40,10 @@ _SEMANTIC_CLASS_KEYWORDS = frozenset({
     "form-input", "combobox", "dropdown", "modal", "dialog",
     "autocomplete", "datepicker", "timepicker", "select", "input-wrapper",
     "search", "picker", "calendar",
+    # Calendar structure and navigation (daterangepicker-style widgets): these
+    # classes are exactly what a date filler needs as selectors — without them
+    # the LLM sees anonymous <th>/<td> cells and cannot name the nav buttons.
+    "next", "prev", "month", "day", "today", "available", "off",
 })
 
 
@@ -71,7 +75,11 @@ def clean_html_for_llm(html: str, preserve_svg_aria: bool = False) -> str:
             svg.decompose()
 
     # ── Pass 1: remove noise tags ────────────────────────────────────────────
+    # find_all snapshots the list: decomposing a parent destroys the children
+    # already in it (attrs becomes None), so skip anything already decomposed.
     for tag in soup.find_all(_REMOVE_TAGS):
+        if tag.decomposed:
+            continue
         tag.decompose()
 
     for node in soup.find_all(string=lambda t: isinstance(t, Comment)):
@@ -79,9 +87,13 @@ def clean_html_for_llm(html: str, preserve_svg_aria: bool = False) -> str:
 
     # ── Pass 2: remove invisible elements ────────────────────────────────────
     for tag in soup.find_all(True, attrs={"hidden": True}):
+        if tag.decomposed:
+            continue
         tag.decompose()
     for tag in soup.find_all(True, style=True):
-        if "display:none" in tag.get("style", "").replace(" ", "").lower():
+        if tag.decomposed:
+            continue
+        if "display:none" in (tag.get("style") or "").replace(" ", "").lower():
             tag.decompose()
 
     # ── Pass 3: strip attributes aggressively ────────────────────────────────
@@ -112,11 +124,21 @@ def clean_html_for_llm(html: str, preserve_svg_aria: bool = False) -> str:
 
     # ── Pass 4: remove elements empty after stripping ────────────────────────
     # Repeat until stable (nested empties resolved from innermost outward).
+    # Interactive and table-structural tags are exempt even when empty:
+    # icon-only nav buttons (a calendar's next-month <th><span></span></th>)
+    # and blank calendar day cells are semantic — removing them leaves the LLM
+    # a calendar with no way to navigate it.
+    _KEEP_EMPTY_TAGS = ("button", "a", "th", "td", "input", "select",
+                        "option", "textarea")
     changed = True
     while changed:
         changed = False
         for tag in soup.find_all(True):
             if tag.name in ("html", "head", "body", "form"):
+                continue
+            if tag.name in _KEEP_EMPTY_TAGS:
+                continue
+            if tag.decomposed:
                 continue
             has_text = bool(tag.get_text(strip=True))
             has_attrs = bool(tag.attrs)

@@ -50,6 +50,7 @@ SCRAPER_REGISTRY: dict[str, type[IBookingScraper]] = {
     "victoria_form": VictoriaScraper,
     "solcar": SolcarScraper,
     "centauro": RecipeScraper,
+    "recordgo": RecipeScraper,
 }
 
 # (provider, pickup_location, dropoff_location, orchestrator)

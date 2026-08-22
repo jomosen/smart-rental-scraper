@@ -337,10 +337,36 @@ async def _extract_transmission_by_aria(
 
 # ── Field extraction helpers ──────────────────────────────────────────────────
 
+async def _find_in_card(card, selector: str):
+    """Locate *selector* inside the card, tolerating a self-referencing prefix.
+
+    Field selectors are written relative to whatever element the classifier
+    called "the card" ("section span b"). When the runtime card element IS
+    that first compound (a <section> marked by the heuristic), a descendant
+    query for "section span b" inside it matches nothing. In that case retry
+    with the leading compound stripped ("span b") — same target, one level up.
+    """
+    loc = card.locator(selector).first
+    if await loc.count() > 0:
+        return loc
+    parts = selector.strip().split(None, 1)
+    if len(parts) == 2:
+        head, rest = parts
+        try:
+            if await card.evaluate(
+                "(el, sel) => { try { return el.matches(sel); } catch (e) { return false; } }",
+                arg=head,
+            ):
+                return card.locator(rest).first
+        except Exception:
+            pass
+    return loc
+
+
 async def _apply_extraction(card, field_sel: FieldSelector) -> str | None:
     """Apply a FieldSelector to a Playwright card locator; return raw string or None."""
     try:
-        el = card.locator(field_sel.selector).first
+        el = await _find_in_card(card, field_sel.selector)
         ext = field_sel.extraction
 
         if ext == "text":

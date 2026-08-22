@@ -195,6 +195,7 @@ class CustomDropdownFiller(LocationFiller):
         widget: WidgetInfo,
         target_value: str,
         logger: SessionLogger,
+        field: IdentifiedField | None = None,
     ) -> tuple[bool, str | None, str | None]:
         """
         Read options (robustly), match, and click.
@@ -239,6 +240,24 @@ class CustomDropdownFiller(LocationFiller):
                         clicked = await session.click_option_by_text(
                             container, match.click_base_selector, match.text
                         )
+                    if not clicked and field is not None:
+                        # Toggle widgets: the classification pass opens the
+                        # dropdown and the fill pass's click closes it again,
+                        # leaving options in the DOM but invisible. Re-click
+                        # the field to reopen, then retry the option.
+                        logger.log("dropdown_retoggle_retry",
+                                   selector=field.selector)
+                        await session.click_selector(
+                            field.selector, field.selector_type
+                        )
+                        await session.wait_ms(500)
+                        clicked = await session.click_nth(
+                            match.click_base_selector, match.click_index
+                        )
+                        if not clicked:
+                            clicked = await session.click_option_by_text(
+                                container, match.click_base_selector, match.text
+                            )
                     if not clicked:
                         return (
                             False, None,
@@ -329,7 +348,7 @@ class CustomDropdownFiller(LocationFiller):
 
         # Step 2: find and click option (with robust reading + scroll support)
         success, matched_text, error = await self._find_and_click_option(
-            session, widget, target_value, logger
+            session, widget, target_value, logger, field=field
         )
 
         if not success:

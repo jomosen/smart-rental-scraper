@@ -96,9 +96,13 @@ class AutocompleteFiller(LocationFiller):
         logger.log("filler_started", strategy=self.strategy_name,
                    target=target_value, match_mode=self.match_mode)
 
-        # Step 1: open dropdown reliably (polling-based, not a blind fixed wait)
+        # Step 1: open dropdown reliably (polling-based, not a blind fixed wait).
+        # probe_text lets the opener type a prefix for type-ahead widgets that
+        # only render suggestions after input; step 2 clears and retypes the
+        # full value, so the probe leaves no residue.
         open_result = await open_widget_reliably(
-            session, field, logger, label="autocomplete"
+            session, field, logger, label="autocomplete",
+            probe_text=target_value,
         )
         if not open_result.opened:
             return _fail(f"Could not open dropdown: {open_result.error}")
@@ -144,19 +148,34 @@ class AutocompleteFiller(LocationFiller):
             matched_text, idx = exact_result
             score = 100
         else:
-            best = process.extractOne(
-                target_value,
-                options_texts,
-                scorer=fuzz.WRatio,
-                score_cutoff=_FUZZY_THRESHOLD,
-            )
-            if not best:
-                sample = options_texts[:5]
-                return _fail(
-                    f"No fuzzy match (threshold={_FUZZY_THRESHOLD}) for {target_value!r} "
-                    f"in {len(options_texts)} options. Sample: {sample}"
+            # Containment first: autocomplete options are often rich cards
+            # (name + address + office details), where the target is a literal
+            # substring but WRatio collapses under the length imbalance (its
+            # partial score is capped at 60 for very long candidates — below
+            # threshold even on a perfect containment). Among containing
+            # options, prefer the shortest text: the closest to the bare name.
+            norm_target = _normalize_for_exact(target_value)
+            containing = [
+                (idx, opt) for idx, opt in enumerate(options_texts)
+                if norm_target in _normalize_for_exact(opt)
+            ]
+            if containing:
+                idx, matched_text = min(containing, key=lambda p: len(p[1]))
+                score = 100
+            else:
+                best = process.extractOne(
+                    target_value,
+                    options_texts,
+                    scorer=fuzz.WRatio,
+                    score_cutoff=_FUZZY_THRESHOLD,
                 )
-            matched_text, score, idx = best
+                if not best:
+                    sample = options_texts[:5]
+                    return _fail(
+                        f"No fuzzy match (threshold={_FUZZY_THRESHOLD}) for {target_value!r} "
+                        f"in {len(options_texts)} options. Sample: {sample}"
+                    )
+                matched_text, score, idx = best
 
         logger.log("filler_match", matched=matched_text, score=round(score, 1),
                    idx=idx, candidate_count=len(options_texts),

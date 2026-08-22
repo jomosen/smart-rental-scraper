@@ -53,7 +53,12 @@ def check_recipe_health(result) -> RecipeHealthCheck:
             rationale=f"Recipe broken at phase {result.failed_phase!r}",
         )
 
-    vehicle_count = len(result.vehicles)
+    # Recipe executions carry their extraction in dom_vehicles (the LLM list
+    # stays empty by design — zero LLM calls); discovery results use vehicles.
+    # Health must look at whichever list the run actually produced, otherwise
+    # a healthy recipe run reads as broken.
+    extracted = result.vehicles or list(getattr(result, "dom_vehicles", []) or [])
+    vehicle_count = len(extracted)
 
     if vehicle_count == 0:
         if getattr(result, "has_empty_page", False):
@@ -81,11 +86,11 @@ def check_recipe_health(result) -> RecipeHealthCheck:
             )
 
     n = vehicle_count
-    n_model = sum(1 for v in result.vehicles if v.model)
-    n_group = sum(1 for v in result.vehicles if v.group_code)
-    n_price = sum(1 for v in result.vehicles if v.price_final is not None)
-    n_trans = sum(1 for v in result.vehicles if v.transmission)
-    n_seats = sum(1 for v in result.vehicles if v.seats is not None)
+    n_model = sum(1 for v in extracted if v.model)
+    n_group = sum(1 for v in extracted if v.group_code)
+    n_price = sum(1 for v in extracted if v.price_final is not None)
+    n_trans = sum(1 for v in extracted if v.transmission)
+    n_seats = sum(1 for v in extracted if v.seats is not None)
 
     pct_with_model = n_model / n
     pct_group = n_group / n
@@ -116,7 +121,7 @@ def check_recipe_health(result) -> RecipeHealthCheck:
         warnings.append(f"seats present in only {pct_seats:.0%} of vehicles")
 
     prices_in_range = True
-    prices = [v.price_final for v in result.vehicles if v.price_final is not None]
+    prices = [v.price_final for v in extracted if v.price_final is not None]
     if prices:
         out_of_range = [p for p in prices if p < PRICE_MIN or p > PRICE_MAX]
         frac_oor = len(out_of_range) / len(prices)

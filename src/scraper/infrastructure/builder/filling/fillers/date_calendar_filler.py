@@ -240,6 +240,15 @@ class DateCalendarFiller(DateFiller):
             day_locator = session.page.locator(day_sel).filter(has_text=day_pattern)
 
         count = await day_locator.count()
+        if count == 0 and container_sel:
+            # The classifier sometimes returns day_cell_selector already
+            # prefixed with the container ("div.picker … td.day"); nesting that
+            # inside the container again matches nothing. Retry unscoped.
+            day_locator = session.page.locator(day_sel).filter(has_text=day_pattern)
+            count = await day_locator.count()
+            if count:
+                logger.log("date_calendar_day_unscoped_retry",
+                           day=day_str, count=count)
         if count == 0:
             return _fail(
                 f"No day cell found for day={day_str!r} using "

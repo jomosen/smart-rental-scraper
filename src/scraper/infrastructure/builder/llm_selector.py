@@ -13,6 +13,26 @@ _MODEL = "claude-sonnet-4-6"
 _COST_INPUT_PER_TOKEN = 3.00 * 0.90 / 1_000_000
 _COST_OUTPUT_PER_TOKEN = 15.00 * 0.90 / 1_000_000
 
+def _parse_json_response(raw: str) -> dict:
+    """Extract a JSON object from *raw*, tolerating markdown code fences.
+
+    Same idiom as the other builder LLM callers (widget_classifier,
+    field_identifier, …): the model occasionally wraps the object in ```json
+    fences despite the instruction, and a raw json.loads aborts the whole
+    cookie phase on what is just a formatting quirk.
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"No JSON object found in LLM response: {raw[:200]!r}")
+    return json.loads(text[start : end + 1])
+
+
 _SYSTEM = """\
 You are an expert web scraper assistant. Your job is to identify the CSS selector
 or XPath expression that, when clicked, will close or accept a cookie consent banner
@@ -57,7 +77,7 @@ async def ask_llm(candidates: list[dict]) -> tuple[LLMDecision, float]:
     )
 
     raw = response.content[0].text.strip()
-    data = json.loads(raw)
+    data = _parse_json_response(raw)
 
     tokens_in = response.usage.input_tokens
     tokens_out = response.usage.output_tokens

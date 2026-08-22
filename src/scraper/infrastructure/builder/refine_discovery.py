@@ -70,7 +70,17 @@ async def _ask_llm(
         model=_MODEL, max_tokens=256, system=_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
-    data = json.loads(resp.content[0].text.strip())
+    # Tolerate markdown fences around the object — same idiom as the other
+    # builder LLM callers (see widget_classifier._parse_json_response).
+    text = resp.content[0].text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        return None, None  # best-effort probe: no JSON → no refine link
+    data = json.loads(text[start : end + 1])
     return data.get("selector"), data.get("selector_type")
 
 

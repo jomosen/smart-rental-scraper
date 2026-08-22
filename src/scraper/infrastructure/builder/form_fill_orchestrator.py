@@ -273,8 +273,11 @@ async def fill_form_in_session(
         state_before_loc = await capture_form_state(session, form_selector)
         save_state_snapshot(log_dir, "loc_state_before.json", state_before_loc)
 
+        # probe_text: type-ahead autocompletes only render suggestions after
+        # real input, so the opener may need to type a prefix of the target.
         open_loc = await open_widget_reliably(
-            session, loc_field, filler_logger, label="location"
+            session, loc_field, filler_logger, label="location",
+            probe_text=loc_target,
         )
         _snap(log_dir, "loc_after_open.html", open_loc.html_after)
 

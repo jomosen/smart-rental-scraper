@@ -70,9 +70,13 @@ class ProviderProvisioningService:
         )
 
         location_name = targets["location"]
+        # location_code is VARCHAR(16) in the catalog; slugs of multi-word
+        # location names ("Alicante Aeropuerto") exceed it. Truncation is safe:
+        # the code is an internal identifier, and get_or_create dedupes on the
+        # same truncated value on every rerun.
         location = self._location_repo.get_or_create(
             provider_id=provider.id,
-            location_code=_slugify(location_name),
+            location_code=_slugify(location_name)[:16],
             location_name=location_name,
         )
 
