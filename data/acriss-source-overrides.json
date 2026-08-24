@@ -1,0 +1,3 @@
+{
+  "_comment": "Per-provider validated ACRISS mappings (spec §20). Keys: normalized provider code -> entry id (acriss-models.json) -> {category?, type?, confidence}. Empty on purpose: overrides are added only when detected via scraping or validated manually — never invented."
+}

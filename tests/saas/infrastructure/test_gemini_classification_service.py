@@ -328,11 +328,14 @@ class TestAcrissLoader:
         yaml_path = Path(__file__).resolve().parents[3] / "acriss_codes.yaml"
         specs = load_acriss_specs(yaml_path)
 
-        assert len(specs) == 69
         codes = {s.code for s in specs}
+        assert len(specs) == len(codes)  # no duplicate codes in the yaml
+        assert len(codes) >= 90
         assert "EDMR" in codes
         assert "EFMR" in codes
-        assert "CGAR" not in codes  # body G dropped in the taxonomy redesign (all SUVs use F)
+        # Body G materialized since engine v2 (DATA_MODEL.md Decision 12),
+        # plus PHEV (I) and diesel (D) fuel codes.
+        assert {"CGAR", "IGAR", "IFAI", "CDMD"} <= codes
         # Compact van family: passenger ludospace (V) + commercial/cargo (K).
         assert {"CVMR", "CVAR", "CKMR", "CKAR"} <= codes
         eco = next(s for s in specs if s.code == "EDMR")

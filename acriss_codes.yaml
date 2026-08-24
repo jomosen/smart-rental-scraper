@@ -23,9 +23,10 @@
 # The default for fuel is R (Combustion Engine + Air). Providers explicitly
 # mark hybrid (H) or electric (E/C) when applicable.
 #
-# La carrocería G (Crossover) no se materializa en nuestra rejilla: todos los
-# SUV usan F (SUV/4WD) para máxima cobertura de agrupación entre proveedores
-# (validado con Drivalia: C3 Aircross=CFMR, Qashqai=IFMR, 3008=IFAR).
+# La carrocería G (Crossover) SÍ se materializa desde 2026-08-23 (engine v2,
+# ver docs/DATA_MODEL.md Decisión 12). Supersede la regla F-only anterior
+# (validada con Drivalia): el matching principal ya es grupo-a-grupo en el
+# cliente, así que F/G pueden convivir como identidades distintas.
 # Premium = tier Elite en 1ª letra; la marca decide (lista cerrada en
 # acriss_reference.md). Escala: M·N·E·H·C·D·I·J·S·R·F·G·P·U·L·W·X.
 #
@@ -1365,3 +1366,360 @@ acriss_codes:
       - "Yamaha NMAX 125"
       - "Vespa Primavera 125"
       - "Yamaha Ray ZR 125"
+
+  # ──────────────────────────────────────────────────────────────
+  # CROSSOVERS (body G) — materialized on demand by engine v2
+  # (docs/DATA_MODEL.md Decision 12). A crossover is a car-platform,
+  # road-oriented urban SUV-styled vehicle; traditional/utility SUVs stay F.
+  # ──────────────────────────────────────────────────────────────
+
+  - code: MGMR
+    display_name: Mini Crossover Manual
+    description: >
+      A-segment city car with crossover styling, manual, combustion.
+    criteria:
+      - "City car footprint (≤ ~3,8 m) with raised crossover body"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Toyota Aygo X"
+
+  - code: MGAR
+    display_name: Mini Crossover Automatic
+    description: >
+      A-segment city car with crossover styling, automatic, combustion.
+    criteria:
+      - "City car footprint with raised crossover body"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Toyota Aygo X Auto"
+
+  - code: CGMR
+    display_name: Compact Crossover Manual
+    description: >
+      B/C-segment crossover (car platform, road-oriented), manual, combustion.
+    criteria:
+      - "B-SUV / small crossover on passenger-car platform"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "VW T-Cross"
+      - "SEAT Arona"
+      - "Renault Captur"
+      - "Škoda Kamiq"
+
+  - code: CGAR
+    display_name: Compact Crossover Automatic
+    description: >
+      B/C-segment crossover (car platform, road-oriented), automatic, combustion.
+    criteria:
+      - "B-SUV / small crossover on passenger-car platform"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "VW T-Cross DSG"
+      - "Peugeot 2008 Auto"
+      - "Opel Mokka Auto"
+
+  - code: CGAH
+    display_name: Compact Crossover Hybrid
+    description: >
+      B/C-segment crossover, automatic, hybrid (HEV/MHEV).
+    criteria:
+      - "B-SUV / small crossover on passenger-car platform"
+      - "Automatic transmission"
+      - "Hybrid powertrain"
+    examples:
+      - "Toyota Yaris Cross"
+      - "Ford Puma MHEV"
+
+  - code: CGAE
+    display_name: Compact Crossover Electric
+    description: >
+      B/C-segment crossover, battery electric.
+    criteria:
+      - "Small crossover on passenger-car platform"
+      - "Battery electric"
+    examples:
+      - "Kia EV3"
+      - "Volvo EX30"
+
+  - code: IGMR
+    display_name: Intermediate Crossover Manual
+    description: >
+      C-segment crossover (car platform, road-oriented), manual, combustion.
+    criteria:
+      - "C-SUV / mid crossover on passenger-car platform"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Nissan Qashqai"
+      - "Škoda Karoq"
+
+  - code: IGAR
+    display_name: Intermediate Crossover Automatic
+    description: >
+      C-segment crossover (car platform, road-oriented), automatic, combustion.
+    criteria:
+      - "C-SUV / mid crossover on passenger-car platform"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Peugeot 3008"
+      - "Renault Austral"
+
+  - code: IGAH
+    display_name: Intermediate Crossover Hybrid
+    description: >
+      C-segment crossover, automatic, hybrid.
+    criteria:
+      - "C-SUV / mid crossover on passenger-car platform"
+      - "Automatic transmission"
+      - "Hybrid powertrain"
+    examples:
+      - "Nissan Qashqai e-Power"
+      - "Renault Austral Hybrid"
+
+  - code: IGAE
+    display_name: Intermediate Crossover Electric
+    description: >
+      C/D-segment crossover, battery electric.
+    criteria:
+      - "Mid-size crossover on dedicated EV or car platform"
+      - "Battery electric"
+    examples:
+      - "VW ID.4"
+      - "Kia EV6"
+      - "Hyundai Ioniq 5"
+
+  - code: JGAR
+    display_name: Intermediate Elite Crossover Automatic
+    description: >
+      Sporty/elite mid crossover, automatic, combustion.
+    criteria:
+      - "Performance-oriented or elite-trim mid crossover"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Cupra Formentor"
+
+  - code: PGAR
+    display_name: Premium Crossover Automatic
+    description: >
+      Premium-brand compact/mid crossover, automatic, combustion.
+    criteria:
+      - "Premium-brand crossover (car platform)"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "BMW X1"
+      - "Audi Q3"
+      - "Mercedes GLA"
+
+  - code: PGAH
+    display_name: Premium Crossover Hybrid
+    description: >
+      Premium-brand crossover, automatic, hybrid.
+    criteria:
+      - "Premium-brand crossover (car platform)"
+      - "Automatic transmission"
+      - "Hybrid powertrain"
+    examples:
+      - "Volvo XC40 Mild Hybrid"
+      - "Lexus LBX"
+
+  - code: PGAE
+    display_name: Premium Crossover Electric
+    description: >
+      Premium-brand crossover, battery electric.
+    criteria:
+      - "Premium-brand crossover"
+      - "Battery electric"
+    examples:
+      - "Tesla Model Y"
+      - "Ford Mustang Mach-E"
+      - "Mercedes EQA"
+
+  # ──────────────────────────────────────────────────────────────
+  # PLUG-IN HYBRID (fuel I) — materialized on demand by engine v2
+  # ──────────────────────────────────────────────────────────────
+
+  - code: CDAI
+    display_name: Compact Plug-in Hybrid
+    description: >
+      C-segment hatchback/sedan, automatic, plug-in hybrid.
+    criteria:
+      - "Compact 4/5-door"
+      - "Automatic transmission"
+      - "Plug-in hybrid (PHEV)"
+    examples:
+      - "VW Golf GTE"
+      - "SEAT Leon e-Hybrid"
+
+  - code: CFAI
+    display_name: Compact SUV Plug-in Hybrid
+    description: >
+      Compact SUV, automatic, plug-in hybrid.
+    criteria:
+      - "Compact SUV"
+      - "Automatic transmission"
+      - "Plug-in hybrid (PHEV)"
+    examples:
+      - "Jeep Renegade 4xe"
+
+  - code: IFAI
+    display_name: Intermediate SUV Plug-in Hybrid
+    description: >
+      Mid-size SUV, automatic, plug-in hybrid.
+    criteria:
+      - "Mid-size SUV"
+      - "Automatic transmission"
+      - "Plug-in hybrid (PHEV)"
+    examples:
+      - "Ford Kuga PHEV"
+      - "Hyundai Tucson PHEV"
+      - "Kia Sportage PHEV"
+
+  # ──────────────────────────────────────────────────────────────
+  # DIESEL (fuel D) — materialized on demand by engine v2
+  # ──────────────────────────────────────────────────────────────
+
+  - code: CDMD
+    display_name: Compact Diesel Manual
+    description: >
+      C-segment hatchback/sedan, manual, diesel.
+    criteria:
+      - "Compact 4/5-door"
+      - "Manual transmission"
+      - "Diesel engine (explicitly identified)"
+    examples:
+      - "VW Golf TDI"
+      - "Peugeot 308 BlueHDi"
+
+  - code: CDAD
+    display_name: Compact Diesel Automatic
+    description: >
+      C-segment hatchback/sedan, automatic, diesel.
+    criteria:
+      - "Compact 4/5-door"
+      - "Automatic transmission"
+      - "Diesel engine (explicitly identified)"
+    examples:
+      - "VW Golf TDI DSG"
+
+  # ──────────────────────────────────────────────────────────────
+  # HYBRID hatchbacks + 6-seat vans — demanded by engine v2 shadow run
+  # ──────────────────────────────────────────────────────────────
+
+  - code: EDAH
+    display_name: Económico Híbrido Automático
+    description: >
+      B-segment supermini, automatic, hybrid.
+    criteria:
+      - "Supermini / B-segment"
+      - "Automatic transmission (e-CVT)"
+      - "Hybrid powertrain"
+    examples:
+      - "Toyota Yaris Hybrid"
+
+  - code: CDAH
+    display_name: Compacto Híbrido Automático
+    description: >
+      C-segment hatchback/sedan, automatic, hybrid.
+    criteria:
+      - "Compact 4/5-door"
+      - "Automatic transmission (e-CVT)"
+      - "Hybrid powertrain"
+    examples:
+      - "Toyota Corolla Hybrid"
+
+  - code: IVMR
+    display_name: Monovolumen 6 plazas Manual
+    description: >
+      Passenger van / people carrier, 6+ seats, manual, combustion.
+    criteria:
+      - "Passenger van family (people carrier)"
+      - "6+ seats"
+      - "Manual transmission"
+    examples:
+      - "VW Touran 6-7 plazas"
+      - "Renault Grand Scénic"
+
+  - code: IVAR
+    display_name: Monovolumen 6 plazas Automático
+    description: >
+      Passenger van / people carrier, 6+ seats, automatic, combustion.
+    criteria:
+      - "Passenger van family (people carrier)"
+      - "6+ seats"
+      - "Automatic transmission"
+    examples:
+      - "VW Touran DSG 6-7 plazas"
+
+  # ──────────────────────────────────────────────────────────────
+  # Second engine-v2 shadow tranche (2026-08-24): premium SUV + real
+  # manual mild-hybrids observed in provider fleets.
+  # ──────────────────────────────────────────────────────────────
+
+  - code: PFAR
+    display_name: SUV Premium Automático
+    description: >
+      Premium-brand mid-size SUV, automatic, combustion. Per the 2026-08-24
+      dictionary audit (GLC/X3/Q5/F-Pace at P+F).
+    criteria:
+      - "Premium-brand mid-size SUV"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "Mercedes GLC"
+      - "BMW X3"
+      - "Audi Q5"
+      - "Jaguar F-Pace"
+
+  - code: HGAH
+    display_name: SUV Urbano Premium Crossover Híbrido
+    description: >
+      Premium-brand B-segment crossover, automatic, hybrid.
+    criteria:
+      - "Premium-brand B-SUV / small crossover"
+      - "Automatic transmission (e-CVT)"
+      - "Hybrid powertrain"
+    examples:
+      - "Lexus LBX"
+
+  - code: MDMH
+    display_name: Mini Híbrido Manual
+    description: >
+      A-segment city car, manual gearbox, mild hybrid (MHEV keeps the manual).
+    criteria:
+      - "City car / A-segment"
+      - "Manual transmission"
+      - "Mild-hybrid powertrain"
+    examples:
+      - "Fiat 500 Hybrid"
+      - "Fiat Panda Hybrid"
+
+  - code: CGMH
+    display_name: Compacto Crossover Híbrido Manual
+    description: >
+      B/C-segment crossover, manual gearbox, mild hybrid.
+    criteria:
+      - "B/C-segment crossover"
+      - "Manual transmission"
+      - "Mild-hybrid powertrain"
+    examples:
+      - "Ford Puma MHEV (manual)"
+      - "Kia XCeed MHEV (manual)"
+
+  - code: IFMH
+    display_name: SUV Intermedio Híbrido Manual
+    description: >
+      Mid-size SUV, manual gearbox, mild hybrid.
+    criteria:
+      - "Mid-size SUV"
+      - "Manual transmission"
+      - "Mild-hybrid powertrain"
+    examples:
+      - "Hyundai Tucson MHEV (manual)"
+      - "Kia Sportage MHEV (manual)"

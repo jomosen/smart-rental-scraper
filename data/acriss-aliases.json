@@ -1,0 +1,17 @@
+{
+  "_comment": "Extra normalization aliases: normalized alias text -> entry id in acriss-models.json. Per-entry 'aliases' arrays cover most cases; this file is for cross-cutting or historic spellings.",
+  "golf estate": "volkswagen_golf_variant",
+  "golf variant": "volkswagen_golf_variant",
+  "golf sw": "volkswagen_golf_variant",
+  "vw golf sw": "volkswagen_golf_variant",
+  "tcross": "volkswagen_t_cross",
+  "qashqai suv": "nissan_qashqai",
+  "toyota chr": "toyota_c_hr",
+  "chr": "toyota_c_hr",
+  "xtrail": "nissan_x_trail",
+  "proace verso": "toyota_proace_verso",
+  "mercedes v": "mercedes_benz_v_class",
+  "fiat 600": "fiat_600e",
+  "toyota proace verso vx": "toyota_proace_verso",
+  "toyota proace verso sv": "toyota_proace_verso"
+}

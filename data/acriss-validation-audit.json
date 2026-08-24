@@ -1,0 +1,42 @@
+{
+  "validation_date": "2026-08-24",
+  "dictionary_file": "data/acriss-models.json",
+  "policy": "verified is reserved for generic model-family mappings whose CATEGORY+TYPE are supported by explicit ACRISS/SIPP fleet mappings and are sufficiently stable for a model-only classifier. Provider/market/trim-specific mappings that materially change CATEGORY or TYPE remain strong.",
+  "promoted_to_verified": {
+    "renault_clio": "Economy + 4/5 Door (ED) repeatedly published in rental fleets; Elite variants exist but ED is a defensible generic default.",
+    "toyota_yaris": "Economy + 4/5 Door (ED) repeatedly published; powertrain may vary and remains handled separately.",
+    "dacia_sandero": "Economy + 4/5 Door (ED) explicitly published by multiple rental fleets.",
+    "volkswagen_golf": "Compact + 4/5 Door (CD) is a canonical repeated rental mapping; special/Elite variants do not change the generic default.",
+    "volkswagen_golf_variant": "Compact + Wagon/Estate (CW) repeatedly published.",
+    "seat_leon": "Compact + 4/5 Door (CD) repeatedly published for the hatchback family.",
+    "opel_astra": "Compact + 4/5 Door (CD) repeatedly published.",
+    "kia_ceed": "Compact + 4/5 Door (CD) repeatedly published by current rental fleets.",
+    "hyundai_i30": "Compact + 4/5 Door (CD) repeatedly published.",
+    "ford_focus": "Compact + 4/5 Door (CD) repeatedly published; higher-spec Elite examples exist, but CD is the generic default.",
+    "skoda_superb": "Standard + 4/5 Door (SD) explicitly published by rental fleets for the non-estate model."
+  },
+  "downgraded_to_strong": {
+    "audi_q2": "Conflicting published rental mappings for the same model family: e.g. HFAR (Economy Elite SUV) vs DFMR (Compact Elite SUV). F is stable, category is not."
+  },
+  "new_verified_entries": {
+    "renault_grand_scenic": "Explicit rental-fleet mapping observed as IVMR; model-family category/type mapping stable enough for model-only use.",
+    "opel_crossland": "Explicit rental-fleet mapping observed as CGMR; C+G stable enough for model-only use.",
+    "audi_a1": "Explicit rental-fleet mappings observed with H+D across manual/automatic groups; first two letters stable.",
+    "bmw_2_series_gran_tourer": "Explicit rental-fleet mapping observed as IVMR; model-family category/type mapping stable enough for model-only use."
+  },
+  "new_strong_entries": [
+    "lexus_lbx", "mercedes_benz_vito", "opel_vivaro", "ford_transit_custom",
+    "fiat_doblo", "peugeot_rifter", "hyundai_bayon", "opel_grandland",
+    "suzuki_swift", "kia_xceed", "audi_a3", "fiat_600e",
+    "renault_5_e_tech_electric", "byd_atto_2"
+  ],
+  "counts_after_expansion": {
+    "strong": 126,
+    "verified": 15
+  },
+  "notes": [
+    "verified applies only to the generic model-family CATEGORY+TYPE mapping under this project policy; it does not mean every trim, market, supplier or powertrain carries one universal official ACRISS code.",
+    "Passenger-van models require seats/capacity rules to finalize the first two letters where applicable.",
+    "Strong entries retain ambiguity where rental suppliers publish materially different category/type assignments or where body/powertrain variants are not distinguishable from the scraped model name alone."
+  ]
+}

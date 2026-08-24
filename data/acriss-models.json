@@ -1,0 +1,3108 @@
+{
+  "_comment": "ACRISS model dictionary (engine v2). Seed per spec §21-29. verification: verified|strong|heuristic — only 'verified' entries may claim official_verified. powertrain_profile.mode: ice_only|ice_dominant|bev_only|hybrid_only|phev_only|mixed. type_alternative marks real F/G (or other) ambiguity (§5, §29): confidence stays <=0.85 and an alternative is emitted. van:true = passenger-van family (§10/§28); van_default_first = capacity letter when seats are not scraped; van_elite for premium vans.",
+  "toyota_aygo": {
+    "make": "Toyota",
+    "model": "Aygo",
+    "aliases": [
+      "Aygo"
+    ],
+    "category": {
+      "code": "M",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "toyota_aygo_x": {
+    "make": "Toyota",
+    "model": "Aygo X",
+    "aliases": [
+      "Aygo X",
+      "AygoX"
+    ],
+    "category": {
+      "code": "M",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "D",
+      "confidence": 0.75,
+      "reason": "city car with crossover styling"
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "hyundai_i10": {
+    "make": "Hyundai",
+    "model": "i10",
+    "aliases": [],
+    "category": {
+      "code": "M",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "kia_picanto": {
+    "make": "Kia",
+    "model": "Picanto",
+    "aliases": [],
+    "category": {
+      "code": "M",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "fiat_panda": {
+    "make": "Fiat",
+    "model": "Panda",
+    "aliases": [],
+    "category": {
+      "code": "M",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
+  "fiat_500": {
+    "make": "Fiat",
+    "model": "500",
+    "aliases": [
+      "Fiat 500"
+    ],
+    "category": {
+      "code": "M",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "renault_clio": {
+    "make": "Renault",
+    "model": "Clio",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "verified"
+  },
+  "opel_corsa": {
+    "make": "Opel",
+    "model": "Corsa",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "peugeot_208": {
+    "make": "Peugeot",
+    "model": "208",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "volkswagen_polo": {
+    "make": "Volkswagen",
+    "model": "Polo",
+    "aliases": [
+      "VW Polo"
+    ],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.93
+    },
+    "verification": "strong"
+  },
+  "seat_ibiza": {
+    "make": "SEAT",
+    "model": "Ibiza",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "skoda_fabia": {
+    "make": "Škoda",
+    "model": "Fabia",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "toyota_yaris": {
+    "make": "Toyota",
+    "model": "Yaris",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.85
+    },
+    "verification": "verified"
+  },
+  "citroen_c3": {
+    "make": "Citroën",
+    "model": "C3",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
+  "dacia_sandero": {
+    "make": "Dacia",
+    "model": "Sandero",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "verified"
+  },
+  "volkswagen_golf": {
+    "make": "Volkswagen",
+    "model": "Golf",
+    "aliases": [
+      "VW Golf"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.99
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.98
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "verified"
+  },
+  "volkswagen_golf_variant": {
+    "make": "Volkswagen",
+    "model": "Golf Variant",
+    "aliases": [
+      "VW Golf Variant",
+      "VW Golf Estate",
+      "Volkswagen Golf Estate",
+      "Golf SW"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.99
+    },
+    "body": {
+      "type": "W",
+      "confidence": 0.99
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "verified"
+  },
+  "seat_leon": {
+    "make": "SEAT",
+    "model": "Leon",
+    "aliases": [
+      "Seat León"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.87
+    },
+    "verification": "verified"
+  },
+  "peugeot_308": {
+    "make": "Peugeot",
+    "model": "308",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "opel_astra": {
+    "make": "Opel",
+    "model": "Astra",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.87
+    },
+    "verification": "verified"
+  },
+  "kia_ceed": {
+    "make": "Kia",
+    "model": "Ceed",
+    "aliases": [
+      "Kia Cee'd"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "verified"
+  },
+  "hyundai_i30": {
+    "make": "Hyundai",
+    "model": "i30",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "verified"
+  },
+  "ford_focus": {
+    "make": "Ford",
+    "model": "Focus",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "verified"
+  },
+  "toyota_corolla": {
+    "make": "Toyota",
+    "model": "Corolla",
+    "aliases": [
+      "Toyota Corolla Sedán"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "renault_megane": {
+    "make": "Renault",
+    "model": "Megane",
+    "aliases": [
+      "Renault Mégane"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "skoda_octavia": {
+    "make": "Škoda",
+    "model": "Octavia",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.87
+    },
+    "verification": "strong"
+  },
+  "skoda_octavia_combi": {
+    "make": "Škoda",
+    "model": "Octavia Combi",
+    "aliases": [
+      "Octavia Estate",
+      "Octavia SW"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "W",
+      "confidence": 0.98
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.87
+    },
+    "verification": "strong"
+  },
+  "volkswagen_passat": {
+    "make": "Volkswagen",
+    "model": "Passat",
+    "aliases": [
+      "VW Passat"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "volkswagen_passat_variant": {
+    "make": "Volkswagen",
+    "model": "Passat Variant",
+    "aliases": [
+      "VW Passat Variant",
+      "Passat Estate"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "W",
+      "confidence": 0.98
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "skoda_superb": {
+    "make": "Škoda",
+    "model": "Superb",
+    "aliases": [],
+    "category": {
+      "code": "S",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "verified"
+  },
+  "renault_captur": {
+    "make": "Renault",
+    "model": "Captur",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "nissan_juke": {
+    "make": "Nissan",
+    "model": "Juke",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "volkswagen_t_cross": {
+    "make": "Volkswagen",
+    "model": "T-Cross",
+    "aliases": [
+      "VW T-Cross",
+      "T Cross",
+      "TCross"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.96
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.98
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.93
+    },
+    "verification": "strong"
+  },
+  "seat_arona": {
+    "make": "SEAT",
+    "model": "Arona",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "B-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.93
+    },
+    "verification": "strong"
+  },
+  "skoda_kamiq": {
+    "make": "Škoda",
+    "model": "Kamiq",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.93
+    },
+    "verification": "strong"
+  },
+  "peugeot_2008": {
+    "make": "Peugeot",
+    "model": "2008",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "B-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "ford_puma": {
+    "make": "Ford",
+    "model": "Puma",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "opel_mokka": {
+    "make": "Opel",
+    "model": "Mokka",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "citroen_c3_aircross": {
+    "make": "Citroën",
+    "model": "C3 Aircross",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "provider practice observed as SUV (Drivalia: CFMR)"
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "toyota_yaris_cross": {
+    "make": "Toyota",
+    "model": "Yaris Cross",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
+  "mg_zs": {
+    "make": "MG",
+    "model": "ZS",
+    "aliases": [
+      "MG ZS"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "budget B/C-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "omoda_5": {
+    "make": "Omoda",
+    "model": "5",
+    "aliases": [
+      "Omoda 5",
+      "OMODA 5"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "new-brand C-SUV, positioning unsettled"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "nissan_qashqai": {
+    "make": "Nissan",
+    "model": "Qashqai",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.8
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "SUV/Crossover classification uncertain (§29)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.78
+    },
+    "verification": "strong"
+  },
+  "skoda_karoq": {
+    "make": "Škoda",
+    "model": "Karoq",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "C-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "seat_ateca": {
+    "make": "SEAT",
+    "model": "Ateca",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "G",
+      "confidence": 0.78,
+      "reason": "C-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "volkswagen_tiguan": {
+    "make": "Volkswagen",
+    "model": "Tiguan",
+    "aliases": [
+      "VW Tiguan"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "peugeot_3008": {
+    "make": "Peugeot",
+    "model": "3008",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.8,
+      "reason": "provider practice observed as SUV (Drivalia: IFAR)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "toyota_c_hr": {
+    "make": "Toyota",
+    "model": "C-HR",
+    "aliases": [
+      "Toyota CHR",
+      "CHR"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.8,
+      "reason": "coupe-crossover marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
+  "hyundai_tucson": {
+    "make": "Hyundai",
+    "model": "Tucson",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "kia_sportage": {
+    "make": "Kia",
+    "model": "Sportage",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "renault_austral": {
+    "make": "Renault",
+    "model": "Austral",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "C-SUV marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "ford_kuga": {
+    "make": "Ford",
+    "model": "Kuga",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "cupra_formentor": {
+    "make": "Cupra",
+    "model": "Formentor",
+    "aliases": [],
+    "category": {
+      "code": "J",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "performance crossover marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "alfa_romeo_tonale": {
+    "make": "Alfa Romeo",
+    "model": "Tonale",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.78
+    },
+    "type_alternative": {
+      "type": "G",
+      "confidence": 0.75,
+      "reason": "premium-ish compact SUV, positioning uncertain"
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "jaecoo_7": {
+    "make": "Jaecoo",
+    "model": "7",
+    "aliases": [
+      "Jaecoo 7"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.82
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "ds_4": {
+    "make": "DS",
+    "model": "4",
+    "aliases": [
+      "DS 4",
+      "DS4"
+    ],
+    "category": {
+      "code": "D",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "skoda_kodiaq": {
+    "make": "Škoda",
+    "model": "Kodiaq",
+    "aliases": [],
+    "category": {
+      "code": "S",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "nissan_x_trail": {
+    "make": "Nissan",
+    "model": "X-Trail",
+    "aliases": [
+      "XTrail",
+      "X Trail"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "peugeot_5008": {
+    "make": "Peugeot",
+    "model": "5008",
+    "aliases": [],
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "G",
+      "confidence": 0.75,
+      "reason": "large crossover marketed both ways"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "kia_sorento": {
+    "make": "Kia",
+    "model": "Sorento",
+    "aliases": [],
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "hyundai_santa_fe": {
+    "make": "Hyundai",
+    "model": "Santa Fe",
+    "aliases": [
+      "SantaFe"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "toyota_highlander": {
+    "make": "Toyota",
+    "model": "Highlander",
+    "aliases": [],
+    "category": {
+      "code": "F",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
+  "ebro_s800": {
+    "make": "Ebro",
+    "model": "S800",
+    "aliases": [
+      "Ebro S800"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "bmw_x1": {
+    "make": "BMW",
+    "model": "X1",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.8
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "premium compact SUV/crossover (§29)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "bmw_x3": {
+    "make": "BMW",
+    "model": "X3",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "bmw_x5": {
+    "make": "BMW",
+    "model": "X5",
+    "aliases": [],
+    "category": {
+      "code": "U",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "audi_q2": {
+    "make": "Audi",
+    "model": "Q2",
+    "aliases": [],
+    "category": {
+      "code": "H",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "G",
+      "confidence": 0.78,
+      "reason": "small premium crossover; catalog curates Q2 at HFAR (Economy Elite SUV)"
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "audi_q3": {
+    "make": "Audi",
+    "model": "Q3",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.8
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "premium compact SUV/crossover (§29)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "audi_q5": {
+    "make": "Audi",
+    "model": "Q5",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "audi_q7": {
+    "make": "Audi",
+    "model": "Q7",
+    "aliases": [],
+    "category": {
+      "code": "U",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_gla": {
+    "make": "Mercedes-Benz",
+    "model": "GLA",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "premium compact SUV/crossover"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_glb": {
+    "make": "Mercedes-Benz",
+    "model": "GLB",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_glc": {
+    "make": "Mercedes-Benz",
+    "model": "GLC",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_gle": {
+    "make": "Mercedes-Benz",
+    "model": "GLE",
+    "aliases": [],
+    "category": {
+      "code": "U",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "volvo_xc40": {
+    "make": "Volvo",
+    "model": "XC40",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "premium compact SUV/crossover"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "volvo_xc60": {
+    "make": "Volvo",
+    "model": "XC60",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "volvo_xc90": {
+    "make": "Volvo",
+    "model": "XC90",
+    "aliases": [],
+    "category": {
+      "code": "U",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "jaguar_f_pace": {
+    "make": "Jaguar",
+    "model": "F-Pace",
+    "aliases": [
+      "F Pace"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "audi_a4": {
+    "make": "Audi",
+    "model": "A4",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "audi_a5": {
+    "make": "Audi",
+    "model": "A5",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.8
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "audi_a6": {
+    "make": "Audi",
+    "model": "A6",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "bmw_3_series": {
+    "make": "BMW",
+    "model": "3 Series",
+    "aliases": [
+      "BMW Serie 3",
+      "BMW 320",
+      "BMW 318"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "bmw_4_series": {
+    "make": "BMW",
+    "model": "4 Series",
+    "aliases": [
+      "BMW Serie 4",
+      "BMW 420"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "E",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
+  "bmw_5_series": {
+    "make": "BMW",
+    "model": "5 Series",
+    "aliases": [
+      "BMW Serie 5",
+      "BMW 520"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_c_class": {
+    "make": "Mercedes-Benz",
+    "model": "C-Class",
+    "aliases": [
+      "Mercedes Clase C",
+      "Mercedes C Class",
+      "Mercedes C200"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_e_class": {
+    "make": "Mercedes-Benz",
+    "model": "E-Class",
+    "aliases": [
+      "Mercedes Clase E",
+      "Mercedes E Class",
+      "Mercedes E220"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "volvo_s60": {
+    "make": "Volvo",
+    "model": "S60",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "volvo_s90": {
+    "make": "Volvo",
+    "model": "S90",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "alfa_romeo_giulia": {
+    "make": "Alfa Romeo",
+    "model": "Giulia",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "alfa_romeo_stelvio": {
+    "make": "Alfa Romeo",
+    "model": "Stelvio",
+    "aliases": [],
+    "category": {
+      "code": "R",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "mazda_mx_5": {
+    "make": "Mazda",
+    "model": "MX-5",
+    "aliases": [
+      "MX5",
+      "Mazda MX5",
+      "Miata"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "N",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "strong"
+  },
+  "tesla_model_3": {
+    "make": "Tesla",
+    "model": "Model 3",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "tesla_model_y": {
+    "make": "Tesla",
+    "model": "Model Y",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "electric crossover/SUV"
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volkswagen_id3": {
+    "make": "Volkswagen",
+    "model": "ID.3",
+    "aliases": [
+      "VW ID.3",
+      "ID3",
+      "ID 3"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volkswagen_id4": {
+    "make": "Volkswagen",
+    "model": "ID.4",
+    "aliases": [
+      "VW ID.4",
+      "ID4",
+      "ID 4"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "electric crossover/SUV"
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volkswagen_id5": {
+    "make": "Volkswagen",
+    "model": "ID.5",
+    "aliases": [
+      "VW ID.5",
+      "ID5",
+      "ID 5"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volkswagen_id7": {
+    "make": "Volkswagen",
+    "model": "ID.7",
+    "aliases": [
+      "VW ID.7",
+      "ID7",
+      "ID 7"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "kia_ev3": {
+    "make": "Kia",
+    "model": "EV3",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "kia_ev6": {
+    "make": "Kia",
+    "model": "EV6",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "kia_ev9": {
+    "make": "Kia",
+    "model": "EV9",
+    "aliases": [],
+    "category": {
+      "code": "F",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "hyundai_ioniq_5": {
+    "make": "Hyundai",
+    "model": "Ioniq 5",
+    "aliases": [
+      "IONIQ 5",
+      "Ioniq5"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "hyundai_ioniq_6": {
+    "make": "Hyundai",
+    "model": "Ioniq 6",
+    "aliases": [
+      "IONIQ 6",
+      "Ioniq6"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "nissan_leaf": {
+    "make": "Nissan",
+    "model": "Leaf",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "nissan_ariya": {
+    "make": "Nissan",
+    "model": "Ariya",
+    "aliases": [],
+    "category": {
+      "code": "I",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.88
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "renault_zoe": {
+    "make": "Renault",
+    "model": "Zoe",
+    "aliases": [
+      "ZOE"
+    ],
+    "category": {
+      "code": "E",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "ford_mustang_mach_e": {
+    "make": "Ford",
+    "model": "Mustang Mach-E",
+    "aliases": [
+      "Mach-E",
+      "Mach E",
+      "Mustang MachE"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_eqa": {
+    "make": "Mercedes-Benz",
+    "model": "EQA",
+    "aliases": [],
+    "category": {
+      "code": "P",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_eqe": {
+    "make": "Mercedes-Benz",
+    "model": "EQE",
+    "aliases": [],
+    "category": {
+      "code": "L",
+      "confidence": 0.82
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volvo_ex30": {
+    "make": "Volvo",
+    "model": "EX30",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "premium small electric SUV/crossover (§29)"
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "volkswagen_touran": {
+    "make": "Volkswagen",
+    "model": "Touran",
+    "aliases": [
+      "VW Touran"
+    ],
+    "van": true,
+    "van_default_first": "I",
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.92
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "ford_galaxy": {
+    "make": "Ford",
+    "model": "Galaxy",
+    "aliases": [],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "ford_s_max": {
+    "make": "Ford",
+    "model": "S-Max",
+    "aliases": [
+      "SMax",
+      "S Max"
+    ],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "volkswagen_multivan": {
+    "make": "Volkswagen",
+    "model": "Multivan",
+    "aliases": [
+      "VW Multivan"
+    ],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
+  "volkswagen_caravelle": {
+    "make": "Volkswagen",
+    "model": "Caravelle",
+    "aliases": [
+      "VW Caravelle"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "mercedes_benz_v_class": {
+    "make": "Mercedes-Benz",
+    "model": "V-Class",
+    "aliases": [
+      "Mercedes Clase V",
+      "Mercedes V Class",
+      "V Class"
+    ],
+    "van": true,
+    "van_elite": true,
+    "van_default_first": "R",
+    "category": {
+      "code": "L",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "peugeot_traveller": {
+    "make": "Peugeot",
+    "model": "Traveller",
+    "aliases": [],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "citroen_spacetourer": {
+    "make": "Citroën",
+    "model": "SpaceTourer",
+    "aliases": [
+      "Space Tourer"
+    ],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "toyota_proace_verso": {
+    "make": "Toyota",
+    "model": "Proace Verso",
+    "aliases": [
+      "ProAce Verso"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "opel_zafira_life": {
+    "make": "Opel",
+    "model": "Zafira Life",
+    "aliases": [],
+    "van": true,
+    "van_default_first": "S",
+    "category": {
+      "code": "S",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "renault_trafic_passenger": {
+    "make": "Renault",
+    "model": "Trafic Passenger",
+    "aliases": [
+      "Trafic Combi"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "ford_tourneo_custom": {
+    "make": "Ford",
+    "model": "Tourneo Custom",
+    "aliases": [
+      "Tourneo"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "volkswagen_caddy": {
+    "make": "Volkswagen",
+    "model": "Caddy",
+    "aliases": [
+      "VW Caddy",
+      "Caddy Maxi",
+      "VW Caddy Maxi",
+      "Volkswagen Caddy Maxi"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "fiat_scudo": {
+    "make": "Fiat",
+    "model": "Scudo",
+    "aliases": [
+      "Fiat Scudo Furgón",
+      "Scudo Furgon"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "K",
+      "confidence": 0.9
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "strong"
+  },
+  "lexus_lbx": {
+    "make": "Lexus",
+    "model": "LBX",
+    "aliases": [],
+    "category": {
+      "code": "H",
+      "confidence": 0.86
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.84
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "premium B-SUV; rental fleets may label SUV rather than crossover"
+    },
+    "powertrain_profile": {
+      "mode": "hybrid_only",
+      "default_code": "H",
+      "confidence": 0.98
+    },
+    "verification": "strong"
+  },
+  "renault_grand_scenic": {
+    "make": "Renault",
+    "model": "Grand Scenic",
+    "aliases": [
+      "Grand Scénic",
+      "Renault Grand Scénic"
+    ],
+    "van": true,
+    "van_default_first": "I",
+    "category": {
+      "code": "I",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.96
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "verified"
+  },
+  "mercedes_benz_vito": {
+    "make": "Mercedes-Benz",
+    "model": "Vito",
+    "aliases": [
+      "Mercedes Vito",
+      "MB Vito",
+      "Vito Tourer"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.78
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "K",
+      "confidence": 0.7,
+      "reason": "Vito also exists as a commercial cargo van; seats/model suffix should disambiguate"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.75
+    },
+    "verification": "strong"
+  },
+  "opel_vivaro": {
+    "make": "Opel",
+    "model": "Vivaro",
+    "aliases": [
+      "Vauxhall Vivaro"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "category": {
+      "code": "S",
+      "confidence": 0.76
+    },
+    "body": {
+      "type": "V",
+      "confidence": 0.8
+    },
+    "type_alternative": {
+      "type": "K",
+      "confidence": 0.72,
+      "reason": "Vivaro exists in passenger/combi and commercial cargo variants; seats should disambiguate"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.76
+    },
+    "verification": "strong"
+  },
+  "ford_transit_custom": {
+    "make": "Ford",
+    "model": "Transit Custom",
+    "aliases": [
+      "Ford Custom",
+      "Transit Custom"
+    ],
+    "category": {
+      "code": "S",
+      "confidence": 0.78
+    },
+    "body": {
+      "type": "K",
+      "confidence": 0.9
+    },
+    "type_alternative": {
+      "type": "V",
+      "confidence": 0.68,
+      "reason": "passenger derivatives may be described generically as Custom; Tourneo Custom should resolve separately"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.74
+    },
+    "verification": "strong"
+  },
+  "fiat_doblo": {
+    "make": "Fiat",
+    "model": "Doblo",
+    "aliases": [
+      "Fiat Doblò",
+      "Doblo",
+      "Doblò"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.95
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.84
+    },
+    "type_alternative": {
+      "type": "V",
+      "confidence": 0.8,
+      "reason": "rental fleets use both compact people-carrier/monospace and passenger-van coding"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "peugeot_rifter": {
+    "make": "Peugeot",
+    "model": "Rifter",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.9
+    },
+    "type_alternative": {
+      "type": "V",
+      "confidence": 0.78,
+      "reason": "7-seat/passenger configurations can be placed in passenger-van groups"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.78
+    },
+    "verification": "strong"
+  },
+  "hyundai_bayon": {
+    "make": "Hyundai",
+    "model": "Bayon",
+    "aliases": [],
+    "category": {
+      "code": "C",
+      "confidence": 0.91
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.94
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "opel_crossland": {
+    "make": "Opel",
+    "model": "Crossland",
+    "aliases": [
+      "Opel Crossland X",
+      "Crossland X"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.98
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.98
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.95
+    },
+    "verification": "verified"
+  },
+  "opel_grandland": {
+    "make": "Opel",
+    "model": "Grandland",
+    "aliases": [
+      "Opel Grandland X",
+      "Grandland X"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.88
+    },
+    "type_alternative": {
+      "type": "D",
+      "confidence": 0.66,
+      "reason": "some Hertz fleets code Grandland as IDAR while other suppliers place it in SUV groups such as SFAR"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.76
+    },
+    "verification": "strong"
+  },
+  "suzuki_swift": {
+    "make": "Suzuki",
+    "model": "Swift",
+    "aliases": [],
+    "category": {
+      "code": "E",
+      "confidence": 0.98
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.88
+    },
+    "type_alternative": {
+      "type": "C",
+      "confidence": 0.78,
+      "reason": "some rental fleets use 2/4-door type code C for Swift despite five-door body"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "H",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "kia_xceed": {
+    "make": "Kia",
+    "model": "XCeed",
+    "aliases": [
+      "Kia Xceed",
+      "XCeed",
+      "Xceed"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.86
+    },
+    "type_alternative": {
+      "type": "D",
+      "confidence": 0.72,
+      "reason": "crossover-hatch positioning can lead fleets to use regular compact coding"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.75
+    },
+    "verification": "strong"
+  },
+  "audi_a1": {
+    "make": "Audi",
+    "model": "A1",
+    "aliases": [
+      "Audi A1 Sportback",
+      "A1 Sportback"
+    ],
+    "category": {
+      "code": "H",
+      "confidence": 0.99
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.99
+    },
+    "powertrain_profile": {
+      "mode": "ice_only",
+      "default_code": "R",
+      "confidence": 0.96
+    },
+    "verification": "verified"
+  },
+  "audi_a3": {
+    "make": "Audi",
+    "model": "A3",
+    "aliases": [
+      "Audi A3 Sportback",
+      "A3 Sportback"
+    ],
+    "category": {
+      "code": "D",
+      "confidence": 0.96
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.9
+    },
+    "type_alternative": {
+      "type": "X",
+      "confidence": 0.7,
+      "reason": "some Europcar automatic groups have used DXAR for A3; body/category mapping varies by fleet"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
+  "bmw_2_series_gran_tourer": {
+    "make": "BMW",
+    "model": "2 Series Gran Tourer",
+    "aliases": [
+      "BMW Serie 2 Gran Tourer",
+      "BMW 2-series Gran Tourer",
+      "BMW 2 Series GT",
+      "Serie 2 GT"
+    ],
+    "van": true,
+    "van_default_first": "I",
+    "category": {
+      "code": "I",
+      "confidence": 0.98
+    },
+    "body": {
+      "type": "M",
+      "confidence": 0.97
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.9
+    },
+    "verification": "verified"
+  },
+  "fiat_600e": {
+    "make": "Fiat",
+    "model": "600e",
+    "aliases": [
+      "Fiat 600e",
+      "600e"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.88
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.9
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.75,
+      "reason": "B-SUV/crossover terminology varies by rental supplier"
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "renault_5_e_tech_electric": {
+    "make": "Renault",
+    "model": "5 E-Tech Electric",
+    "aliases": [
+      "Renault 5",
+      "Renault 5 E-Tech",
+      "R5 E-Tech",
+      "Renault R5"
+    ],
+    "category": {
+      "code": "E",
+      "confidence": 0.92
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.96
+    },
+    "powertrain_profile": {
+      "mode": "bev_only",
+      "default_code": "E",
+      "confidence": 1.0
+    },
+    "verification": "strong"
+  },
+  "byd_atto_2": {
+    "make": "BYD",
+    "model": "Atto 2",
+    "aliases": [
+      "BYD Atto2",
+      "Atto 2",
+      "Atto2"
+    ],
+    "category": {
+      "code": "C",
+      "confidence": 0.9
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.9
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "B-segment crossover SUV; F/G terminology can vary by rental fleet"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "E",
+      "confidence": 0.88
+    },
+    "verification": "strong"
+  },
+  "volkswagen_t_roc": {
+    "make": "Volkswagen",
+    "model": "T-Roc",
+    "aliases": [
+      "VW T-Roc",
+      "T Roc",
+      "TRoc",
+      "VW TO-ROC",
+      "TO-ROC"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.82
+    },
+    "type_alternative": {
+      "type": "F",
+      "confidence": 0.78,
+      "reason": "C-crossover marketed both ways (victoria classifies it IFAR)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  }
+}
