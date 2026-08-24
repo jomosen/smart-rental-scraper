@@ -25,8 +25,25 @@ from src.saas.application.classification.dtos import (
 from src.saas.application.classification.service import ClassificationService
 
 _CONFIDENCE_THRESHOLD = 0.85
-_FLASH_MODEL = "gemini-2.5-flash"
-_PRO_MODEL = "gemini-2.5-pro"
+
+# Model selection. ALWAYS pin explicit versions — never floating aliases
+# ("-latest") or "-preview" models: the classifier is calibrated (confidence
+# thresholds, mixed-group rule) and a model that changes underneath silently
+# recalibrates it. Upgrades are deliberate: change the env var (or default),
+# which rotates classifier_version and invalidates the model_classifications
+# cache; scripts/reclassify_compare.py diffs old vs new before adopting.
+_DEFAULT_FLASH_MODEL = "gemini-3.6-flash"
+_DEFAULT_PRO_MODEL = "gemini-2.5-pro"  # newest STABLE Pro; 3.x Pro only in preview
+
+
+def flash_model() -> str:
+    """Primary (cheap) classification model. Override: GEMINI_FLASH_MODEL."""
+    return os.getenv("GEMINI_FLASH_MODEL", _DEFAULT_FLASH_MODEL)
+
+
+def pro_model() -> str:
+    """Escalation model for low-confidence batches. Override: GEMINI_PRO_MODEL."""
+    return os.getenv("GEMINI_PRO_MODEL", _DEFAULT_PRO_MODEL)
 
 # Bump when the classification PROMPT/logic changes (mixed-group rule, fuel
 # fallback, tie-breaks…). Combined with a hash of acriss_codes.yaml, it forms the
@@ -257,12 +274,12 @@ class GeminiClassificationService(ClassificationService):
     def _call_flash_batch(
         self, provider_code: str, vehicles: list[VehicleClassificationInput]
     ) -> list[ClassificationResult]:
-        return self._call_model_batch(_FLASH_MODEL, provider_code, vehicles)
+        return self._call_model_batch(flash_model(), provider_code, vehicles)
 
     def _call_pro_batch(
         self, provider_code: str, vehicles: list[VehicleClassificationInput]
     ) -> list[ClassificationResult]:
-        return self._call_model_batch(_PRO_MODEL, provider_code, vehicles)
+        return self._call_model_batch(pro_model(), provider_code, vehicles)
 
     def _call_model_batch(
         self,

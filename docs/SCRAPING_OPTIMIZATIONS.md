@@ -110,9 +110,68 @@ This optimization lives entirely in the scheduler / `SearchPlanBuilder` layer.
 
 ---
 
+## 3. Duration-linearity detection (skip 14/21/28-day searches)
+
+### The observation
+
+Some providers price long durations as an exact linear multiple of their 7-day
+price: `total(14d) = 2 × total(7d)`, etc. For those providers, the 14/21/28-day
+extraction searches (3 of the 10 durations — ~30% of extraction volume) return
+information already contained in the 7-day point, and could be **derived at
+read time instead of searched**.
+
+### Empirical status (2026-08-23, dev observations)
+
+Measured as `total(Nd) / (total(7d) × N/7)` over all (group, pickup_date) pairs:
+
+| provider | avg ratio 14/21/28d | exact multiples |
+|---|---|---|
+| victoria | 0.987 / 0.986 / 0.971 | ~80% / ~80% / ~65% |
+| solcar   | 1.020 / 1.021 / 1.013 | ~4% |
+| centauro | 1.051 / 1.113 / 1.144 | ~1% |
+
+**Only victoria is quasi-linear, and imperfectly.** A blanket multiply-by-N
+derivation would be wrong for most providers and wrong ~20% of the time even
+for victoria. Any implementation must be per-(provider, rate), evidence-based,
+and continuously revalidated — never assumed.
+
+### The proposed approach
+
+1. **Detection.** During normal extraction, keep searching the full duration
+   set. After K consecutive representative dates where every long-duration
+   total is within ε (e.g. ±1%) of the linear extrapolation from 7d, set a
+   flag on `provider_rates`: `duration_pricing = 'linear_beyond_7d'`.
+2. **Skipping.** `SearchPlanBuilder` omits 14/21/28-day searches for flagged
+   rates. The values are **derived at read time** (future `PriceQueryService`),
+   like synthetic in-zone days — NEVER persisted as observations
+   (synthetic-vs-real is the invariant this repo protects hardest).
+3. **Revalidation.** Each run still performs one long-duration spot-check per
+   flagged rate. If it deviates beyond ε, clear the flag — the next run
+   searches the full set again.
+
+### Caveats that make this riskier than it looks
+
+- **Cross-season bookings.** A 28-day rental spanning a zone boundary may be
+  priced by the provider against both seasons; linear extrapolation from the
+  starting zone's 7-day price diverges exactly there.
+- **Long-duration products.** Some providers switch product beyond a duration
+  threshold (e.g. recordgo's FlexRent renting kicks in at 15+ days) — long
+  durations are structurally different prices, not multiples.
+- The ~30% search saving applies to extraction only; probe (7-day searches)
+  is unaffected.
+
+### When to implement
+
+Same triggers as #1/#2 (run duration, provider pressure), **plus** the
+detection data showing a provider actually holds linearity ≥99% of points over
+a sustained window. With current data, no provider qualifies.
+
+---
+
 ## Combined effect
 
-The two optimizations are independent and compose:
+The optimizations are independent and compose (#3 adds up to ~30% off
+extraction volume, but only for providers whose data proves linearity):
 
 - Adaptive probe reduces the **per-run** cost.
 - Layered frequency reduces the **per-day** cost across runs.
