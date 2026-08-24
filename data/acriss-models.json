@@ -1208,6 +1208,35 @@
     },
     "verification": "strong"
   },
+  "ds_7": {
+    "make": "DS",
+    "model": "7",
+    "aliases": [
+      "DS 7",
+      "DS7",
+      "DS 7 Crossback",
+      "DS7 Crossback"
+    ],
+    "category": {
+      "code": "P",
+      "confidence": 0.85
+    },
+    "body": {
+      "type": "F",
+      "confidence": 0.85
+    },
+    "type_alternative": {
+      "type": "G",
+      "confidence": 0.78,
+      "reason": "premium mid-size SUV, crossover styling (§29)"
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.82
+    },
+    "verification": "strong"
+  },
   "skoda_kodiaq": {
     "make": "Škoda",
     "model": "Kodiaq",
