@@ -77,10 +77,15 @@ async def _ask_llm(
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
             text = text[: text.rfind("```")]
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
+    start = text.find("{")
+    if start == -1:
         return None, None  # best-effort probe: no JSON → no refine link
-    data = json.loads(text[start : end + 1])
+    try:
+        # raw_decode stops at the end of the first object — tolerates trailing
+        # prose after it (some responses append rationale outside the JSON).
+        data = json.JSONDecoder().raw_decode(text[start:])[0]
+    except ValueError:
+        return None, None
     return data.get("selector"), data.get("selector_type")
 
 
@@ -90,26 +95,32 @@ async def discover_refine_link(
     targets: dict,
     log_dir,
     client: AsyncAnthropic | None = None,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, str | None]:
     """Probe for the refine strategy. Precondition: *session* is on the
     provider's results page (a search has just been submitted).
 
-    Returns (refine_url, strategy). The candidate is CONFIRMED by running one
-    real date change (+7 days) and checking vehicles come back — so a detected
-    form that isn't actually usable falls back to (None, 'none').
+    Returns (refine_url, strategy, open_selector). open_selector is the
+    "edit search" control that reveals the embedded form on the results page
+    (in_place via LLM path only) — the runtime must click it again on every
+    refine, so it is persisted in the recipe. The candidate is CONFIRMED by
+    running one real date change (+7 days) and checking vehicles come back —
+    so a detected form that isn't actually usable falls back to
+    (None, 'none', None).
     """
     from dataclasses import replace
 
     pickup_rf = recipe.form_fields.get("pickup_date")
     if pickup_rf is None or not pickup_rf.selector:
         logger.info("[refine_discovery] recipe has no pickup_date selector — skipping")
-        return None, "none"
+        return None, "none", None
     pickup_sel = pickup_rf.selector
     location = str(targets.get("location", ""))
     results_url = session.get_url()
 
     candidate_url: str | None = None
     candidate_strategy: str | None = None
+    candidate_open_sel: str | None = None
+    candidate_open_type: str = "css"
 
     try:
         # ── A) Is the search form already embedded (visible) in results? ──────
@@ -123,34 +134,45 @@ async def discover_refine_link(
             selector, selector_type = await _ask_llm(client, await session.get_html(), location)
             if not selector:
                 logger.info("[refine_discovery] LLM found no edit-search control")
-                return None, "none"
+                return None, "none", None
             if not await session.click_selector(selector, selector_type or "css"):
                 logger.info("[refine_discovery] could not click %r", selector)
-                return None, "none"
+                return None, "none", None
             if not await session.wait_for_selector(pickup_sel, timeout_ms=8_000):
                 logger.info("[refine_discovery] edit control did not reveal %r", pickup_sel)
-                return None, "none"
+                return None, "none", None
             new_url = session.get_url()
             if new_url and new_url != results_url:
                 candidate_url, candidate_strategy = new_url, "navigate_and_change_dates"
                 logger.info("[refine_discovery] navigate deep-link candidate: %s", new_url)
             else:
                 candidate_strategy = "in_place"
-                logger.info("[refine_discovery] in-place edit panel (same URL) candidate")
+                # The panel needed this click to open — the runtime will need
+                # it again on every refine (cold results page), so persist it.
+                candidate_open_sel = selector
+                candidate_open_type = selector_type or "css"
+                logger.info("[refine_discovery] in-place edit panel (same URL) "
+                            "candidate, open_selector=%r", selector)
 
         # ── Verify by performing one real date change (+7 days) ───────────────
-        trial = replace(recipe, refine_strategy=candidate_strategy, refine_url=candidate_url)
+        trial = replace(
+            recipe,
+            refine_strategy=candidate_strategy,
+            refine_url=candidate_url,
+            refine_open_selector=candidate_open_sel,
+            refine_open_selector_type=candidate_open_type,
+        )
         p2 = targets["pickup_date"] + timedelta(days=7)
         r2 = targets["return_date"] + timedelta(days=7)
         res = await refine_dates(session, trial, p2, r2, log_dir)
         if res.success:
-            logger.info("[refine_discovery] CONFIRMED strategy=%s url=%s",
-                        candidate_strategy, candidate_url)
-            return candidate_url, candidate_strategy
+            logger.info("[refine_discovery] CONFIRMED strategy=%s url=%s open_selector=%s",
+                        candidate_strategy, candidate_url, candidate_open_sel)
+            return candidate_url, candidate_strategy, candidate_open_sel
 
         logger.info("[refine_discovery] candidate refine failed to verify "
                     "(phase=%s) — falling back to none", res.failed_phase)
-        return None, "none"
+        return None, "none", None
     except Exception as exc:
         logger.info("[refine_discovery] probe failed: %s", exc)
-        return None, "none"
+        return None, "none", None

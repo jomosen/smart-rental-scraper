@@ -96,10 +96,10 @@ def parse_args() -> argparse.Namespace:
 
 async def _auto_discover_refine(
     recipe, targets: dict, headless: bool, provider_name: str
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, str | None]:
     """Reach the results page with *recipe*, then probe for the refine strategy
     (navigate_and_change_dates | in_place). Best-effort — never raises.
-    Returns (refine_url, strategy)."""
+    Returns (refine_url, strategy, open_selector)."""
     log_dir = create_log_dir(provider_name, suffix="_refine_probe")
     bs = BrowserSession(headless=headless)
     await bs.__aenter__()
@@ -108,11 +108,11 @@ async def _auto_discover_refine(
         if not res.success:
             print(f"  [auto-refine] could not reach results "
                   f"(phase={res.failed_phase!r}) — skipping")
-            return None, "none"
+            return None, "none", None
         return await discover_refine_link(bs, recipe, targets, log_dir)
     except Exception as exc:  # noqa: BLE001 — probe must never break the build
         print(f"  [auto-refine] probe error: {exc}")
-        return None, "none"
+        return None, "none", None
     finally:
         await bs.__aexit__(None, None, None)
 
@@ -186,21 +186,26 @@ async def main() -> None:
         #    the recipe simply keeps its full-resubmit behaviour.
         if not args.refine_url and args.auto_refine:
             print("  [auto-refine] probing results page for an edit-search deep-link…")
-            disc_url, disc_strategy = await _auto_discover_refine(
+            disc_url, disc_strategy, disc_open_sel = await _auto_discover_refine(
                 recipe, targets, not args.visible, name
             )
-            if disc_url:
+            # 'in_place' comes back as (None, 'in_place', ...) — no URL, still a win.
+            if disc_strategy != "none":
                 session = factory()
                 try:
                     repo = ProviderRecipeRepository(session)
                     active = repo.get_active_recipe(prov.provider_id)
                     updated = replace(
-                        active, refine_url=disc_url, refine_strategy=disc_strategy
+                        active,
+                        refine_url=disc_url,
+                        refine_strategy=disc_strategy,
+                        refine_open_selector=disc_open_sel,
                     )
                     row = repo.save_recipe(prov.provider_id, updated)
                     session.commit()
                     print(f"  [auto-refine] OK -> recipe v{row.version}  "
-                          f"strategy={disc_strategy!r}  url={disc_url}")
+                          f"strategy={disc_strategy!r}  url={disc_url}  "
+                          f"open_selector={disc_open_sel!r}")
                 except Exception:
                     session.rollback()
                     raise

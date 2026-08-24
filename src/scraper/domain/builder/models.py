@@ -31,7 +31,10 @@ class RecipeField:
 class RecipeFieldExtractor:
     """Selector + extraction strategy for one vehicle-card field."""
     field: str                      # "model" | "group_code" | "seats" | "transmission" | "price_final"
-    selector: str | None            # CSS selector relative to card; None for semantic strategies
+    selector: str | None            # CSS selector relative to card; None for semantic
+                                    # strategies — EXCEPT price_cascade, where a selector
+                                    # scopes the cascade to a sub-element of the card
+                                    # (e.g. one tariff's block on multi-rate cards)
     extraction: str                 # "text" | "attribute:X" | "regex:Y"
                                     # | "aria_keyword"              → seats
                                     # | "aria_keyword_transmission" → transmission
@@ -57,6 +60,11 @@ class Recipe:
     # ── Refine strategy (operator-set, not LLM-discovered) ──────────────────
     refine_url: str | None = None
     refine_strategy: str = "none"   # "navigate_and_change_dates" | "in_place" | "none"
+    # in_place only: control that reveals the embedded search form on the
+    # results page (e.g. an "edit search" summary bar). Clicked by
+    # _refine_in_place when the date field is not immediately visible.
+    refine_open_selector: str | None = None
+    refine_open_selector_type: str = "css"
     # ── Cookie-accept control (build-discovered, deterministic) ─────────────
     # When set, the runtime clicks this selector directly (waiting for it to
     # appear) before falling back to the multilingual text heuristic. This

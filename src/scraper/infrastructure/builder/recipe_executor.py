@@ -703,9 +703,19 @@ async def _refine_in_place(
         )
 
     # The embedded search form must expose the recipe's pickup_date field.
+    # Some providers hide it behind an "edit search" control on the results
+    # page — recipe.refine_open_selector, discovered by discover_refine_link.
     pickup_rf = recipe.form_fields.get("pickup_date")
     if pickup_rf and pickup_rf.selector:
-        if not await session.wait_for_selector(pickup_rf.selector):
+        visible = await session.wait_for_selector(pickup_rf.selector, timeout_ms=3_000)
+        if not visible and recipe.refine_open_selector:
+            logger.log("refine_open_click", selector=recipe.refine_open_selector)
+            if await session.click_selector(
+                recipe.refine_open_selector,
+                recipe.refine_open_selector_type or "css",
+            ):
+                visible = await session.wait_for_selector(pickup_rf.selector)
+        if not visible:
             return _make_result(
                 "refine_in_place",
                 f"Date field {pickup_rf.selector!r} not present on results page",
