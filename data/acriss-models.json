@@ -67,6 +67,29 @@
     },
     "verification": "strong"
   },
+  "hyundai_i20": {
+    "make": "Hyundai",
+    "model": "i20",
+    "aliases": [
+      "Hyundai I20",
+      "Hyundai i-20",
+      "i20"
+    ],
+    "category": {
+      "code": "E",
+      "confidence": 0.97
+    },
+    "body": {
+      "type": "D",
+      "confidence": 0.95
+    },
+    "powertrain_profile": {
+      "mode": "ice_dominant",
+      "default_code": "R",
+      "confidence": 0.92
+    },
+    "verification": "strong"
+  },
   "kia_picanto": {
     "make": "Kia",
     "model": "Picanto",

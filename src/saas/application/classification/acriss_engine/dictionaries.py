@@ -4,11 +4,14 @@ Data lives in repo-versioned JSON (data/acriss-models.json,
 data/acriss-aliases.json, data/acriss-source-overrides.json) — never hardcoded
 in engine logic (§18, §39). Matching order (§36): exact key → alias → word
 containment (longest key wins) → fuzzy ≥ 0.90. Fuzzy below threshold never
-auto-accepts.
+auto-accepts, and a fuzzy candidate whose model designator differs from the
+query's ("i20" vs "i10", "2008" vs "208") is rejected regardless of score —
+cross-designator links belong in explicit aliases, which resolve earlier.
 """
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -16,7 +19,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
-from .normalizer import norm_key
+from .normalizer import detect_make, norm_key
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parents[5] / "data"
 MODELS_PATH = _DATA_DIR / "acriss-models.json"
@@ -101,14 +106,26 @@ class ModelDictionary:
         if best_id:
             return ModelMatch(best_id, self._models[best_id], "contains", 1.0)
 
-        # 4. Fuzzy — high threshold, never aggressive (§36). Guard: a fuzzy
-        #    match must not add/remove body-variant words (Variant/Estate/SW…).
+        # 4. Fuzzy — high threshold, never aggressive (§36). Guards: a fuzzy
+        #    match must not cross model designators ("hyundai i20" scores 0.909
+        #    against "hyundai i10" — same family naming, different car) and must
+        #    not add/remove body-variant words (Variant/Estate/SW…).
         best_score, best_id = 0.0, None
         for key, eid in self._index.items():
             score = SequenceMatcher(None, text, key).ratio()
-            if score > best_score:
-                best_score, best_id = score, eid
-        if best_id and best_score >= FUZZY_ACCEPT and not _variant_mismatch(
+            if score < FUZZY_ACCEPT or score <= best_score:
+                continue
+            if _model_designator_mismatch(text, key):
+                logger.debug(
+                    "fuzzy_candidate_rejected reason=model_designator_mismatch "
+                    "query=%r candidate=%r query_designator=%r "
+                    "candidate_designator=%r similarity=%.4f",
+                    text, key, _extract_model_designator(text),
+                    _extract_model_designator(key), score,
+                )
+                continue
+            best_score, best_id = score, eid
+        if best_id and not _variant_mismatch(
             text, norm_key(f"{self._models[best_id]['make']} {self._models[best_id]['model']}")
         ):
             return ModelMatch(best_id, self._models[best_id], "fuzzy", best_score)
@@ -124,6 +141,49 @@ def _variant_mismatch(a: str, b: str) -> bool:
     """True when exactly one of the two strings carries an estate marker."""
     has = lambda s: any(re.search(rf"\b{w}\b", s) for w in _VARIANT_WORDS)
     return has(a) != has(b)
+
+
+# Max length of a short alpha series prefix that fuses with a following number
+# to form one designator: "id 4" → id4, "ev 6" → ev6, "mx 5" → mx5. Longer
+# words ("serie 3", "model 3") are family labels, not part of the designator.
+_DESIGNATOR_PREFIX_MAX = 3
+
+
+def _extract_model_designator(text: str) -> Optional[str]:
+    """Main model designator of a normalized name, or None if it has none.
+
+    "hyundai i20" → "i20", "peugeot 2008" → "2008", "volkswagen id 4" → "id4"
+    (norm_key already lowered case and turned dots/dashes into spaces),
+    "fiat 500x" → "500x", "fiat 500 x" → "500x", "bmw 3 series" → "3".
+    The make is stripped first so it never fuses with the number ("bmw 3" must
+    yield "3", not "bmw3")."""
+    _, remainder = detect_make(text)
+    tokens = remainder.split()
+    for i, tok in enumerate(tokens):
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok.isalpha():
+            if len(tok) <= _DESIGNATOR_PREFIX_MAX and nxt and nxt.isdigit():
+                return tok + nxt
+            continue
+        if not any(ch.isdigit() for ch in tok):
+            continue
+        if tok.isdigit() and nxt and nxt.isalpha() and len(nxt) == 1:
+            return tok + nxt
+        return tok
+    return None
+
+
+def _model_designator_mismatch(query: str, candidate: str) -> bool:
+    """Prevent fuzzy matching between different model designators.
+
+    True when BOTH normalized names carry a designator and they differ —
+    "hyundai i20" must never fuzzy-land on "hyundai i10" even at ratio 0.909.
+    Only the fuzzy step consults this guard: exact, alias and containment
+    matches resolve earlier, so intentional cross-designator aliases
+    ("BMW 320" → 3 Series) keep working."""
+    q = _extract_model_designator(query)
+    c = _extract_model_designator(candidate)
+    return q is not None and c is not None and q != c
 
 
 # ── Loaders (cached per-path) ─────────────────────────────────────────────────
