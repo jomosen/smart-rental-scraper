@@ -471,6 +471,7 @@ async def extract_vehicles_dom(
             generic_selectors.append(fs)
 
     vehicles: list[VehicleResult] = []
+    price_scope_missing = 0
 
     for card in cards:
         field_values: dict = {}
@@ -498,7 +499,20 @@ async def extract_vehicles_dom(
 
         # Price: skip level-1 selector in recipe path (price_cascade_fs present)
         price_sel = None if price_cascade_fs else price_text_fs
-        price_data = await _extract_price_cascade(card, price_sel)
+        # A selector on a price_cascade FS is a SCOPE: the cascade runs inside
+        # that sub-element (e.g. the block of one specific tariff on multi-rate
+        # cards). If the scope is demanded but absent, the price stays None —
+        # never silently fall back to the whole card, that would quietly
+        # extract the wrong tariff.
+        price_scope = card
+        if price_cascade_fs and price_cascade_fs.selector:
+            scoped = card.locator(price_cascade_fs.selector).first
+            price_scope = scoped if await scoped.count() else None
+        if price_scope is None:
+            price_scope_missing += 1
+            price_data = {"price_final": None, "currency": None}
+        else:
+            price_data = await _extract_price_cascade(price_scope, price_sel)
         field_values.update(price_data)
 
         # Build VehicleResult
@@ -515,5 +529,7 @@ async def extract_vehicles_dom(
         ),
         encoding="utf-8",
     )
+    if price_scope_missing:
+        logger.log("price_scope_missing", count=price_scope_missing)
     logger.log("dom_extraction", count=len(vehicles))
     return vehicles
