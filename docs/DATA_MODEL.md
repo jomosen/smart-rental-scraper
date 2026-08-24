@@ -296,6 +296,64 @@ The Python `Recipe` dataclass (domain model) is serialised to a JSONB column by 
 
 ---
 
+### 12. Deterministic ACRISS classification (engine v2)
+
+Decision (2026-08-23): the free-form LLM classification described in Decision 1
+is being replaced by a **deterministic classification engine** (spec agreed with
+the operator): normalization → model dictionary → source overrides → ACRISS
+rules → heuristic fallback, with per-letter confidence and alternatives. The
+LLM (Gemini, env-pinned models) remains ONLY as a fallback resolver for
+unknown models, and it returns a **structured semantic profile**
+(likely category/type/powertrain), never the final ACRISS code — the code is
+always built by the rule engine.
+
+**Data artifacts (repo-versioned, like `acriss_codes.yaml`):**
+- `data/acriss-models.json` — model dictionary (make/model/aliases, category,
+  body type, powertrain profile, verification level).
+- `data/acriss-source-overrides.json` — per-provider known mappings.
+- `data/acriss-aliases.json` — normalization aliases.
+Their content hashes join `classifier_version`, so editing any of them
+invalidates the `model_classifications` cache coherently.
+
+**Review queue lives in the DATABASE, not in a file** (`acriss_review_queue`,
+catalog scope — see Part 2). Rationale: it is operational state produced by
+scraper runs (which execute on the operator's machine) and consumed by
+back-office review (which runs against the same DB the SaaS serves) — a repo
+file cannot be shared between those two worlds, and the DB is the source of
+truth for state. Promotion flow: the operator validates a queued model and
+adds it to `data/acriss-models.json` in a commit; the queue row is then marked
+`accepted` (never deleted, never auto-promoted — LLM suggestions do not write
+the dictionary).
+
+**`provider_vehicle_categories.classification_detail` (JSONB)** stores the full
+engine output per group: per-letter code/confidence/source, alternatives,
+assumptions, and the human-readable explanation. The existing aggregate
+columns keep their meaning: `classification_confidence` = min() across the
+four letters; `pending_review` = the engine's `needs_review`.
+
+**Bundles.** Provider groups often list several models ("Audi A1, Ford Focus,
+Opel Astra"). The engine classifies each member; the group is then priced to
+the MOST EXPENSIVE member (unchanged business rule — see the mixed-group rule
+in Decision 1). The premium-brand list may be used to rank members by expected
+price; it must never be used to assign the category letter of a single model.
+
+**Catalog extension policy (operator decision: extend, not project).** New
+ACRISS codes (e.g. fuel `I` = plug-in hybrid, `D` = diesel) are materialized
+**on demand**: a code is added to `acriss_codes.yaml` (never straight to SQL)
+when a dictionary entry or a real provider group needs it, and applied with
+`scripts/seed_acriss_codes.py`. Codes are never bulk-generated from the ACRISS
+combinatorial space. **Body type `G` (crossover) IS materialized** (operator
+decision 2026-08-23, superseding the earlier F-only rule recorded in the
+`acriss_codes.yaml` header): a crossover is not an SUV, and the taxonomy
+should say so. The cross-provider grouping concern that motivated F-only is
+accepted as resolved by the product's pivot to **direct group-to-group
+matching at the client** — ACRISS is now taxonomy + fallback, not the primary
+matching path, so F/G splitting a segment across codes no longer breaks the
+core flow. Per-provider source overrides may assign F or G per the engine
+spec; the model dictionary is the default authority.
+
+---
+
 ### 10. Canonical output format
 
 **Format A: zone-based price table.** Not day×duration matrix.
@@ -489,6 +547,26 @@ acriss_codes
   -- Source of truth: acriss_codes.yaml. Applied to DB by scripts/seed_acriss_codes.py.
   -- Deactivated codes are never deleted; they remain as FK references.
 
+acriss_review_queue                    -- catalog scope (no tenant_id, no RLS)
+  id BIGSERIAL PK
+  normalized_model TEXT NOT NULL UNIQUE -- engine's normalized "make model" key
+  raw_model        TEXT NOT NULL        -- as first scraped (kept verbatim)
+  suggested_category  CHAR(1) NULL      -- engine/LLM best estimate (semantic, not final)
+  suggested_type      CHAR(1) NULL
+  suggested_powertrain VARCHAR(16) NULL -- powertrain_profile mode (ice_only, bev_only, mixed…)
+  suggested_acriss    VARCHAR(4) NULL   -- engine-built best estimate, informational
+  confidence       NUMERIC(4,3) NULL
+  reason           TEXT NULL            -- heuristic/LLM rationale
+  sources_seen     JSONB NOT NULL DEFAULT '[]'  -- provider codes that surfaced it
+  status           VARCHAR(16) NOT NULL DEFAULT 'pending_review'
+                                        -- 'pending_review' | 'accepted' | 'rejected'
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  -- Unknown models found during classification land here (upsert on
+  -- normalized_model; sources_seen accumulates). Rows are never auto-promoted:
+  -- the operator validates and adds the entry to data/acriss-models.json in a
+  -- commit, then marks the row 'accepted'. See Decision 12.
+
 providers
   id PK
   code                                -- 'provider_a', 'victoria', 'solcar', 'centauro', ...
@@ -551,8 +629,11 @@ provider_vehicle_categories
   acriss_code VARCHAR(4) GENERATED ALWAYS AS               -- NULL until all 4 attrs set
     (acriss_category || acriss_body_type || acriss_transmission || acriss_fuel) STORED
     FK → acriss_codes.code
-  classification_confidence FLOAT NULL                     -- last LLM confidence (0..1)
+  classification_confidence FLOAT NULL                     -- min() across the 4 letters (0..1)
   pending_review BOOLEAN NOT NULL DEFAULT false            -- operator attention required
+  classification_detail JSONB NULL                         -- engine v2 full output: per-letter
+                                                           -- code/confidence/source, alternatives,
+                                                           -- assumptions, explanation (Decision 12)
   -- Observed display attributes (last seen):
   example_models  TEXT NOT NULL DEFAULT ''
   seats           INT NULL

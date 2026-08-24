@@ -196,6 +196,9 @@ class ProviderVehicleCategory(Base):
     pending_review: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
+    # Engine v2 full classification output: per-letter code/confidence/source,
+    # alternatives, assumptions, explanation. See docs/DATA_MODEL.md Decision 12.
+    classification_detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     # Observed display attributes (last seen)
     example_models: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     seats: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -394,3 +397,35 @@ class ModelClassification(Base):
         DateTime(timezone=True), nullable=False, server_default="NOW()"
     )
     hit_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+class AcrissReviewQueueEntry(Base):
+    """Unknown vehicle model awaiting operator validation (engine v2).
+
+    Catalog scope (no tenant_id, no RLS). Upserted on normalized_model by the
+    classification engine when no dictionary entry matches; the operator
+    validates and promotes the model to data/acriss-models.json in a commit,
+    then marks the row 'accepted'. Rows are never auto-promoted or deleted.
+    See docs/DATA_MODEL.md Decision 12.
+    """
+    __tablename__ = "acriss_review_queue"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    normalized_model: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    raw_model: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_category: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    suggested_type: Mapped[Optional[str]] = mapped_column(CHAR(1), nullable=True)
+    suggested_powertrain: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    suggested_acriss: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    confidence: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 3), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sources_seen: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="'[]'")
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="'pending_review'"
+    )
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="NOW()"
+    )

@@ -1,4 +1,5 @@
 from .acriss_code_repository import AcrissCodeRepository
+from .acriss_review_queue_repository import AcrissReviewQueueRepository
 from .provider import ProviderRepository
 from .provider_location import ProviderLocationRepository
 from .provider_rate import ProviderRateRepository
@@ -11,6 +12,7 @@ from .pricing_rule_repository import PricingRuleRepository
 
 __all__ = [
     "AcrissCodeRepository",
+    "AcrissReviewQueueRepository",
     "ProviderRepository",
     "ProviderLocationRepository",
     "ProviderRateRepository",
