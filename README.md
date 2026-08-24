@@ -132,6 +132,7 @@ The full list is in `.env.example`. The most relevant groups:
 
 | Variable | Purpose |
 |---|---|
+| `PERIOD_DAYS` | Scraping period length in days (`main.py`). Default `300`; use a shorter period in dev to iterate faster. |
 | `SEASON_PRICE_THRESHOLD` | Minimum relative price change to detect a season boundary (`SeasonAnalyzer`). Default `0.05`. |
 | `PRICE_CHANGE_THRESHOLD` | Minimum relative variation for `insert_if_changed` to insert a new observation. Default `0.005`. |
 | `ANTIBOT_BREAK_EVERY_MIN_LOW` | Lower bound (minutes) for the random interval between anti-detection macro-pauses. Default `5`. |

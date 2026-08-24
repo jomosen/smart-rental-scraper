@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime, timedelta
 from functools import partial
@@ -51,7 +52,9 @@ _handler.setFormatter(_ColorFormatter(
 logging.basicConfig(level=logging.INFO, handlers=[_handler])
 
 # --- Scraping period ---
-PERIOD_DAYS = 300 
+# PERIOD_DAYS is env-overridable (e.g. a shorter period in dev to iterate
+# faster); production keeps the 300-day default unless .env.prod says otherwise.
+PERIOD_DAYS = int(os.environ.get("PERIOD_DAYS", "300"))
 PERIOD_OFFSET_DAYS = 1
 PICKUP_HOUR = 10
 
