@@ -1218,22 +1218,17 @@
       "DS7 Crossback"
     ],
     "category": {
-      "code": "P",
-      "confidence": 0.85
+      "code": "F",
+      "confidence": 0.82
     },
     "body": {
       "type": "F",
-      "confidence": 0.85
-    },
-    "type_alternative": {
-      "type": "G",
-      "confidence": 0.78,
-      "reason": "premium mid-size SUV, crossover styling (§29)"
+      "confidence": 0.95
     },
     "powertrain_profile": {
       "mode": "mixed",
       "default_code": "R",
-      "confidence": 0.82
+      "confidence": 0.80
     },
     "verification": "strong"
   },

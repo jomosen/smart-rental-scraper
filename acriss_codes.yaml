@@ -1723,3 +1723,23 @@ acriss_codes:
     examples:
       - "Hyundai Tucson MHEV (manual)"
       - "Kia Sportage MHEV (manual)"
+
+  # ──────────────────────────────────────────────────────────────
+  # FULLSIZE (F) — first materialized code (2026-08-24): DS 7 with
+  # explicit FFAR fleet-documentation evidence; provider grouping of
+  # this tier varies a lot across markets.
+  # ──────────────────────────────────────────────────────────────
+
+  - code: FFAR
+    display_name: SUV Grande Automático
+    description: >
+      Full-size SUV, automatic, combustion. Tier above Standard (S) on the
+      mainstream scale. Provider fleet documentation places the DS 7
+      Crossback here (FFAR), though grouping of this model varies by
+      provider/market.
+    criteria:
+      - "Full-size SUV (above Standard tier)"
+      - "Automatic transmission"
+      - "Combustion engine"
+    examples:
+      - "DS 7 Crossback"
