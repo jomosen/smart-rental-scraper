@@ -102,7 +102,8 @@ def main() -> None:
                 ) or None
                 delta = "=" if new == old else "≠"
                 pend = " pr" if result.pending_review else ""
-                print(f"  {delta} {pvc.external_code or pvc.attributes_hash:16} "
+                label = pvc.external_code or pvc.attributes_hash or f"pvc:{pvc.id}"
+                print(f"  {delta} {label:16} "
                       f"{old or '—':5} -> {new or '—':5}{pend}")
                 if new == old:
                     kept += 1
