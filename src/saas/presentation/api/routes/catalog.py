@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.read.catalog_read import (
     empty_coverage,
+    fetch_acriss_catalog,
     fetch_group_coverage,
     fetch_provider_groups,
 )
@@ -34,6 +35,31 @@ from src.saas.infrastructure.persistence.session import make_session_factory, te
 from ..dependencies import get_tenant_from_api_key
 
 router = APIRouter()
+
+
+@router.get("/api/v1/acriss-codes")
+def get_acriss_codes(
+    tenant_id: uuid.UUID = Depends(get_tenant_from_api_key),
+) -> dict:
+    """The active materialized ACRISS catalog — codes, curated labels, examples.
+
+    Replaces frozen copies of the catalog in external systems: fetch on demand
+    (or refresh periodically) instead of importing a snapshot that drifts.
+    Source of truth is acriss_codes.yaml, applied to the DB by the seed script.
+
+    Each entry carries `group_count`: how many active logical provider groups
+    are classified into the code right now. 0 = no market presence today (a
+    mapping to it will yield no prices until a provider group lands there);
+    render it greyed out rather than hiding it.
+    """
+    factory = make_session_factory(app_engine())
+    with tenant_context(factory, tenant_id) as session:
+        codes = fetch_acriss_catalog(session)
+    return {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "total": len(codes),
+        "codes": codes,
+    }
 
 
 @router.get("/api/v1/provider-groups")

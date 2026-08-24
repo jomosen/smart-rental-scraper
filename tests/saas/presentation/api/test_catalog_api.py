@@ -228,6 +228,52 @@ class TestCatalog:
         assert _get(client, catalog_fixture, duration=9).status_code == 422
 
 
+class TestAcrissCatalog:
+    """/api/v1/acriss-codes — the live catalog external selectors fetch."""
+
+    def test_requires_api_key(self, client):
+        assert client.get("/api/v1/acriss-codes").status_code == 401
+
+    def test_returns_active_catalog_with_curated_fields(self, client, catalog_fixture):
+        resp = client.get(
+            "/api/v1/acriss-codes",
+            headers={"Authorization": f"Bearer {catalog_fixture['raw_key']}"},
+        )
+        assert resp.status_code == 200, resp.text
+        payload = resp.json()
+        assert payload["total"] == len(payload["codes"]) > 0
+
+        by_code = {c["code"]: c for c in payload["codes"]}
+        mdmr = by_code["MDMR"]
+        assert mdmr["category"] == "M"
+        assert mdmr["body_type"] == "D"
+        assert mdmr["transmission"] == "M"
+        assert mdmr["fuel"] == "R"
+        assert mdmr["display_name"]
+        assert mdmr["examples"]  # curated examples come through
+
+    def test_group_count_reflects_market_presence(self, client, catalog_fixture):
+        """The fixture's provider has one active group classified MDMR."""
+        payload = client.get(
+            "/api/v1/acriss-codes",
+            headers={"Authorization": f"Bearer {catalog_fixture['raw_key']}"},
+        ).json()
+        by_code = {c["code"]: c for c in payload["codes"]}
+        assert by_code["MDMR"]["group_count"] >= 1
+
+    def test_ordered_by_acriss_scale(self, client, catalog_fixture):
+        """Mini (M) opens the list; Elite tiers interleave per the scale."""
+        payload = client.get(
+            "/api/v1/acriss-codes",
+            headers={"Authorization": f"Bearer {catalog_fixture['raw_key']}"},
+        ).json()
+        cats = [c["category"] for c in payload["codes"]]
+        scale = "MNEHCDIJSRFGPULWX"
+        positions = [scale.index(c) for c in cats if c in scale]
+        assert positions == sorted(positions)
+        assert cats[0] == "M"
+
+
 class TestCoverage:
     def test_backed_and_empty_seasons_are_distinguished(self, client, catalog_fixture):
         group = _groups_of(

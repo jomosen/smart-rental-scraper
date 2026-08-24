@@ -47,6 +47,76 @@ def split_models(example_models: str | None) -> list[str]:
     return [m.strip() for m in (example_models or "").split(",") if m.strip()]
 
 
+# ACRISS mainstream/elite scale (docs/acriss_reference.md): each Elite sits
+# immediately above its mainstream counterpart. Codes sort by this scale so a
+# rendered catalog reads smallest-to-largest; letters outside the scale (new
+# categories not yet ranked) sink to the end rather than erroring.
+_CATEGORY_SCALE = "MNEHCDIJSRFGPULWX"
+
+
+def _catalog_sort_key(code: str) -> tuple:
+    cat = code[0]
+    pos = _CATEGORY_SCALE.index(cat) if cat in _CATEGORY_SCALE else len(_CATEGORY_SCALE)
+    return (pos, code[1:])
+
+
+def fetch_acriss_catalog(conn: _Executor) -> list[dict]:
+    """The active materialized ACRISS catalog, for external selectors.
+
+    One entry per active `acriss_codes` row: the four letters, curated display
+    name / description / criteria / examples (source of truth:
+    acriss_codes.yaml), plus `group_count` — how many active logical provider
+    groups are currently classified into the code (same logical-group identity
+    as fetch_provider_groups). `group_count = 0` marks a code with no market
+    presence today; consumers can grey it out but should keep it selectable.
+
+    Ordered by the ACRISS mainstream/elite scale, then code — stable for
+    direct rendering.
+    """
+    sql = text("""
+        SELECT ac.code,
+               ac.acriss_category,
+               ac.acriss_body_type,
+               ac.acriss_transmission,
+               ac.acriss_fuel,
+               ac.display_name,
+               ac.description,
+               ac.criteria,
+               ac.examples,
+               COALESCE(gc.group_count, 0) AS group_count
+        FROM   acriss_codes ac
+        LEFT   JOIN (
+            SELECT pvc.acriss_code,
+                   COUNT(DISTINCT (p.code, COALESCE(pvc.external_code, pvc.attributes_hash)))
+                       AS group_count
+            FROM   provider_vehicle_categories pvc
+            JOIN   providers p ON p.id = pvc.provider_id
+            WHERE  pvc.active = TRUE
+              AND  p.status = 'active'
+              AND  pvc.acriss_code IS NOT NULL
+            GROUP  BY pvc.acriss_code
+        ) gc ON gc.acriss_code = ac.code
+        WHERE  ac.active = TRUE
+    """)
+    rows = conn.execute(sql).fetchall()
+    entries = [
+        {
+            "code": r.code,
+            "category": r.acriss_category,
+            "body_type": r.acriss_body_type,
+            "transmission": r.acriss_transmission,
+            "fuel": r.acriss_fuel,
+            "display_name": r.display_name,
+            "description": (r.description or "").strip(),
+            "criteria": list(r.criteria or []),
+            "examples": list(r.examples or []),
+            "group_count": r.group_count,
+        }
+        for r in rows
+    ]
+    return sorted(entries, key=lambda e: _catalog_sort_key(e["code"]))
+
+
 def fetch_provider_groups(
     conn: _Executor,
     provider_codes: tuple[str, ...] | None = None,

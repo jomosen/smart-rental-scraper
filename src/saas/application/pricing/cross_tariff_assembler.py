@@ -28,7 +28,7 @@ from .cross_tariff_calc import CellResult, RuleConfig, compute_cell
 
 # ── Naming + ordering (single source; mirrors the proto's viewLabel) ─────────
 # Segment scale with Elites interleaved. Ref: docs/segmentos_acriss.md §"LA ESCALA".
-TIER_ORDER = "MNEHCDIJSRPULW"
+TIER_ORDER = "MNEHCDIJSRFGPULW"
 
 _SEG_NAMES: dict[str, str] = {
     "M": "Pequeño",      "N": "Pequeño Premium",
