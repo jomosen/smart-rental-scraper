@@ -5,8 +5,9 @@ GET /api/v1/classify?model=Peugeot%20208%20Manual
 
 Authenticated by the per-tenant API key (Bearer), same as /api/v1/prices.
 Read-through cache (model_classifications): the LLM is hit only on a cache miss;
-the cache key includes a classifier_version (hash of acriss_codes.yaml + the
-prompt version) so a catalog/prompt change invalidates stale entries.
+the cache key includes a classifier_version (hash of acriss_codes.yaml + prompt
+version + active Gemini models) so a catalog/prompt/model change invalidates
+stale entries.
 """
 from __future__ import annotations
 
@@ -17,15 +18,24 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.saas.application.classification.acriss_engine.dictionaries import (
+    ALIASES_PATH,
+    MODELS_PATH,
+    OVERRIDES_PATH,
+)
 from src.saas.application.classification.acriss_loader import load_acriss_specs
 from src.saas.application.classification.dtos import (
     ClassificationResult,
     VehicleClassificationInput,
 )
 from src.saas.application.classification.service import ClassificationService
-from src.saas.infrastructure.classification.gemini_service import (
-    PROMPT_VERSION,
-    GeminiClassificationService,
+from src.saas.infrastructure.classification.engine_service import (
+    AcrissEngineClassificationService,
+)
+from src.saas.infrastructure.classification.gemini_service import flash_model
+from src.saas.infrastructure.classification.semantic_resolver import (
+    RESOLVER_PROMPT_VERSION,
+    SemanticModelResolver,
 )
 from src.saas.infrastructure.persistence.engine import app_engine
 from src.saas.infrastructure.persistence.repositories.acriss_code_repository import (
@@ -47,18 +57,43 @@ _version: Optional[str] = None
 
 
 def get_classifier() -> ClassificationService:
-    """Lazily-built, process-cached classifier (FastAPI dependency; override in tests)."""
+    """Lazily-built, process-cached classifier (FastAPI dependency; override in tests).
+
+    Engine v2 (deterministic). Gemini only resolves unknown models
+    semantically; unknowns are queued in acriss_review_queue.
+    """
     global _classifier
     if _classifier is None:
-        _classifier = GeminiClassificationService(acriss_types=load_acriss_specs(_YAML_PATH))
+        _classifier = AcrissEngineClassificationService(
+            materialized_codes={s.code for s in load_acriss_specs(_YAML_PATH)},
+            resolver=SemanticModelResolver(),
+            session_factory=make_session_factory(app_engine()),
+        )
     return _classifier
 
 
+def _digest(path: Path) -> str:
+    return hashlib.sha1(path.read_bytes()).hexdigest()[:12]
+
+
 def _classifier_version() -> str:
+    """Cache key version for model_classifications.
+
+    Anything that changes a classification rotates the version: the
+    materialized catalog, the three engine data files, the engine marker,
+    the resolver prompt, and the resolver's Gemini model.
+    """
     global _version
     if _version is None:
-        digest = hashlib.sha1(_YAML_PATH.read_bytes()).hexdigest()[:12]
-        _version = f"{digest}:{PROMPT_VERSION}"
+        _version = ":".join([
+            _digest(_YAML_PATH),
+            _digest(MODELS_PATH),
+            _digest(ALIASES_PATH),
+            _digest(OVERRIDES_PATH),
+            "engine2",
+            RESOLVER_PROMPT_VERSION,
+            flash_model(),
+        ])
     return _version
 
 

@@ -60,3 +60,7 @@ class ClassificationResult:
     # classify" outcome: consumers must not cache or persist an errored result
     # as a classification. None for every genuine outcome, however uncertain.
     error: str | None = None
+    # Engine v2 full output (per-letter confidence/source, alternatives,
+    # assumptions, explanation) — persisted to PVC.classification_detail.
+    # None for LLM-produced results (engine v1). See DATA_MODEL.md Decision 12.
+    detail: dict | None = None

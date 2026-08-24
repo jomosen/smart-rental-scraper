@@ -31,7 +31,12 @@ from ...infrastructure.scrapers.victoria_url_scraper import VictoriaUrlScraper
 from ...infrastructure.scrapers.solcar_scraper import SolcarScraper
 from ...infrastructure.scrapers.recipe_scraper import RecipeScraper
 from ....saas.application.classification.acriss_loader import load_acriss_specs
-from ....saas.infrastructure.classification.gemini_service import GeminiClassificationService
+from ....saas.infrastructure.classification.engine_service import (
+    AcrissEngineClassificationService,
+)
+from ....saas.infrastructure.classification.semantic_resolver import (
+    SemanticModelResolver,
+)
 from ....saas.infrastructure.persistence.repositories import (
     ProviderLocationRepository,
     ProviderRateRepository,
@@ -112,7 +117,14 @@ def build_container(
 
     yaml_path = Path(__file__).resolve().parents[4] / "acriss_codes.yaml"
     acriss_specs = load_acriss_specs(yaml_path)
-    classification_service = GeminiClassificationService(acriss_types=acriss_specs)
+    # Engine v2 (deterministic, DATA_MODEL.md Decision 12). Gemini survives
+    # only as the semantic resolver for unknown models; unknowns are queued
+    # in acriss_review_queue through session_factory.
+    classification_service = AcrissEngineClassificationService(
+        materialized_codes={s.code for s in acriss_specs},
+        resolver=SemanticModelResolver(),
+        session_factory=session_factory,
+    )
 
     # Keep the session open for the entire build so ORM objects don't become
     # detached before we finish reading their attributes.

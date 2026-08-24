@@ -182,6 +182,12 @@ class ProviderVehicleCategoryRepository:
           - New PVC (or existing with no prior code) + no candidate code: NULL
             ACRISS attrs, pending_review=True.
         """
+        # Engine v2 rich output travels with every outcome — even when the
+        # aggregate columns keep a cached code, the fresh detail is what the
+        # operator reviews.
+        if result.detail is not None:
+            pvc.classification_detail = result.detail
+
         if result.pending_review:
             if not is_new and pvc.acriss_category is not None:
                 pvc.classification_confidence = result.confidence
