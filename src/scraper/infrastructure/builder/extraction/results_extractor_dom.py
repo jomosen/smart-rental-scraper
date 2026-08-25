@@ -400,6 +400,16 @@ def _coerce(field: str, raw: str | None) -> "str | int | None":
         m = re.search(r"(\d+)", raw)
         return int(m.group(1)) if m else None
 
+    if field == "transmission":
+        # Sites often mark the dedicated transmission cell with a bare letter
+        # ("M"/"A"). Safe to expand HERE because the field is already scoped to
+        # transmission — never apply this to free text.
+        letter = raw.lower()
+        if letter == "m":
+            return "manual"
+        if letter == "a":
+            return "automatic"
+
     return raw or None
 
 
@@ -452,7 +462,8 @@ async def extract_vehicles_dom(
     seats_fs = None           # aria_keyword for seats (recipe path)
     trans_semantic_fs = None  # aria_keyword_transmission (recipe path)
     price_cascade_fs = None   # price_cascade (recipe path)
-    trans_text_fs = None      # text/regex selector for transmission (LLM fallback)
+    trans_text_fs = None      # text/regex selector for transmission (aria fallback)
+    seats_text_fs = None      # text/regex selector for seats (aria fallback)
     price_text_fs = None      # text/regex selector for price_final (LLM level-1)
     generic_selectors = []    # all other text/attribute/regex selectors
 
@@ -464,10 +475,12 @@ async def extract_vehicles_dom(
         elif fs.extraction == "price_cascade" and fs.field == "price_final":
             price_cascade_fs = fs
         elif fs.field == "transmission":
-            trans_text_fs = fs          # LLM-provided selector, used as aria fallback
+            trans_text_fs = fs          # CSS selector, used when aria finds nothing
+        elif fs.field == "seats":
+            seats_text_fs = fs          # CSS selector, used when aria finds nothing
         elif fs.field in _PRICE_FIELDS | {"currency"}:
             price_text_fs = fs          # LLM-provided price selector (level-1 cascade)
-        elif fs.field != "seats":       # seats with non-semantic selector → ignored
+        else:
             generic_selectors.append(fs)
 
     vehicles: list[VehicleResult] = []
@@ -481,21 +494,21 @@ async def extract_vehicles_dom(
             raw = await _apply_extraction(card, fs)
             field_values[fs.field] = _coerce(fs.field, raw)
 
-        # Seats: recipe-provided keywords → defaults
+        # Seats: recipe-provided keywords → defaults; CSS selector as aria fallback
         seat_kw = (seats_fs.keywords or DEFAULT_SEAT_KEYWORDS) if seats_fs else DEFAULT_SEAT_KEYWORDS
-        field_values["seats"] = await _extract_seats_by_aria(card, seat_kw)
+        seats_val = await _extract_seats_by_aria(card, seat_kw)
+        if seats_val is None and seats_text_fs is not None:
+            seats_val = _coerce("seats", await _apply_extraction(card, seats_text_fs))
+        field_values["seats"] = seats_val
 
-        # Transmission: recipe-provided keywords → defaults; text selector as aria fallback
-        if trans_semantic_fs:
-            auto_kw = trans_semantic_fs.auto_keywords or DEFAULT_AUTO_KEYWORDS
-            man_kw = trans_semantic_fs.manual_keywords or DEFAULT_MANUAL_KEYWORDS
-            field_values["transmission"] = await _extract_transmission_by_aria(
-                card, auto_kw, man_kw, None
-            )
-        else:
-            field_values["transmission"] = await _extract_transmission_by_aria(
-                card, DEFAULT_AUTO_KEYWORDS, DEFAULT_MANUAL_KEYWORDS, trans_text_fs
-            )
+        # Transmission: recipe-provided keywords → defaults; the CSS selector
+        # fires when aria semantics find nothing (sites exposing the value in
+        # plain markup — data-title boxes, icon classes — instead of labels).
+        auto_kw = (trans_semantic_fs.auto_keywords if trans_semantic_fs else None) or DEFAULT_AUTO_KEYWORDS
+        man_kw = (trans_semantic_fs.manual_keywords if trans_semantic_fs else None) or DEFAULT_MANUAL_KEYWORDS
+        field_values["transmission"] = await _extract_transmission_by_aria(
+            card, auto_kw, man_kw, trans_text_fs
+        )
 
         # Price: skip level-1 selector in recipe path (price_cascade_fs present)
         price_sel = None if price_cascade_fs else price_text_fs
