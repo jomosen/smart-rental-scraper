@@ -1771,3 +1771,29 @@ acriss_codes:
       - "Combustion engine (no explicit fuel information)"
     examples:
       - "Alfa Romeo Tonale"
+
+  - code: RGAI
+    display_name: Crossover Mediano Premium Híbrido Enchufable Automático
+    description: >
+      Premium mid-size crossover, plug-in hybrid (PHEV), automatic. Completes
+      the Tonale family set (R+G, 2026-08-25 review): explicit PHEV token in
+      the name or declared code sets the fourth letter to I.
+    criteria:
+      - "Premium mid-size crossover"
+      - "Automatic transmission"
+      - "Plug-in hybrid powertrain"
+    examples:
+      - "Alfa Romeo Tonale Plug-in Hybrid Q4"
+
+  - code: RGAD
+    display_name: Crossover Mediano Premium Diésel Automático
+    description: >
+      Premium mid-size crossover, diesel, automatic. Completes the Tonale
+      family set (R+G, 2026-08-25 review): explicit diesel token in the name
+      sets the fourth letter to D.
+    criteria:
+      - "Premium mid-size crossover"
+      - "Automatic transmission"
+      - "Diesel engine"
+    examples:
+      - "Alfa Romeo Tonale Diesel"
