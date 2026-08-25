@@ -994,12 +994,27 @@ classifies the same for everyone).
 model_classifications
   normalized_model   TEXT   -- input lowercased + whitespace-collapsed
   classifier_version TEXT   -- sha1(acriss_codes.yaml)[:12] + ":" + PROMPT_VERSION
-  acriss_code        TEXT NULL  -- NULL = unclassifiable
+  acriss_code        TEXT NULL  -- recommended, materialized code; NULL = unclassifiable
+  acriss_full        VARCHAR(4) NULL  -- engine's exact letters, possibly
+                                      -- unmaterialized (migration v4w5x6y7z8a9)
   confidence         NUMERIC(4,3)
   pending_review     BOOLEAN
   created_at, last_used_at, hit_count
   PK (normalized_model, classifier_version)
 ```
+
+**Two representations, one derived (2026-08-26).** `acriss_code` is what a
+mapping should target (always in `acriss_codes`); `acriss_full` preserves the
+engine's honest letters even when the catalog does not materialize them (e.g.
+`IGAV` for an explicit-petrol query). The *commercial group* served by
+`/api/v1/classify` (`acriss_group` = first three letters + `*`) is derived at
+read time and never stored — the fourth letter (fuel) carries little
+commercial weight in rental grouping, with one exception: BEVs (fuel `E`/`C`)
+keep their fourth letter, because electric implies distinct rental policy,
+range, deposit and demand. The engine also collapses an unmaterialized
+specific-fuel code to its `R` trunk when that trunk is materialized (petrol
+silently — `R` subsumes it; diesel/hybrid/PHEV flagged `pending_review`; BEV
+never), recorded in `classification_detail.fuel_collapsed_to_trunk`.
 The LLM is hit only on a cache miss. `classifier_version` is part of the key, so a
 catalog change (the YAML hash moves) or a prompt change (bump `PROMPT_VERSION` in
 `gemini_service`) makes old rows stop matching — stale classifications are never

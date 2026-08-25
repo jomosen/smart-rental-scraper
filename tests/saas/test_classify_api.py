@@ -14,7 +14,11 @@ from src.saas.application.classification.dtos import ClassificationResult
 from src.saas.infrastructure.auth.security import generate_api_key
 from src.saas.infrastructure.persistence.models.tenant import ApiKey, Tenant
 from src.saas.presentation.api.app import create_app
-from src.saas.presentation.api.routes.classify import _normalize, get_classifier
+from src.saas.presentation.api.routes.classify import (
+    _group_code,
+    _normalize,
+    get_classifier,
+)
 
 
 class _FakeClassifier:
@@ -46,6 +50,25 @@ def _app_with(fake: _FakeClassifier):
 def test_missing_api_key_returns_401():
     client = TestClient(create_app())
     assert client.get("/api/v1/classify?model=x").status_code == 401
+
+
+def test_group_code_wildcards_fuel():
+    """Commercial group: fuel carries little weight → wildcarded."""
+    assert _group_code("IGAV") == "IGA*"
+    assert _group_code("IGAR") == "IGA*"
+    assert _group_code("RGAH") == "RGA*"
+    assert _group_code("CDAD") == "CDA*"
+
+
+def test_group_code_bev_exception():
+    """Electric keeps its fourth letter — its own commercial category."""
+    assert _group_code("IGAE") == "IGAE"
+    assert _group_code("MDAC") == "MDAC"
+
+
+def test_group_code_absent_input():
+    assert _group_code(None) is None
+    assert _group_code("ED") is None
 
 
 def test_empty_model_returns_400(super_db_session):

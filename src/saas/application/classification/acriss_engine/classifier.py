@@ -175,6 +175,14 @@ def classify_vehicle(
     powertrain_ambiguous = powertrain_ambiguous or fuel_ambiguous
     assumptions.extend(fuel_assumptions)
 
+    # BEV single-speed rule, family edition: a bev_only family without any
+    # transmission signal is automatic by construction, same as the token path.
+    if transmission.code is None and fuel.code == "E":
+        transmission = _letter(
+            "A", TRANSMISSION_NAMES, 0.97, "heuristic",
+            "A because the vehicle is electric (single-speed)",
+        )
+
     # ── Assemble ──────────────────────────────────────────────────────────────
     letters = [category, veh_type, transmission, fuel]
     partial = "".join(lr.code if lr.code else "?" for lr in letters)

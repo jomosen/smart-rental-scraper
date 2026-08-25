@@ -107,6 +107,24 @@ def _compose_code(r: ClassificationResult) -> Optional[str]:
     return "".join(parts) if all(parts) else None
 
 
+def _full_code(r: ClassificationResult) -> Optional[str]:
+    """The engine's exact letters — even when the catalog does not materialize
+    them (detail carries the original code through trunk collapses)."""
+    d = r.detail or {}
+    return d.get("unmaterialized_code") or _compose_code(r)
+
+
+def _group_code(full: Optional[str]) -> Optional[str]:
+    """Commercial group: first three letters + wildcard. BEV exception: an
+    electric (fuel E/C) keeps its fourth letter — different rental policy,
+    range, deposit and demand make it its own commercial category."""
+    if not full or len(full) != 4:
+        return None
+    if full[3] in ("E", "C"):
+        return full
+    return full[:3] + "*"
+
+
 @router.get("/api/v1/classify")
 def classify(
     model: str = Query(default="", description="Free-text vehicle model, e.g. 'Peugeot 208 Manual'"),
@@ -125,6 +143,7 @@ def classify(
         if row is not None:
             cache.touch(norm, version)
             code = row.acriss_code
+            full = row.acriss_full or row.acriss_code
             confidence = float(row.confidence)
             pending = row.pending_review
             from_cache = True
@@ -156,9 +175,10 @@ def classify(
                     },
                 )
             code = _compose_code(result)
+            full = _full_code(result)
             confidence = result.confidence
             pending = result.pending_review
-            cache.upsert(norm, version, code, confidence, pending)
+            cache.upsert(norm, version, code, confidence, pending, acriss_full=full)
             from_cache = False
 
         description: Optional[str] = None
@@ -171,7 +191,14 @@ def classify(
 
     return {
         "model": model,
+        # Recommended, materialized code — what a mapping should target.
         "acriss_code": code,
+        # The engine's exact letters, possibly unmaterialized (IGAV for an
+        # explicit-petrol query). Informational: not necessarily mappable.
+        "acriss_full": full,
+        # Commercial group (category+body+transmission, fuel wildcarded).
+        # BEVs keep their fourth letter — electric is its own group.
+        "acriss_group": _group_code(full),
         "description": description,
         "example_models": example_models,
         "confidence": round(confidence, 3),

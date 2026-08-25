@@ -44,14 +44,17 @@ class ModelClassificationRepository:
         acriss_code: Optional[str],
         confidence: float,
         pending_review: bool,
+        acriss_full: Optional[str] = None,
     ) -> None:
         self._s.execute(
             text(
                 "INSERT INTO model_classifications "
-                "  (normalized_model, classifier_version, acriss_code, confidence, pending_review) "
-                "VALUES (:m, :v, :code, :conf, :pending) "
+                "  (normalized_model, classifier_version, acriss_code, acriss_full, "
+                "   confidence, pending_review) "
+                "VALUES (:m, :v, :code, :full, :conf, :pending) "
                 "ON CONFLICT (normalized_model, classifier_version) DO UPDATE "
                 "SET acriss_code = EXCLUDED.acriss_code, "
+                "    acriss_full = EXCLUDED.acriss_full, "
                 "    confidence = EXCLUDED.confidence, "
                 "    pending_review = EXCLUDED.pending_review, "
                 "    last_used_at = NOW()"
@@ -60,6 +63,7 @@ class ModelClassificationRepository:
                 "m": normalized_model,
                 "v": classifier_version,
                 "code": acriss_code,
+                "full": acriss_full,
                 "conf": Decimal(str(round(confidence, 3))),
                 "pending": pending_review,
             },

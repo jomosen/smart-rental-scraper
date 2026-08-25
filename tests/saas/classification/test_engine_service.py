@@ -64,6 +64,49 @@ class TestBundles:
         assert r.confidence > 0.65
 
 
+class TestFuelTrunkCollapse:
+    """Unmaterialized specific-fuel codes fall back to their R trunk —
+    the fourth letter carries little commercial weight, except for BEVs."""
+
+    def test_petrol_collapses_silently_to_trunk(self):
+        # Golf + TSI token → CDAV; only the trunk CDAR is materialized.
+        svc = make_service({"CDAR"})
+        [r] = svc.classify_provider_batch(
+            "prov", [vin("VW Golf TSI", transmission="automatic")]
+        )
+        assert r.acriss_fuel == "R"
+        assert (r.acriss_category, r.acriss_body_type, r.acriss_transmission) == ("C", "D", "A")
+        assert r.detail["fuel_collapsed_to_trunk"] == {"from": "CDAV", "to": "CDAR"}
+        assert r.detail["unmaterialized_code"] == "CDAV"
+        # V→R is lossless commercially: R subsumes petrol — no review flag.
+        assert r.pending_review is False
+
+    def test_diesel_collapse_is_flagged_for_review(self):
+        svc = make_service({"CDAR"})  # CDAD deliberately NOT materialized
+        [r] = svc.classify_provider_batch(
+            "prov", [vin("VW Golf TDI", transmission="automatic")]
+        )
+        assert r.acriss_fuel == "R"
+        assert r.detail["fuel_collapsed_to_trunk"]["from"] == "CDAD"
+        assert r.pending_review is True
+
+    def test_materialized_specific_fuel_is_kept(self):
+        svc = make_service({"CDAD", "CDAR"})
+        [r] = svc.classify_provider_batch(
+            "prov", [vin("VW Golf TDI", transmission="automatic")]
+        )
+        assert r.acriss_fuel == "D"
+        assert "fuel_collapsed_to_trunk" not in r.detail
+
+    def test_bev_never_collapses(self):
+        # ID.3 family is bev_only → CDAE; trunk CDAR materialized, CDAE not.
+        svc = make_service({"CDAR"})
+        [r] = svc.classify_provider_batch("prov", [vin("Volkswagen ID.3")])
+        assert r.acriss_fuel is None          # dropped, NOT collapsed to R
+        assert r.detail["unmaterialized_code"] == "CDAE"
+        assert r.pending_review is True
+
+
 class TestProviderDeclaredCode:
     def test_declared_code_fills_missing_transmission(self):
         svc = make_service({"MDMR"})

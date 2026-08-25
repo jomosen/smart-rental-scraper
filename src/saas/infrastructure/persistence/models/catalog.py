@@ -388,6 +388,9 @@ class ModelClassification(Base):
     normalized_model: Mapped[str] = mapped_column(Text, primary_key=True)
     classifier_version: Mapped[str] = mapped_column(Text, primary_key=True)
     acriss_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Engine's exact letters, possibly unmaterialized (e.g. IGAV for explicit
+    # petrol) — acriss_code stays the recommended, materialized target.
+    acriss_full: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False, server_default="0")
     pending_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime.datetime] = mapped_column(

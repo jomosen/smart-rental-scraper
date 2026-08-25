@@ -437,6 +437,30 @@ class AcrissEngineClassificationService(ClassificationService):
         materialized = bool(r.acriss and r.acriss in self._codes)
         if r.acriss and not materialized:
             detail["unmaterialized_code"] = r.acriss
+            # Commercial-group collapse: the fourth letter carries little
+            # commercial weight (fuel), so an unmaterialized specific-fuel
+            # code falls back to its R trunk when THAT is materialized.
+            # V (petrol) collapses silently — R (unspecified) subsumes it.
+            # D/H/I collapse flagged for review (information is dropped).
+            # E/C (BEV) never collapse: electric is its own commercial world.
+            trunk = r.acriss[:3] + "R"
+            fuel = r.acriss[3]
+            if fuel in ("V", "D", "H", "I") and trunk in self._codes:
+                detail["fuel_collapsed_to_trunk"] = {"from": r.acriss, "to": trunk}
+                r.fuel_power = LetterResult(
+                    code="R",
+                    name=FUEL_NAMES.get("R"),
+                    confidence=r.fuel_power.confidence,
+                    source=r.fuel_power.source,
+                    explanation=(
+                        f"R trunk — specific fuel {fuel} not materialized "
+                        f"({r.acriss} -> {trunk})"
+                    ),
+                )
+                self._refresh_aggregate(r)
+                if fuel != "V":
+                    r.needs_review = True
+                materialized = True
 
         if r.acriss and materialized:
             return ClassificationResult(

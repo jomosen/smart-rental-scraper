@@ -1351,6 +1351,27 @@
     },
     "verification": "strong"
   },
+  "ebro_s700": {
+    "make": "Ebro",
+    "model": "S700",
+    "aliases": [
+      "Ebro S700"
+    ],
+    "category": {
+      "code": "I",
+      "confidence": 0.8
+    },
+    "body": {
+      "type": "G",
+      "confidence": 0.85
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.8
+    },
+    "verification": "strong"
+  },
   "ebro_s800": {
     "make": "Ebro",
     "model": "S800",
