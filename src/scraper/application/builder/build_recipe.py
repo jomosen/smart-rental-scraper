@@ -237,12 +237,19 @@ def build_recipe(
     # ── Field extractors ──────────────────────────────────────────────────────
     # Selector-based fields (model, group_code, …) from LLM discovery.
     # Semantic fields always appended with fixed strategies → recipe is self-contained.
-    _SELECTOR_SKIP = frozenset({"seats", "transmission", "price_final", "currency"})
+    # seats/transmission CSS selectors from discovery are KEPT as fallbacks:
+    # the aria semantics fire first, the selector covers sites that expose the
+    # value in plain markup (spec cells with data-title, icon classes) — the
+    # gap that left recordgo with 0% transmission until recipe v9.
+    _SELECTOR_SKIP = frozenset({"price_final", "currency"})
+    _FALLBACK_FIELDS = frozenset({"seats", "transmission"})
     extractors: list[RecipeFieldExtractor] = []
     if scrape_result.results_structure:
         for fs in scrape_result.results_structure.field_selectors:
             if fs.field in _SELECTOR_SKIP:
                 continue
+            if fs.field in _FALLBACK_FIELDS and not fs.selector:
+                continue  # semantic-only proposal; the fixed strategies below cover it
             extractors.append(RecipeFieldExtractor(
                 field=fs.field,
                 selector=fs.selector if fs.selector else None,

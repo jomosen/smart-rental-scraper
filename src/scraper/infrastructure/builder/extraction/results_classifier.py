@@ -35,6 +35,11 @@ Te paso el HTML limpio. Identifica:
    Ejemplo: <span aria-label="Nº de plazas: 5"> → seats con
    "regex:\\d+" sobre "attribute:aria-label". Si hay aria-label con
    "automático"/"manual"/"automatic", úsalo para transmission.
+   Si NO hay aria-labels, busca celdas de especificaciones en markup plano:
+   contenedores con data-title/title descriptivo (ej.
+   div[data-title="Tipo de cambio"] span con "M"/"A") o clases de icono
+   semánticas (icon-cambio-manual). Propón igualmente el selector CSS —
+   se usa como respaldo cuando la vía semántica no encuentra nada.
 
    extraction puede ser:
    - "text"              → usar textContent del elemento
