@@ -1757,3 +1757,17 @@ acriss_codes:
       - "Hybrid powertrain"
     examples:
       - "Alfa Romeo Tonale Hybrid"
+
+  - code: RGAR
+    display_name: Crossover Mediano Premium Automático
+    description: >
+      Premium mid-size crossover, automatic, combustion (fuel unspecified).
+      The honest no-fuel-token default for mixed-powertrain premium crossover
+      families like the Alfa Romeo Tonale (hybrid/diesel/PHEV): with no token
+      in the name the engine emits R and flags the result for review.
+    criteria:
+      - "Premium mid-size crossover"
+      - "Automatic transmission"
+      - "Combustion engine (no explicit fuel information)"
+    examples:
+      - "Alfa Romeo Tonale"
