@@ -18,6 +18,17 @@
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jmorell\Proyectos\smart-rental-scraper\deploy\run_scraper_prod.ps1"
 #>
 
+param(
+    # Limitar el run a estos proveedores (pasa --provider al CLI). Vacío = todos.
+    [string[]]$Providers,
+    # Override de PERIOD_DAYS solo para este run (0 = default/env).
+    [int]$PeriodDays,
+    # Ruta a un export de scripts/export_provider_catalog.py que se importa en
+    # PROD (con --yes) tras abrir el túnel y antes de scrapear — la vía para
+    # subir una receta/catálogo nuevos en el mismo run que los estrena.
+    [string]$ImportCatalog
+)
+
 $ErrorActionPreference = 'Stop'
 
 # ── Forzar UTF-8 (logs legibles: € y acentos correctos) ───────────────────────
@@ -53,6 +64,11 @@ foreach ($raw in Get-Content $EnvFile) {
     $key = $line.Substring(0, $idx).Trim()
     $val = $line.Substring($idx + 1).Trim()
     Set-Item -Path "env:$key" -Value $val
+}
+
+if ($PeriodDays -gt 0) {
+    Set-Item -Path 'env:PERIOD_DAYS' -Value $PeriodDays
+    Write-Log "PERIOD_DAYS=$PeriodDays (override de linea de comandos)"
 }
 
 # ── Config del túnel (desde .env.prod) ────────────────────────────────────────
@@ -99,10 +115,24 @@ try {
         } catch { Start-Sleep -Milliseconds 500 }
     }
     if (-not $ready) { throw "El túnel no quedó listo en 20s." }
-    Write-Log "Túnel listo. Lanzando scraper…"
+    Write-Log "Túnel listo."
+
+    Set-Location $Repo
+
+    # ── 4b. Import opcional de catálogo/receta a PROD por el túnel ────────────
+    if ($ImportCatalog) {
+        if (-not (Test-Path $ImportCatalog)) { throw "ImportCatalog no encontrado: $ImportCatalog" }
+        Write-Log "Importando catálogo en PROD: $ImportCatalog"
+        & $Python (Join-Path $Repo 'scripts\import_provider_catalog.py') $ImportCatalog --yes 2>&1 | ForEach-Object {
+            Write-Host $_
+            Add-Content -Path $Log -Value $_ -Encoding UTF8
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Import del catálogo falló (exit $LASTEXITCODE)" }
+    }
+
+    Write-Log "Lanzando scraper…"
 
     # ── 5. Correr el scraper ──────────────────────────────────────────────────
-    Set-Location $Repo
     # El scraper (o un debugger enganchado, p.ej. debugpy "Debugger attached.")
     # puede escribir en stderr. Con ErrorActionPreference='Stop' + 2>&1, una sola
     # línea de stderr se convierte en NativeCommandError y abortaría el run (y
@@ -110,7 +140,12 @@ try {
     # relajamos la política solo durante la ejecución del scraper.
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $Python -m src.scraper.presentation.cli.main 2>&1 | ForEach-Object {
+    $scraperArgs = @('-m', 'src.scraper.presentation.cli.main')
+    if ($Providers) {
+        $scraperArgs += @('--provider') + $Providers
+        Write-Log "Filtro de proveedores: $($Providers -join ', ')"
+    }
+    & $Python @scraperArgs 2>&1 | ForEach-Object {
         Write-Host $_
         Add-Content -Path $Log -Value $_ -Encoding UTF8
     }
