@@ -84,6 +84,20 @@ def test_passenger_van_capacity_9_seats():
     assert r.acriss == "LVMR"
 
 
+# ── §10 Capacity beats the family default (Jumpy Combi review 2026-08-27) ─────
+
+def test_jumpy_combi_seats_decide_first_letter():
+    assert clf("Citroën Jumpy Combi", transmission="manual", seats=9).acriss == "LVMR"
+    assert clf("Citroën Jumpy Combi", transmission="manual", seats=8).acriss == "PVMR"
+    assert clf("Citroën Jumpy Combi", transmission="automatic", seats=9).acriss == "LVAR"
+
+
+def test_jumpy_combi_without_seats_uses_family_default():
+    r = clf("Citroën Jumpy Combi", transmission="manual")
+    assert r.acriss == "LVMR"
+    assert r.category.confidence < 0.95  # default, not capacity-confirmed
+
+
 # ── §34 Electric ──────────────────────────────────────────────────────────────
 
 def test_electric_tesla_model_3():

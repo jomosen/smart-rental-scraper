@@ -12,6 +12,7 @@ stale entries.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -103,6 +104,27 @@ def _normalize(model: str) -> str:
     return " ".join(model.split()).lower()
 
 
+_SEATS_IN_TEXT = re.compile(
+    r"\b(\d{1,2})\s*(?:plazas?|pax|seats?|asientos|places|posti|p)\b",
+    re.IGNORECASE,
+)
+
+
+def _seats_from_text(model: str) -> Optional[int]:
+    """Seat count declared inside the free text ('9 plazas', '9PAX', '7p').
+
+    Passenger-van coding hangs off capacity (§10: 9→LV, 8→PV, 7→SV), so a
+    declared count must reach the engine as `seats`, not stay buried in the
+    name. Bounded to plausible rental capacities to avoid grabbing engine
+    displacements or model digits.
+    """
+    m = _SEATS_IN_TEXT.search(model)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if 2 <= n <= 20 else None
+
+
 def _compose_code(r: ClassificationResult) -> Optional[str]:
     parts = [r.acriss_category, r.acriss_body_type, r.acriss_transmission, r.acriss_fuel]
     return "".join(parts) if all(parts) else None
@@ -155,7 +177,7 @@ def classify(
                     external_code=None,
                     external_name=model,
                     example_models=model,
-                    seats=None,
+                    seats=_seats_from_text(model),
                     luggage=None,
                     transmission=None,
                     fuel_type=None,

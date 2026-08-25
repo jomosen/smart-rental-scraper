@@ -17,6 +17,7 @@ from src.saas.presentation.api.app import create_app
 from src.saas.presentation.api.routes.classify import (
     _group_code,
     _normalize,
+    _seats_from_text,
     get_classifier,
 )
 
@@ -69,6 +70,19 @@ def test_group_code_bev_exception():
 def test_group_code_absent_input():
     assert _group_code(None) is None
     assert _group_code("ED") is None
+
+
+def test_seats_from_text():
+    """Passenger-van coding hangs off capacity — declared counts must parse."""
+    assert _seats_from_text("Citroen Jumpy Combi manual 9 plazas") == 9
+    assert _seats_from_text("Citroën Jumpy 9PAX") == 9
+    assert _seats_from_text("Renault Trafic 8 seats") == 8
+    assert _seats_from_text("Dacia Jogger 7p") == 7
+    assert _seats_from_text("Opel Vivaro 9 asientos") == 9
+    # No false positives on displacements or model digits.
+    assert _seats_from_text("VW Golf 2.0 TDI") is None
+    assert _seats_from_text("Peugeot 208") is None
+    assert _seats_from_text("BMW Serie 3") is None
 
 
 def test_empty_model_returns_400(super_db_session):

@@ -1351,6 +1351,27 @@
     },
     "verification": "strong"
   },
+  "citroen_jumpy_combi": {
+    "make": "Citroën",
+    "model": "Jumpy Combi",
+    "aliases": [
+      "Citroen Jumpy Combi",
+      "Citroën Jumpy Combi",
+      "Jumpy Combi"
+    ],
+    "van": true,
+    "van_default_first": "L",
+    "body": {
+      "type": "V",
+      "confidence": 0.99
+    },
+    "powertrain_profile": {
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.85
+    },
+    "verification": "strong"
+  },
   "ebro_s700": {
     "make": "Ebro",
     "model": "S700",

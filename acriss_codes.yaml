@@ -1173,6 +1173,19 @@ acriss_codes:
       - "Audi A4 Avant"
       - "Volvo V60"
 
+  - code: PVMR
+    display_name: Furgoneta Pasajero 8 Plazas Manual
+    description: >
+      Passenger van with 8 fixed seats, manual transmission, combustion
+      engine. Commercial-derived platform.
+    criteria:
+      - "Commercial-derived van body"
+      - "8 fixed passenger seats"
+      - "Manual transmission"
+      - "Combustion engine"
+    examples:
+      - "Citroën Jumpy Combi 8"
+
   - code: PVAR
     display_name: Furgoneta Pasajero 8 Plazas Automático
     description: >
