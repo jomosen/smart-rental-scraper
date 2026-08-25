@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 
 from src.saas.application.classification.acriss_engine.dictionaries import (
     ALIASES_PATH,
@@ -180,6 +181,29 @@ def classify(
             pending = result.pending_review
             cache.upsert(norm, version, code, confidence, pending, acriss_full=full)
             from_cache = False
+
+        # Market-aware recommendation (applied LIVE, cache hits included, so
+        # it tracks the market instead of freezing with the cached row): a
+        # specific-fuel code with no active market groups is commercially
+        # empty — providers there don't split by that fuel — so the mapping
+        # target falls back to its R trunk. Where the market DOES separate
+        # (hybrids today), the specific stays. BEVs (E/C) never collapse.
+        # acriss_full keeps the honest letters either way.
+        if code and len(code) == 4 and code[3] in ("D", "H", "I"):
+            has_market = session.execute(
+                text(
+                    "SELECT EXISTS ("
+                    "  SELECT 1 FROM provider_vehicle_categories pvc"
+                    "  JOIN providers p ON p.id = pvc.provider_id"
+                    "  WHERE pvc.active AND p.status = 'active'"
+                    "    AND pvc.acriss_code = :c)"
+                ),
+                {"c": code},
+            ).scalar()
+            if not has_market:
+                trunk_row = AcrissCodeRepository(session).get_by_code(code[:3] + "R")
+                if trunk_row is not None and trunk_row.active:
+                    code = trunk_row.code
 
         description: Optional[str] = None
         example_models: list[str] = []
