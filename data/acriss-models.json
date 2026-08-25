@@ -1146,24 +1146,19 @@
     "model": "Tonale",
     "aliases": [],
     "category": {
-      "code": "I",
-      "confidence": 0.8
+      "code": "R",
+      "confidence": 0.95
     },
     "body": {
-      "type": "F",
-      "confidence": 0.78
-    },
-    "type_alternative": {
       "type": "G",
-      "confidence": 0.75,
-      "reason": "premium-ish compact SUV, positioning uncertain"
+      "confidence": 0.98
     },
     "powertrain_profile": {
-      "mode": "hybrid_only",
-      "default_code": "H",
-      "confidence": 0.85
+      "mode": "mixed",
+      "default_code": "R",
+      "confidence": 0.80
     },
-    "verification": "strong"
+    "verification": "verified"
   },
   "jaecoo_7": {
     "make": "Jaecoo",

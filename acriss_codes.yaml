@@ -1743,3 +1743,17 @@ acriss_codes:
       - "Combustion engine"
     examples:
       - "DS 7 Crossback"
+
+  - code: RGAH
+    display_name: Crossover Mediano Premium Híbrido Automático
+    description: >
+      Premium mid-size crossover, self-charging hybrid, automatic. Demanded by
+      the Alfa Romeo Tonale hybrid (dictionary R+G, 2026-08-25 review): the
+      family sells hybrid/diesel/PHEV, so the fuel letter comes from tokens or
+      the provider-declared group code.
+    criteria:
+      - "Premium mid-size crossover"
+      - "Automatic transmission (e-CVT)"
+      - "Hybrid powertrain"
+    examples:
+      - "Alfa Romeo Tonale Hybrid"

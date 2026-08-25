@@ -34,6 +34,11 @@
     "strong": 126,
     "verified": 15
   },
+  "addenda": {
+    "2026-08-25": {
+      "alfa_romeo_tonale": "Promoted strong -> verified as R+G per user review. Powertrain corrected hybrid_only -> mixed: the family currently sells hybrid, diesel and PHEV, so the fuel letter must come from tokens (RGAH/RGAI/RGAD) with RGAR as the no-token default."
+    }
+  },
   "notes": [
     "verified applies only to the generic model-family CATEGORY+TYPE mapping under this project policy; it does not mean every trim, market, supplier or powertrain carries one universal official ACRISS code.",
     "Passenger-van models require seats/capacity rules to finalize the first two letters where applicable.",
